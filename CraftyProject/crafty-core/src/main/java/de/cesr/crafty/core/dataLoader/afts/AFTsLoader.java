@@ -10,7 +10,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
@@ -163,140 +165,107 @@ public class AFTsLoader extends HashSet<Aft> {
 	}
 
 	Map<String, Map<String, Path>> production_paths() {
-		Map<String, Map<String, Path>> data = new HashMap<>(); // <aftName,default_/Year/scenario,path>
-
-		Path configPath = Paths.get(ConfigLoader.config.aft_production_parameters_directory);
-		if (configPath.toFile().isDirectory()) {
-			ArrayList<Path> folder = PathTools.findAllFilePaths(configPath);
-			hashAFTs.keySet().forEach(aftName -> {
-				data.put(aftName, new HashMap<>());
-				for (int i = Timestep.getStartYear(); i <= Timestep.getEndtYear(); i++) {
-					ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i),
-							File.separator + aftName + ".csv");
-					if (p != null && !p.isEmpty()) {
-						data.get(aftName).put(String.valueOf(i), p.get(0));
-					}
-				}
-				ArrayList<Path> list2 = new ArrayList<>(data.get(aftName).values());
-				ArrayList<Path> tmp = PathTools.fileFilter(folder, File.separator + aftName + ".csv");
-				if (tmp != null) {
-					ArrayList<Path> list3 = new ArrayList<>(tmp);
-					list3.removeAll(new HashSet<>(list2));
-					list3.forEach(p -> {
-						data.get(aftName).put("default_", p);
-					});
-				}
-			});
-
-		} else {
-			ArrayList<Path> folder = PathTools.fileFilter(PathTools.asFolder("production"));
-			hashAFTs.keySet().forEach(aftName -> {
-				data.put(aftName, new HashMap<>());
-				// if Name contain year and scenarios
-				ProjectLoader.getScenariosList().forEach(scenarioName -> {
-					for (int i = Timestep.getStartYear(); i <= Timestep.getEndtYear(); i++) {
-						ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i),
-								File.separator + aftName + ".csv", scenarioName);
-						if (p != null && !p.isEmpty()) {
-							data.get(aftName).put(scenarioName + "|" + i, p.get(0));
-						}
-					}
-				});
-				// if Name contain only scenarios -> go to rest and find scenarios
-				ArrayList<Path> exist1 = new ArrayList<>(data.get(aftName).values());
-
-				ProjectLoader.getScenariosList().forEach(scenarioName -> {
-					ArrayList<Path> tmp = PathTools.fileFilter(folder, File.separator + aftName + ".csv", scenarioName);
-					if (tmp != null) {
-						ArrayList<Path> rest1 = new ArrayList<>(tmp);
-						rest1.removeAll(new HashSet<>(exist1));
-						rest1.forEach(p -> {
-							data.get(aftName).put(scenarioName, p);
-						});
-					}
-				});
-				// if Name contain only default_-> go to rest and define file as default_
-				ArrayList<Path> exist2 = new ArrayList<>(data.get(aftName).values());
-				ArrayList<Path> tmp = PathTools.fileFilter(folder, File.separator + aftName + ".csv", "default_");
-				if (tmp != null) {
-					ArrayList<Path> rest2 = new ArrayList<>(tmp);
-					rest2.removeAll(new HashSet<>(exist2));
-					rest2.forEach(p -> {
-						data.get(aftName).put("default_", p);
-					});
-				}
-			});
-		}
-//		data.forEach((a, v) -> {
-//			System.out.println("@@   " + a + ": " + v);
-//		});
-		return data;
+		return resolveParameterPaths(ConfigLoader.config.aft_production_parameters_directory, "production",
+				aftName -> File.separator + aftName + ".csv");
 	}
 
 	Map<String, Map<String, Path>> behaviourPaths() {
+		return resolveParameterPaths(ConfigLoader.config.aft_behaviour_parameters_directory, "agents",
+				aftName -> "AftParams_" + aftName + ".csv");
+	}
+
+	/**
+	 * Builds, for every AFT, a map of "which file to use when" -> path.
+	 *
+	 * The keys of the inner map are unchanged by this refactor: "<year>" when an
+	 * explicit directory is configured; "<scenario>|<year>", "<scenario>" or
+	 * "default_" when falling back to the project folders.
+	 *
+	 * @param configuredDirectory directory from config.yaml, may be null or blank
+	 * @param fallbackFolder      project sub-folder used when no directory is set
+	 * @param fileNameForAft      how a file belonging to one AFT is recognised
+	 */
+	private Map<String, Map<String, Path>> resolveParameterPaths(String configuredDirectory, String fallbackFolder,
+			Function<String, String> fileNameForAft) {
 		Map<String, Map<String, Path>> data = new HashMap<>(); // <aftName,default_/Year/scenario,path>
-		String configuredDirectory = ConfigLoader.config.aft_behaviour_parameters_directory;
+
+		// This blank/null check used to exist only in behaviourPaths().
+		// production_paths() called Paths.get(...) straight away and threw a
+		// NullPointerException when the key was missing from config.yaml.
 		Path configPath = configuredDirectory == null || configuredDirectory.isBlank() ? null
 				: Paths.get(configuredDirectory);
+
 		if (configPath != null && configPath.toFile().isDirectory()) {
 			ArrayList<Path> folder = PathTools.findAllFilePaths(configPath);
 			hashAFTs.keySet().forEach(aftName -> {
-				data.put(aftName, new HashMap<>());
+				String fileName = fileNameForAft.apply(aftName);
+				Map<String, Path> byKey = new HashMap<>();
+				data.put(aftName, byKey);
+
+				// Most specific first: a file whose name carries a simulation year.
 				for (int i = Timestep.getStartYear(); i <= Timestep.getEndtYear(); i++) {
-					ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i),
-							"AftParams_" + aftName + ".csv");
+					ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i), fileName);
 					if (p != null && !p.isEmpty()) {
-						data.get(aftName).put(String.valueOf(i), p.get(0));
+						byKey.put(String.valueOf(i), p.get(0));
 					}
 				}
-				ArrayList<Path> list2 = new ArrayList<>(data.get(aftName).values());
-				ArrayList<Path> list3 = new ArrayList<>(PathTools.fileFilter(folder, "AftParams_" + aftName + ".csv"));
-				list3.removeAll(new HashSet<>(list2));
-				list3.forEach(p -> {
-					data.get(aftName).put("default_", p);
-				});
+				// Whatever is left over becomes this AFT's default file.
+				putUnclaimedUnder("default_", byKey, PathTools.fileFilter(folder, fileName), snapshot(byKey));
 			});
 
 		} else {
-			ArrayList<Path> folder = PathTools.fileFilter(PathTools.asFolder("agents"));
+			ArrayList<Path> folder = PathTools.fileFilter(PathTools.asFolder(fallbackFolder));
 			hashAFTs.keySet().forEach(aftName -> {
-				data.put(aftName, new HashMap<>());
-				// if Name contain year and scenarios
+				String fileName = fileNameForAft.apply(aftName);
+				Map<String, Path> byKey = new HashMap<>();
+				data.put(aftName, byKey);
+
+				// Most specific first: file name carries both scenario and year.
 				ProjectLoader.getScenariosList().forEach(scenarioName -> {
 					for (int i = Timestep.getStartYear(); i <= Timestep.getEndtYear(); i++) {
-						ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i),
-								"AftParams_" + aftName + ".csv", scenarioName);
+						ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i), fileName, scenarioName);
 						if (p != null && !p.isEmpty()) {
-							data.get(aftName).put(scenarioName + "|" + i, p.get(0));
+							byKey.put(scenarioName + "|" + i, p.get(0));
 						}
 					}
 				});
-				// if Name contain only scenarios -> go to rest and find scenarios
-				ArrayList<Path> exist1 = new ArrayList<>(data.get(aftName).values());
 
-				ProjectLoader.getScenariosList().forEach(scenarioName -> {
-					ArrayList<Path> tmp = PathTools.fileFilter(folder, "AftParams_" + aftName + ".csv", scenarioName);
-					if (tmp != null) {
-						ArrayList<Path> rest1 = new ArrayList<>(tmp);
-						rest1.removeAll(new HashSet<>(exist1));
-						rest1.forEach(p -> {
-							data.get(aftName).put(scenarioName, p);
-						});
-					}
-				});
-				// if Name contain only default_-> go to rest and define file as default_
-				ArrayList<Path> exist2 = new ArrayList<>(data.get(aftName).values());
-				ArrayList<Path> tmp = PathTools.fileFilter(folder, "AftParams_" + aftName + ".csv", "default_");
-				if (tmp != null) {
-					ArrayList<Path> rest2 = new ArrayList<>(tmp);
-					rest2.removeAll(new HashSet<>(exist2));
-					rest2.forEach(p -> {
-						data.get(aftName).put("default_", p);
-					});
-				}
+				// Then: file name carries a scenario but no year. Note that all
+				// scenarios are compared against ONE snapshot taken after the year
+				// pass, never against each other's results - that is what the
+				// original code did, and it is preserved deliberately.
+				Set<Path> afterYearPass = snapshot(byKey);
+				ProjectLoader.getScenariosList().forEach(scenarioName -> putUnclaimedUnder(scenarioName, byKey,
+						PathTools.fileFilter(folder, fileName, scenarioName), afterYearPass));
+
+				// Least specific: a file explicitly marked as the default.
+				putUnclaimedUnder("default_", byKey, PathTools.fileFilter(folder, fileName, "default_"),
+						snapshot(byKey));
 			});
 		}
 		return data;
+	}
+
+	/** The paths already registered for one AFT, used to skip files a more specific key claimed. */
+	private static Set<Path> snapshot(Map<String, Path> byKey) {
+		return new HashSet<>(byKey.values());
+	}
+
+	/**
+	 * Registers, under {@code key}, every candidate file not already claimed.
+	 *
+	 * A null candidate list is ignored. production_paths() already guarded
+	 * against that; behaviourPaths() did not, so a missing folder could throw a
+	 * NullPointerException on the behaviour side only.
+	 */
+	private static void putUnclaimedUnder(String key, Map<String, Path> byKey, ArrayList<Path> candidates,
+			Set<Path> alreadyClaimed) {
+		if (candidates == null) {
+			return;
+		}
+		ArrayList<Path> unclaimed = new ArrayList<>(candidates);
+		unclaimed.removeAll(alreadyClaimed);
+		unclaimed.forEach(p -> byKey.put(key, p));
 	}
 
 	private void initializeAFTBehaviour(Path aftPath) {
