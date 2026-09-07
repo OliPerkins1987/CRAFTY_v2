@@ -166,7 +166,7 @@ public class Listener extends AbstractUpdater {
 			servicedemandHash.put(ServiceSet.getServicesList().get(i), h);
 		}
 
-		landEventCounter = new String[Timestep.getSize()][2];
+		landEventCounter = new String[Timestep.getSize() + 1][2];
 		landEventCounter[0][0] = "year";
 		landEventCounter[0][1] = "LU changed";
 		for (int i = 0; i < Timestep.getSize(); i++) {

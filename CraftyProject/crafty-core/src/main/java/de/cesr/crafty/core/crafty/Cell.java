@@ -66,21 +66,8 @@ public class Cell extends AbstractCell {
 				}
 				return 0.0;
 			}
-			double product = 1.0;
-			for (var e : exps.entrySet()) {
-				if (!CapitalUpdater.isSuitability(e.getKey()))
-					continue;
-				final double p = e.getValue();
-				if (p == 0.0)
-					continue;
-				final double capVal = (getCapitals().getOrDefault(e.getKey(), 0.)
-						* (1 + getCapitalsAdjusment().getOrDefault(e.getKey(), 0.)));
-				if (p == 1.0)
-					product *= capVal;
-				else
-					product *= Math.pow(capVal, p);
-			}
-			return product * a.getProductivityLevel().get(serviceName);
+			// Production counts suitability capitals only.
+			return capitalProduct(exps, true) * a.getProductivityLevel().get(serviceName);
 		}
 		return competitiveness(a, serviceName);
 	}
@@ -93,21 +80,29 @@ public class Cell extends AbstractCell {
 		if (exps == null || exps.isEmpty())
 			return 0.0;
 
+		// Competitiveness counts every capital the AFT is sensitive to.
+		return capitalProduct(exps, false) * a.getProductivityLevel().get(serviceName);
+	}
+
+	private double capitalProduct(Map<String, Double> exps, boolean suitabilityOnly) {
 		double product = 1.0;
 
 		for (var e : exps.entrySet()) {
+			if (suitabilityOnly && !CapitalUpdater.isSuitability(e.getKey()))
+				continue;
 			final double p = e.getValue();
 			if (p == 0.0)
 				continue;
 			final double capVal = (getCapitals().getOrDefault(e.getKey(), 0.)
 					* (1 + getCapitalsAdjusment().getOrDefault(e.getKey(), 0.)));
+			// Exponent 1 is the common case and skips the cost of Math.pow.
 			if (p == 1.0)
 				product *= capVal;
 			else
 				product *= Math.pow(capVal, p);
 		}
 
-		return product * a.getProductivityLevel().get(serviceName);
+		return product;
 	}
 
 	public double productionCost(Aft a) {
