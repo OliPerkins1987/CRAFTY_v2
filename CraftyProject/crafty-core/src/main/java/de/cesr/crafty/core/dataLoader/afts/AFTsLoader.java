@@ -194,7 +194,7 @@ public class AFTsLoader extends HashSet<Aft> {
 				data.put(aftName, new HashMap<>());
 				// if Name contain year and scenarios
 				ProjectLoader.getScenariosList().forEach(scenarioName -> {
-					for (int i = Timestep.getStartYear(); i < Timestep.getEndtYear(); i++) {
+					for (int i = Timestep.getStartYear(); i <= Timestep.getEndtYear(); i++) {
 						ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i),
 								File.separator + aftName + ".csv", scenarioName);
 						if (p != null && !p.isEmpty()) {
@@ -242,7 +242,7 @@ public class AFTsLoader extends HashSet<Aft> {
 			ArrayList<Path> folder = PathTools.findAllFilePaths(configPath);
 			hashAFTs.keySet().forEach(aftName -> {
 				data.put(aftName, new HashMap<>());
-				for (int i = Timestep.getStartYear(); i < Timestep.getEndtYear(); i++) {
+				for (int i = Timestep.getStartYear(); i <= Timestep.getEndtYear(); i++) {
 					ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i),
 							"AftParams_" + aftName + ".csv");
 					if (p != null && !p.isEmpty()) {
@@ -263,7 +263,7 @@ public class AFTsLoader extends HashSet<Aft> {
 				data.put(aftName, new HashMap<>());
 				// if Name contain year and scenarios
 				ProjectLoader.getScenariosList().forEach(scenarioName -> {
-					for (int i = Timestep.getStartYear(); i < Timestep.getEndtYear(); i++) {
+					for (int i = Timestep.getStartYear(); i <= Timestep.getEndtYear(); i++) {
 						ArrayList<Path> p = PathTools.fileFilter(folder, String.valueOf(i),
 								"AftParams_" + aftName + ".csv", scenarioName);
 						if (p != null && !p.isEmpty()) {
