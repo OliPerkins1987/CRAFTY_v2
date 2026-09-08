@@ -10,6 +10,8 @@ import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
@@ -398,37 +400,76 @@ public class RegionalModelRunner {
             return;
         }
 
-        List<List<Cell>> subsubsets = Utils.splitIntoSubsetsDeterministic(uniqueCells.values(),
-                ConfigLoader.config.marginal_utility_calculations_per_tick, ConfigLoader.config.random_seed,
-                Timestep.getCurrentYear(), DeterministicRandom.Process.COMPETITION_BATCH_ORDER);
+        // Only cells with an active owner take part; the filter is applied per
+        // batch, after splitting, so the batch boundaries are unchanged.
+        runCompetitionInBatches(uniqueCells.values(), DeterministicRandom.Process.COMPETITION_BATCH_ORDER,
+                c -> c.getOwner() != null && c.getOwner().isActive(),
+                c -> Competitiveness.evaluateCompetition(c, this,
+                        DeterministicRandom.Process.CELL_SELECTION_COMPETITION));
+    }
 
-        subsubsets.forEach(subsubset -> {
-            List<Cell> eligibleCells = subsubset.stream().filter(c -> c.getOwner() != null && c.getOwner().isActive())
-                    .toList();
-            // Evaluate the complete batch against one unchanged ownership state.
-            List<Competitiveness.CompetitionDecision> decisions = eligibleCells.parallelStream()
-                    .map(c -> Competitiveness.evaluateCompetition(c, this,
-                            DeterministicRandom.Process.CELL_SELECTION_COMPETITION))
+    /**
+     * CLEANUP (plan step 2.4): competition() and twinnedCompetition() both ran
+     * the same four-step pass over a set of cells, with the bookkeeping in the
+     * last two steps copy-pasted between them. That shared shape now lives here:
+     *
+     *   1. split the cells into deterministic batches;
+     *   2. evaluate a whole batch in parallel against one unchanged ownership
+     *      state - evaluation only reads model state, it changes nothing;
+     *   3. apply the resulting decisions in the batch's encounter order, so the
+     *      outcome does not depend on which thread finished first;
+     *   4. recompute productivity for the cells just processed, fold the change
+     *      into regional supply, and refresh marginal utility so the next batch
+     *      reacts to what this batch did.
+     *
+     * @param cells          all cells taking part in this pass
+     * @param batchProcessId process code that seeds the deterministic batching
+     * @param takesPart      applied per batch to skip cells that cannot compete
+     * @param evaluator      decides one cell, returning null for "no change"
+     */
+    private void runCompetitionInBatches(Collection<Cell> cells, int batchProcessId, Predicate<Cell> takesPart,
+            Function<Cell, Competitiveness.CompetitionDecision> evaluator) {
+        List<List<Cell>> batches = Utils.splitIntoSubsetsDeterministic(cells,
+                ConfigLoader.config.marginal_utility_calculations_per_tick, ConfigLoader.config.random_seed,
+                Timestep.getCurrentYear(), batchProcessId);
+
+        for (List<Cell> batch : batches) {
+            List<Cell> participating = batch.stream().filter(takesPart).toList();
+
+            // Step 2: evaluate the complete batch against one unchanged state.
+            List<Competitiveness.CompetitionDecision> decisions = participating.parallelStream().map(evaluator::apply)
                     .filter(Objects::nonNull).toList();
 
-            // Apply only after the parallel evaluation barrier, preserving encounter order.
+            // Step 3: apply only after the parallel evaluation barrier.
             decisions.forEach(d -> Competitiveness.applyCompetitionDecision(d, this));
 
-            Map<String, Double> before = new LinkedHashMap<>();
-            Map<String, Double> after = new LinkedHashMap<>();
-            for (Cell c : eligibleCells) {
-                for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
-                    before.merge(ServiceSet.getServicesList().get(i), c.getCurrentProd()[i], Double::sum);
-                }
-                c.calculateCurrentProductivity();
-                for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
-                    after.merge(ServiceSet.getServicesList().get(i), c.getCurrentProd()[i], Double::sum);
-                }
-            }
-            after.forEach(
-                    (key, value) -> getRegionalSupply().merge(key, value - before.getOrDefault(key, 0.0), Double::sum));
+            // Step 4: refresh supply for the cells this batch touched.
+            applyProductivityChangeToRegionalSupply(participating);
             computeMarginal();
-        });
+        }
+    }
+
+    /**
+     * Recomputes productivity for the given cells and folds the difference into
+     * regional supply, so supply stays consistent with the new owners without
+     * re-summing every cell in the region.
+     */
+    private void applyProductivityChangeToRegionalSupply(List<Cell> cells) {
+        List<String> services = ServiceSet.getServicesList();
+        Map<String, Double> before = new LinkedHashMap<>();
+        Map<String, Double> after = new LinkedHashMap<>();
+
+        for (Cell c : cells) {
+            for (int i = 0; i < services.size(); i++) {
+                before.merge(services.get(i), c.getCurrentProd()[i], Double::sum);
+            }
+            c.calculateCurrentProductivity();
+            for (int i = 0; i < services.size(); i++) {
+                after.merge(services.get(i), c.getCurrentProd()[i], Double::sum);
+            }
+        }
+
+        after.forEach((key, value) -> getRegionalSupply().merge(key, value - before.getOrDefault(key, 0.0), Double::sum));
     }
 
     private void twinnedCompetition() {
@@ -450,28 +491,22 @@ public class RegionalModelRunner {
 
         if (seed.isEmpty()) return;
 
-        List<List<Cell>> subsubsets = Utils.splitIntoSubsetsDeterministic(seed,
-                ConfigLoader.config.marginal_utility_calculations_per_tick, runSeed,
-                year, DeterministicRandom.Process.CELL_SELECTION_TWIN_COMPETITION);
-
-        subsubsets.forEach(subsubset -> {
-            ConcurrentHashMap<String, Double> before = new ConcurrentHashMap<>();
-            ConcurrentHashMap<String, Double> after = new ConcurrentHashMap<>();
-
-            subsubset.parallelStream().forEach(c -> {
-                for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
-                    before.merge(ServiceSet.getServicesList().get(i), c.getCurrentProd()[i], Double::sum);
-                }
-                Competitiveness.twinCompetition(c, this);
-                c.calculateCurrentProductivity();
-                for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
-                    after.merge(ServiceSet.getServicesList().get(i), c.getCurrentProd()[i], Double::sum);
-                }
-            });
-
-            after.forEach((key, value) -> getRegionalSupply().merge(key, value - before.getOrDefault(key, 0.0), Double::sum));
-            computeMarginal();
-        });
+        // CLEANUP (plan step 2.4): this pass used to take over cells inside a
+        // parallel forEach and add up the supply change from several threads at
+        // once. Two consequences, both now gone:
+        //   - it was the only competition pass that changed ownership while
+        //     still evaluating, unlike competition() and takeOverUnmanageCells();
+        //   - adding doubles from several threads meant the supply totals were
+        //     summed in a different order on every run, so the twin pass was not
+        //     reproducible even with a fixed random seed.
+        // Each twin decision depends only on its own cell plus region-level
+        // values that do not change within a batch, so evaluating the batch
+        // first and applying afterwards gives the same ownership outcome while
+        // making the totals deterministic. Every cell in the seed takes part,
+        // hence the always-true filter.
+        runCompetitionInBatches(seed, DeterministicRandom.Process.CELL_SELECTION_TWIN_COMPETITION,
+                c -> true,
+                c -> Competitiveness.evaluateTwinCompetition(c, this));
     }
 
     private ConcurrentHashMap<String, Cell> cellsWhereOwnerExceededMaxLifeCycle() {

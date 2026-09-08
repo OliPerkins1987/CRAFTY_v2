@@ -249,30 +249,26 @@ public class Competitiveness {
     // ── Twin competition ────────────────────────────────────────────────
 
     static void twinCompetition(Cell c, RegionalModelRunner r) {
-        Aft owner = c.getOwner();
-        if (owner == null || !owner.isInteract() || !owner.hasTwin()) return;
-        Aft twin = AFTsLoader.getAftHash().get(owner.getTwinLabel());
-        if (twin == null || !twin.isInteract() || !makeCompetition(c, owner, twin)) return;
+        applyCompetitionDecision(evaluateTwinCompetition(c, r), r);
+    }
 
-        if (ConfigLoader.config.use_twinned_cost) {
-            double uTwin = utility(c, twin, r);
-            double uOwner = c.getCurrentUtility();
-            if (uTwin > 0 && uTwin > uOwner + twin.getTwinCost()) {
-                takeOverAcell(c, twin, r);
-            }
-        } else {
-            boolean changesOwner;
-            if (ConfigLoader.config.use_normalised_price_competition) {
-                changesOwner = landUsechangeNormalisedPriceUtility(c, owner, twin, r);
-            } else if (AftCategorised.useCategorisationGivIn && CellBehaviourUpdater.behaviourUsed) {
-                changesOwner = landUsechangeNormalisedUtility(c, owner, twin, r);
-            } else {
-                changesOwner = landUsechange(c, owner, twin, r);
-            }
-            if (changesOwner) {
-                takeOverAcell(c, twin, r);
-            }
-        }
+    /**
+     * Decides whether a cell's owner should be replaced by its twin AFT, without
+     * changing the cell, so a whole batch can be evaluated against one unchanged
+     * ownership state and applied afterwards in a deterministic order.
+     */
+    static CompetitionDecision evaluateTwinCompetition(Cell c, RegionalModelRunner r) {
+        Aft owner = c.getOwner();
+        if (owner == null || !owner.isInteract() || !owner.hasTwin()) return null;
+        Aft twin = AFTsLoader.getAftHash().get(owner.getTwinLabel());
+        if (twin == null || !twin.isInteract() || !makeCompetition(c, owner, twin)) return null;
+
+        // Twin switching is a straight $ decision, net of the switching cost
+        // (zero unless use_twinned_cost is set).
+        double uTwin = utility(c, twin, r);
+        double uOwner = c.getCurrentUtility();
+        double twinCost = ConfigLoader.config.use_twinned_cost ? twin.getTwinCost() : 0.0;
+        return (uTwin > 0 && uTwin > uOwner + twinCost) ? new CompetitionDecision(c, twin) : null;
     }
 
     // ── Cell takeover ───────────────────────────────────────────────────
