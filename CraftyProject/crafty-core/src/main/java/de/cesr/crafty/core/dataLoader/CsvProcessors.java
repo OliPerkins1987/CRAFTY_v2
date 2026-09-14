@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Spliterator;
 import java.util.Spliterators;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -326,7 +327,22 @@ public class CsvProcessors {
 		return matrixMap;
 	}
 
-	static void associateNfertCostsToCells(Map<String, Integer> indexof, String data) {
+	/*
+	 * CLEANUP: the nfert, irrigation and intensity row handlers used to be three
+	 * ~20-line copies of the same method. Each resolved the cell from X/Y and then
+	 * copied one column per eligible AFT into a per-cell map; they differed only in
+	 * which AFT list selects the columns and which map receives the values, which
+	 * are the two parameters below. Irrigation additionally supports a single shared
+	 * column, which is the third. Keeping the logic in one place is what stops the
+	 * copies drifting apart as cost types are added.
+	 */
+	private static void associateCostsToCells(Map<String, Integer> indexof, String data, List<String> aftLabels,
+			Function<Cell, Map<String, Double>> targetMap) {
+		associateCostsToCells(indexof, data, aftLabels, targetMap, null);
+	}
+
+	private static void associateCostsToCells(Map<String, Integer> indexof, String data, List<String> aftLabels,
+			Function<Cell, Map<String, Double>> targetMap, String sharedColumn) {
 		String[] row = COMMA.split(data, -1);
 		int x = (int) Utils.sToD(row[indexof.get("X")]);
 		int y = (int) Utils.sToD(row[indexof.get("Y")]);
@@ -336,69 +352,45 @@ public class CsvProcessors {
 			return;
 		}
 
-		for (String aftLabel : ProductionCostUpdater.getNfertAftLabels()) {
+		Map<String, Double> costs = targetMap.apply(c);
+
+		/*
+		 * A shared column carries one value for the whole cell that applies to every
+		 * eligible AFT, rather than one column per AFT label.
+		 */
+		if (sharedColumn != null) {
+			Integer shared = indexof.get(sharedColumn);
+			if (shared != null && shared < row.length) {
+				double costValue = Utils.sToD(row[shared]);
+				for (String aftLabel : aftLabels) {
+					costs.put(aftLabel, costValue);
+				}
+				return;
+			}
+		}
+
+		for (String aftLabel : aftLabels) {
 			Integer col = indexof.get(aftLabel.toUpperCase());
 			if (col == null) {
 				continue;
 			}
 			if (col < row.length) {
-				double costValue = Utils.sToD(row[col]);
-				c.getNfertCosts().put(aftLabel, costValue);
+				costs.put(aftLabel, Utils.sToD(row[col]));
 			}
 		}
+	}
+
+	static void associateNfertCostsToCells(Map<String, Integer> indexof, String data) {
+		associateCostsToCells(indexof, data, ProductionCostUpdater.getNfertAftLabels(), Cell::getNfertCosts);
 	}
 
 	static void associateIrrigationCostToCells(Map<String, Integer> indexof, String data) {
-		String[] row = COMMA.split(data, -1);
-		int x = (int) Utils.sToD(row[indexof.get("X")]);
-		int y = (int) Utils.sToD(row[indexof.get("Y")]);
-
-		Cell c = CellsLoader.getCell(x, y);
-		if (c == null) {
-			return;
-		}
-
-		Integer singleCol = indexof.get("IRRIGATION_COST");
-		if (singleCol != null && singleCol < row.length) {
-			double costValue = Utils.sToD(row[singleCol]);
-			for (String aftLabel : ProductionCostUpdater.getIrrigatedAftLabels()) {
-				c.getIrrigationCosts().put(aftLabel, costValue);
-			}
-			return;
-		}
-
-		for (String aftLabel : ProductionCostUpdater.getIrrigatedAftLabels()) {
-			Integer col = indexof.get(aftLabel.toUpperCase());
-			if (col == null) {
-				continue;
-			}
-			if (col < row.length) {
-				double costValue = Utils.sToD(row[col]);
-				c.getIrrigationCosts().put(aftLabel, costValue);
-			}
-		}
+		associateCostsToCells(indexof, data, ProductionCostUpdater.getIrrigatedAftLabels(), Cell::getIrrigationCosts,
+				"IRRIGATION_COST");
 	}
 
 	static void associateIntensityCostsToCells(Map<String, Integer> indexof, String data) {
-		String[] row = COMMA.split(data, -1);
-		int x = (int) Utils.sToD(row[indexof.get("X")]);
-		int y = (int) Utils.sToD(row[indexof.get("Y")]);
-
-		Cell c = CellsLoader.getCell(x, y);
-		if (c == null) {
-			return;
-		}
-
-		for (String aftLabel : ProductionCostUpdater.getIntensityAftLabels()) {
-			Integer col = indexof.get(aftLabel.toUpperCase());
-			if (col == null) {
-				continue;
-			}
-			if (col < row.length) {
-				double costValue = Utils.sToD(row[col]);
-				c.getIntensityCosts().put(aftLabel, costValue);
-			}
-		}
+		associateCostsToCells(indexof, data, ProductionCostUpdater.getIntensityAftLabels(), Cell::getIntensityCosts);
 	}
 
 	static void associateSubsidiesToCells(Map<String, Integer> indexof, String data) {

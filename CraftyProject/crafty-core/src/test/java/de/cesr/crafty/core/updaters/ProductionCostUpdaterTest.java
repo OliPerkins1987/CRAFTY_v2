@@ -370,7 +370,7 @@ class ProductionCostUpdaterTest {
 	// =========================================================
 
 	@Test
-	void buildAftLists_correctlyCategorises() throws IOException {
+	void buildAftLists_gatesOnDataNotCategory() throws IOException {
 		createGlobalCostsFile();
 		ConfigLoader.config.use_production_costs = true;
 		ConfigLoader.config.spatial_production_costs = false;
@@ -386,22 +386,121 @@ class ProductionCostUpdaterTest {
 
 		ProductionCostUpdater updater = new ProductionCostUpdater();
 
-		// AFT1 and AFT2 are Agri_Crops -> nfert list
+		// Nfert is gated on a positive Nfert_rate, not on the Agri_Crops category.
 		assertTrue(ProductionCostUpdater.getNfertAftLabels().contains("AFT1"));
 		assertTrue(ProductionCostUpdater.getNfertAftLabels().contains("AFT2"));
-		assertFalse(ProductionCostUpdater.getNfertAftLabels().contains("AFT3"));
+		assertFalse(ProductionCostUpdater.getNfertAftLabels().contains("AFT3"),
+				"AFT3 declares no Nfert_rate so should not receive a fertiliser cost");
 
 		// Only AFT1 is irrigated
 		assertTrue(ProductionCostUpdater.getIrrigatedAftLabels().contains("AFT1"));
 		assertFalse(ProductionCostUpdater.getIrrigatedAftLabels().contains("AFT2"));
 
-		// Interactive AFTs with real categories get intensity costs
+		// Every interacting AFT is intensity-eligible; the productivity-weighted sum
+		// is what zeroes out an AFT that produces nothing priced.
 		assertTrue(ProductionCostUpdater.getIntensityAftLabels().contains("AFT1"));
 		assertTrue(ProductionCostUpdater.getIntensityAftLabels().contains("AFT2"));
 		assertTrue(ProductionCostUpdater.getIntensityAftLabels().contains("AFT3"));
-		// Abandoned and Uncategorized AFTs are excluded
+		assertTrue(ProductionCostUpdater.getIntensityAftLabels().contains("Urban"),
+				"Uncategorized AFTs are no longer excluded by name - gating is on data");
+		// Non-interacting AFTs are still excluded
 		assertFalse(ProductionCostUpdater.getIntensityAftLabels().contains("Abandoned"));
-		assertFalse(ProductionCostUpdater.getIntensityAftLabels().contains("Urban"),
-				"Uncategorized AFTs should be excluded from intensity costs");
+	}
+
+	@Test
+	void buildAftLists_nfertGateIgnoresCategory() throws IOException {
+		createGlobalCostsFile();
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = false;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("irrigation"),
+				"irrigation_cost.csv",
+				"ID,X,Y,irrigation_cost",
+				"0,0,0,0");
+
+		// AFT3 is deliberately NOT Agri_Crops, but it declares a fertiliser rate.
+		Aft aft3 = AFTsLoader.getAftHash().get("AFT3");
+		aft3.setNfertRate(40.0);
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		assertTrue(ProductionCostUpdater.getNfertAftLabels().contains("AFT3"),
+				"An AFT outside Agri_Crops that declares a Nfert_rate should be charged for it");
+		// 1.08 * 40.0 = 43.2
+		assertEquals(43.2, aft3.getNfertCostPerHa(), 0.001);
+	}
+
+	// =========================================================
+	// 11. Other_intensity scaling of the global intensity cost
+	// =========================================================
+
+	@Test
+	void globalIntensityCost_scaledByOtherIntensity() throws IOException {
+		createGlobalCostsFile();
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = false;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+
+		Aft aft1 = AFTsLoader.getAftHash().get("AFT1");
+		aft1.getProductivityLevel().put("C3cereals", 1.0);
+		aft1.setOtherIntensity(0.75);
+
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("irrigation"),
+				"irrigation_cost.csv",
+				"ID,X,Y,irrigation_cost",
+				"0,0,0,0");
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		// 0.75 * (1.0 * 50) = 37.5
+		assertEquals(37.5, aft1.getIntensityCostPerHa(), 0.001);
+	}
+
+	@Test
+	void globalIntensityCost_blankOtherIntensityDefaultsToOne() throws IOException {
+		createGlobalCostsFile();
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = false;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+
+		// Other_intensity deliberately left at its default - this is the "column blank
+		// or absent" case, which must not change the cost.
+		Aft aft1 = AFTsLoader.getAftHash().get("AFT1");
+		aft1.getProductivityLevel().put("C3cereals", 1.0);
+		assertEquals(1.0, aft1.getOtherIntensity(), 0.001, "default must be 1.0, not 0.0");
+
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("irrigation"),
+				"irrigation_cost.csv",
+				"ID,X,Y,irrigation_cost",
+				"0,0,0,0");
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		// 1.0 * (1.0 * 50) = 50 - unchanged from the pre-scaling behaviour
+		assertEquals(50.0, aft1.getIntensityCostPerHa(), 0.001);
+	}
+
+	@Test
+	void globalIntensityCost_explicitZeroOtherIntensityZeroesCost() throws IOException {
+		createGlobalCostsFile();
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = false;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+
+		// An explicit 0 is honoured - that is the escape hatch for an AFT that
+		// produces a priced service but should not be charged an intensity cost.
+		Aft aft1 = AFTsLoader.getAftHash().get("AFT1");
+		aft1.getProductivityLevel().put("C3cereals", 1.0);
+		aft1.setOtherIntensity(0.0);
+
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("irrigation"),
+				"irrigation_cost.csv",
+				"ID,X,Y,irrigation_cost",
+				"0,0,0,0");
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		assertEquals(0.0, aft1.getIntensityCostPerHa(), 0.001);
 	}
 }

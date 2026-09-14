@@ -313,6 +313,24 @@ public class AFTsLoader extends HashSet<Aft> {
 				if (csv.containsKey("Nfert_rate")) {
 					a.setNfertRate(Utils.sToD(csv.get("Nfert_rate").get(i)));
 				}
+				if (csv.containsKey("Other_intensity")) {
+					String val = csv.get("Other_intensity").get(i).trim();
+					/*
+					 * Other_intensity is a multiplier on the intensity cost, not a cost, so a
+					 * blank cell means "do not scale" rather than "no cost" and the 1.0 default
+					 * is left in place. Tablesaw renders a missing numeric cell as "" or "NaN"
+					 * depending on the column type it infers; both count as blank here. An
+					 * explicit 0 is honoured and does zero the AFT's intensity cost.
+					 */
+					if (!val.isEmpty() && !val.equalsIgnoreCase("NaN")) {
+						try {
+							a.setOtherIntensity(Double.parseDouble(val));
+						} catch (NumberFormatException e) {
+							LOGGER.warn("Unrecognised Other_intensity value '" + val
+									+ "' for AFT " + label + ", defaulting to 1.0 (no scaling)");
+						}
+					}
+				}
 				if (csv.containsKey("Irrigated")) {
 					String val = csv.get("Irrigated").get(i).trim();
 					try {

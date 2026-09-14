@@ -48,6 +48,14 @@ public class ProductionCostUpdater extends AbstractUpdater {
 		}
 	}
 
+	/*
+	 * CLEANUP: which AFTs pay which cost is now decided by each AFT's own data
+	 * rather than by its category name. These lists used to be gated on the literal
+	 * strings "Agri_Crops", "Uncategorized" and "Natural", which meant an AFT that
+	 * both cropped and grazed could never receive a fertiliser cost - the category
+	 * was the gate, so a mixed AFT had to pick a side. The costs are independent and
+	 * additive, and nothing here stops one AFT appearing in several lists.
+	 */
 	private void buildAftLists() {
 		nfertAftLabels.clear();
 		irrigatedAftLabels.clear();
@@ -55,17 +63,20 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 		AFTsLoader.getAftHash().forEach((label, aft) -> {
 			if (!aft.isInteract()) return;
-			String catName = aft.getCategory() != null ? aft.getCategory().getName() : "";
-			if ("Agri_Crops".equalsIgnoreCase(catName)) {
+			if (aft.getNfertRate() > 0) {
 				nfertAftLabels.add(label);
 			}
 			if (aft.isIrrigated()) {
 				irrigatedAftLabels.add(label);
 			}
-			if (!"Uncategorized".equalsIgnoreCase(catName)
-					&& !"Natural".equalsIgnoreCase(catName)) {
-				intensityAftLabels.add(label);
-			}
+			/*
+			 * Intensity applies to every interacting AFT; no exclusion list is needed.
+			 * In global mode the productivity-weighted sum is already zero for an AFT
+			 * that produces nothing priced, and in spatial mode a column missing from
+			 * the cost CSV is skipped. Note this is a behaviour change for AFTs that
+			 * were previously excluded by category but do produce a priced service.
+			 */
+			intensityAftLabels.add(label);
 		});
 		LOGGER.info("Nfert AFTs: " + nfertAftLabels);
 		LOGGER.info("Irrigated AFTs: " + irrigatedAftLabels);
@@ -84,17 +95,14 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	private void cacheGlobalNfertCosts() {
 		if (globalCostData == null) return;
 
-		boolean hasNfertRateColumn = false;
-		for (String label : nfertAftLabels) {
-			Aft aft = AFTsLoader.getAftHash().get(label);
-			if (aft != null && aft.getNfertRate() > 0) {
-				hasNfertRateColumn = true;
-			}
-		}
-
-		if (!hasNfertRateColumn && !nfertAftLabels.isEmpty()) {
-			LOGGER.fatal("Nfert_rate column missing or all zero in AFTsMetaData "
-					+ "but use_production_costs is true (global mode)");
+		/*
+		 * The "Nfert_rate column missing or all zero" fatal check used to live here.
+		 * It is unreachable now that nfertAftLabels is built from the rates themselves:
+		 * a non-empty list already guarantees at least one positive rate, and an empty
+		 * one simply means no AFT declares that it fertilises.
+		 */
+		if (nfertAftLabels.isEmpty()) {
+			LOGGER.info("No AFT declares a positive Nfert_rate; no fertiliser costs applied");
 			return;
 		}
 
@@ -122,8 +130,16 @@ public class ProductionCostUpdater extends AbstractUpdater {
 				double prodLevel = aft.getProductivityLevel().getOrDefault(serviceName, 0.0);
 				totalCost += prodLevel * serviceCost;
 			}
-			aft.setIntensityCostPerHa(totalCost);
-			LOGGER.info("Global intensity cost for " + label + ": " + totalCost + " $/ha");
+			/*
+			 * Other_intensity scales the productivity-weighted sum, so two AFTs
+			 * producing the same service at the same level can still differ in what
+			 * their management costs. It defaults to 1.0, so this is a no-op for any
+			 * project that does not populate the column.
+			 */
+			double scaledCost = totalCost * aft.getOtherIntensity();
+			aft.setIntensityCostPerHa(scaledCost);
+			LOGGER.info("Global intensity cost for " + label + ": " + scaledCost + " $/ha (unscaled "
+					+ totalCost + " x Other_intensity " + aft.getOtherIntensity() + ")");
 		}
 	}
 

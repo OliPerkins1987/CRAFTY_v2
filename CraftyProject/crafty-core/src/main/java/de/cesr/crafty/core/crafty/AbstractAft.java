@@ -50,6 +50,14 @@ public abstract class AbstractAft {
 	private boolean irrigated = false;
 	private double nfertCostPerHa = 0.0;
 	private double intensityCostPerHa = 0.0;
+	/*
+	 * Scaling factor applied to the intensity cost, from the Other_intensity column
+	 * of AFTsMetaData. It is a multiplier, not a cost, so a blank cell (or a missing
+	 * column) means "do not scale" rather than "no cost" - hence the default of 1.0,
+	 * which leaves projects that do not use the column behaving exactly as before.
+	 * An explicit 0 in the metadata does zero the cost; only blank defaults to 1.0.
+	 */
+	private double otherIntensity = 1.0;
 
 	// Twinned AFT fields
 	private String twinLabel = null;
@@ -240,6 +248,14 @@ public abstract class AbstractAft {
 
 	public void setIntensityCostPerHa(double intensityCostPerHa) {
 		this.intensityCostPerHa = intensityCostPerHa;
+	}
+
+	public double getOtherIntensity() {
+		return otherIntensity;
+	}
+
+	public void setOtherIntensity(double otherIntensity) {
+		this.otherIntensity = otherIntensity;
 	}
 
 	public String getTwinLabel() {
