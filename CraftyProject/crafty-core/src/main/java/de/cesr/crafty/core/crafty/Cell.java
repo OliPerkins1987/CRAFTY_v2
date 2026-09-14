@@ -109,12 +109,18 @@ public class Cell extends AbstractCell {
 		if (a == null || !a.isInteract() || !ConfigLoader.isUseProductionCosts()) {
 			return 0.0;
 		}
+		/*
+		 * The cost components are independent and additive. An AFT that only crops has
+		 * no stocking cost and one that only grazes has no fertiliser cost, but nothing
+		 * here assumes that: a mixed crop/livestock AFT carries both.
+		 */
 		double cost = getIrrigationCosts().getOrDefault(a.getLabel(), 0.0);
 		if (ConfigLoader.isSpatialProductionCosts()) {
 			cost += getNfertCosts().getOrDefault(a.getLabel(), 0.0)
-					+ getIntensityCosts().getOrDefault(a.getLabel(), 0.0);
+					+ getIntensityCosts().getOrDefault(a.getLabel(), 0.0)
+					+ getStockingCosts().getOrDefault(a.getLabel(), 0.0);
 		} else {
-			cost += a.getNfertCostPerHa() + a.getIntensityCostPerHa();
+			cost += a.getNfertCostPerHa() + a.getIntensityCostPerHa() + a.getStockingCostPerHa();
 		}
 		return cost;
 	}

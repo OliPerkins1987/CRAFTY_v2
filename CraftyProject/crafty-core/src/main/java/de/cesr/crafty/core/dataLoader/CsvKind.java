@@ -45,6 +45,12 @@ public enum CsvKind {
 			CsvProcessors.associateIntensityCostsToCells(index, line);
 		}
 	},
+	STOCKING_COST {
+		@Override
+		void apply(String line, Map<String, Integer> index) {
+			CsvProcessors.associateStockingCostsToCells(index, line);
+		}
+	},
 	SUBSIDY {
 		@Override
 		void apply(String line, Map<String, Integer> index) {

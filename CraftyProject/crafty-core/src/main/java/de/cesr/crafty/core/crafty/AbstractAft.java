@@ -58,6 +58,7 @@ public abstract class AbstractAft {
 	 * An explicit 0 in the metadata does zero the cost; only blank defaults to 1.0.
 	 */
 	private double otherIntensity = 1.0;
+	private double stockingCostPerHa = 0.0;
 
 	// Twinned AFT fields
 	private String twinLabel = null;
@@ -256,6 +257,14 @@ public abstract class AbstractAft {
 
 	public void setOtherIntensity(double otherIntensity) {
 		this.otherIntensity = otherIntensity;
+	}
+
+	public double getStockingCostPerHa() {
+		return stockingCostPerHa;
+	}
+
+	public void setStockingCostPerHa(double stockingCostPerHa) {
+		this.stockingCostPerHa = stockingCostPerHa;
 	}
 
 	public String getTwinLabel() {

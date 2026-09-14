@@ -194,6 +194,108 @@ class CompetitivenessTest {
     }
 
     @Test
+    void explicitPriceUtility_subtractsGlobalModeStockingCost() throws Throwable {
+        withServices(List.of("S1"), () -> {
+            Object cfg = ensureConfigInstance();
+            setConfig(cfg, Map.of("use_explicit_price_utility", true, "use_production_costs", true,
+                    "spatial_production_costs", false));
+
+            Cell c = Mockito.spy(new Cell(0, 0));
+
+            Aft a = mock(Aft.class);
+            when(a.isInteract()).thenReturn(true);
+            when(a.getLabel()).thenReturn("AFT1");
+            when(a.getIntensityCostPerHa()).thenReturn(5.0);
+            when(a.getStockingCostPerHa()).thenReturn(4.0);
+
+            doReturn(2.0).when(c).competitiveness(a, "S1");
+
+            Service s1 = mock(Service.class);
+            when(s1.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, 10.0)));
+            Region region = mock(Region.class);
+            when(region.getServicesHash()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", s1)));
+            RegionalModelRunner r = mock(RegionalModelRunner.class);
+            r.R = region;
+
+            try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class)) {
+                ts.when(Timestep::getCurrentYear).thenReturn(2020);
+
+                // revenue = 10 * 2 = 20; costs = intensity(5) + stocking(4) = 9
+                assertEquals(11.0, callUtility(c, a, r), 1e-12);
+            }
+        });
+    }
+
+    @Test
+    void explicitPriceUtility_subtractsSpatialModeStockingCost() throws Throwable {
+        withServices(List.of("S1"), () -> {
+            Object cfg = ensureConfigInstance();
+            setConfig(cfg, Map.of("use_explicit_price_utility", true, "use_production_costs", true,
+                    "spatial_production_costs", true));
+
+            Cell c = Mockito.spy(new Cell(0, 0));
+            c.getIntensityCosts().put("AFT1", 3.0);
+            c.getStockingCosts().put("AFT1", 6.0);
+
+            Aft a = mock(Aft.class);
+            when(a.isInteract()).thenReturn(true);
+            when(a.getLabel()).thenReturn("AFT1");
+
+            doReturn(2.0).when(c).competitiveness(a, "S1");
+
+            Service s1 = mock(Service.class);
+            when(s1.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, 10.0)));
+            Region region = mock(Region.class);
+            when(region.getServicesHash()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", s1)));
+            RegionalModelRunner r = mock(RegionalModelRunner.class);
+            r.R = region;
+
+            try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class)) {
+                ts.when(Timestep::getCurrentYear).thenReturn(2020);
+
+                // revenue = 10 * 2 = 20; costs = intensity(3) + stocking(6) = 9
+                assertEquals(11.0, callUtility(c, a, r), 1e-12);
+            }
+        });
+    }
+
+    @Test
+    void explicitPriceUtility_mixedAftPaysBothNfertAndStocking() throws Throwable {
+        withServices(List.of("S1"), () -> {
+            Object cfg = ensureConfigInstance();
+            setConfig(cfg, Map.of("use_explicit_price_utility", true, "use_production_costs", true,
+                    "spatial_production_costs", true));
+
+            // Costs are additive and independent: a mixed crop/livestock AFT pays both.
+            Cell c = Mockito.spy(new Cell(0, 0));
+            c.getNfertCosts().put("AFT1", 8.0);
+            c.getStockingCosts().put("AFT1", 6.0);
+            c.getIntensityCosts().put("AFT1", 3.0);
+            c.getIrrigationCosts().put("AFT1", 2.0);
+
+            Aft a = mock(Aft.class);
+            when(a.isInteract()).thenReturn(true);
+            when(a.getLabel()).thenReturn("AFT1");
+
+            doReturn(2.0).when(c).competitiveness(a, "S1");
+
+            Service s1 = mock(Service.class);
+            when(s1.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, 10.0)));
+            Region region = mock(Region.class);
+            when(region.getServicesHash()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", s1)));
+            RegionalModelRunner r = mock(RegionalModelRunner.class);
+            r.R = region;
+
+            try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class)) {
+                ts.when(Timestep::getCurrentYear).thenReturn(2020);
+
+                // revenue = 20; costs = nfert(8) + stocking(6) + intensity(3) + irrigation(2) = 19
+                assertEquals(1.0, callUtility(c, a, r), 1e-12);
+            }
+        });
+    }
+
+    @Test
     void explicitPriceUtility_noCostSubtraction_whenProductionCostsDisabled() throws Throwable {
         withServices(List.of("S1"), () -> {
             Object cfg = ensureConfigInstance();

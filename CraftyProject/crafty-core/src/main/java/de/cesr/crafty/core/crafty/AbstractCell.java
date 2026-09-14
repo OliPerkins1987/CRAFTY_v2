@@ -40,6 +40,7 @@ public abstract class AbstractCell {
 	private ConcurrentHashMap<String, Double> nfertCosts = new ConcurrentHashMap<>();
 	private ConcurrentHashMap<String, Double> irrigationCosts = new ConcurrentHashMap<>();
 	private ConcurrentHashMap<String, Double> intensityCosts = new ConcurrentHashMap<>();
+	private ConcurrentHashMap<String, Double> stockingCosts = new ConcurrentHashMap<>();
 
 	private double giveUpSubsidy = 0.0;
 
@@ -224,6 +225,10 @@ public abstract class AbstractCell {
 
 	public ConcurrentHashMap<String, Double> getIntensityCosts() {
 		return intensityCosts;
+	}
+
+	public ConcurrentHashMap<String, Double> getStockingCosts() {
+		return stockingCosts;
 	}
 
 	public double getGiveUpSubsidy() {

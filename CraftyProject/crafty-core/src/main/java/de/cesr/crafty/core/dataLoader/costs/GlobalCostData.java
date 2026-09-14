@@ -12,6 +12,7 @@ public class GlobalCostData {
 	private static final CustomLogger LOGGER = new CustomLogger(GlobalCostData.class);
 
 	private double nfertUnitCost = 0.0;
+	private double stockingUnitCost = 0.0;
 	private Map<String, Double> intensityCosts = new HashMap<>();
 
 	public GlobalCostData(Path globalCostsCsv) {
@@ -26,21 +27,45 @@ public class GlobalCostData {
 			LOGGER.fatal("global_costs.csv must have 'Item' and 'Cost' columns");
 			return;
 		}
+		/*
+		 * Most rows are per-service intensity costs, keyed by service name. A few are
+		 * unit costs for a specific input and must be kept out of that map, or they
+		 * would be looked up against a service's productivity level and silently
+		 * mis-applied if a service ever shared their name.
+		 */
 		for (int i = 0; i < items.size(); i++) {
 			String item = items.get(i).trim();
 			double cost = Double.parseDouble(costs.get(i).trim());
+
 			if (item.equalsIgnoreCase("Nfert")) {
 				nfertUnitCost = cost;
-			} else {
-				intensityCosts.put(item, cost);
+				continue;
 			}
+			if (item.equalsIgnoreCase("Stocking")) {
+				stockingUnitCost = cost;
+				continue;
+			}
+			if (item.equalsIgnoreCase("Water")) {
+				/*
+				 * The irrigation unit cost. Core never applies it: irrigation costs arrive
+				 * per cell as finished $/ha, and this row is consumed upstream when those
+				 * files are generated. Excluded here, and deliberately not stored.
+				 */
+				continue;
+			}
+
+			intensityCosts.put(item, cost);
 		}
-		LOGGER.info("Loaded global costs: Nfert=" + nfertUnitCost
+		LOGGER.info("Loaded global costs: Nfert=" + nfertUnitCost + ", Stocking=" + stockingUnitCost
 				+ ", intensity items=" + intensityCosts.keySet());
 	}
 
 	public double getNfertUnitCost() {
 		return nfertUnitCost;
+	}
+
+	public double getStockingUnitCost() {
+		return stockingUnitCost;
 	}
 
 	public Map<String, Double> getIntensityCosts() {

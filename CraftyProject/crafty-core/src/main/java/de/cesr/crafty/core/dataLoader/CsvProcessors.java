@@ -393,6 +393,10 @@ public class CsvProcessors {
 		associateCostsToCells(indexof, data, ProductionCostUpdater.getIntensityAftLabels(), Cell::getIntensityCosts);
 	}
 
+	static void associateStockingCostsToCells(Map<String, Integer> indexof, String data) {
+		associateCostsToCells(indexof, data, ProductionCostUpdater.getStockingAftLabels(), Cell::getStockingCosts);
+	}
+
 	static void associateSubsidiesToCells(Map<String, Integer> indexof, String data) {
 		String[] row = COMMA.split(data, -1);
 		int x = (int) Utils.sToD(row[indexof.get("X")]);

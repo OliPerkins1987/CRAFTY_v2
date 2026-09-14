@@ -94,6 +94,7 @@ class ProductionCostUpdaterTest {
 		writeCsv(tempDir.resolve("costs").resolve("global"), "global_costs.csv",
 				"Item,Cost,Notes",
 				"Nfert,1.08,USD per kg",
+				"Stocking,500,USD per stocking unit",
 				"Water,0.5,USD per unit",
 				"C3cereals,50,USD per unit",
 				"Pasture,50,USD per unit");
@@ -144,16 +145,24 @@ class ProductionCostUpdaterTest {
 		Path csvPath = writeCsv(tempDir, "global_costs.csv",
 				"Item,Cost,Notes",
 				"Nfert,1.08,USD per kg",
+				"Stocking,500,USD per stocking unit",
 				"Water,0.5,USD per unit",
 				"C3cereals,50,service cost");
 
 		GlobalCostData data = new GlobalCostData(csvPath);
 
 		assertEquals(1.08, data.getNfertUnitCost(), 0.001);
-		assertEquals(0.5, data.getIntensityCosts().get("Water"), 0.001);
+		assertEquals(500.0, data.getStockingUnitCost(), 0.001);
 		assertEquals(50.0, data.getIntensityCosts().get("C3cereals"), 0.001);
+
+		// Unit-cost rows are kept out of the per-service intensity map so they can
+		// never be looked up against a service's productivity level.
 		assertFalse(data.getIntensityCosts().containsKey("Nfert"),
 				"Nfert should be stored separately, not in intensity costs");
+		assertFalse(data.getIntensityCosts().containsKey("Stocking"),
+				"Stocking should be stored separately, not in intensity costs");
+		assertFalse(data.getIntensityCosts().containsKey("Water"),
+				"Water is an irrigation unit cost consumed upstream; core stores it nowhere");
 	}
 
 	// =========================================================
@@ -502,5 +511,204 @@ class ProductionCostUpdaterTest {
 		ProductionCostUpdater updater = new ProductionCostUpdater();
 
 		assertEquals(0.0, aft1.getIntensityCostPerHa(), 0.001);
+	}
+
+	// =========================================================
+	// 12. Stocking costs (global mode)
+	// =========================================================
+
+	/** Global-mode setup shared by the stocking tests. */
+	private void prepareGlobalMode() throws IOException {
+		createGlobalCostsFile();
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = false;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("irrigation"),
+				"irrigation_cost.csv",
+				"ID,X,Y,irrigation_cost",
+				"0,0,0,0");
+	}
+
+	@Test
+	void globalStockingCost_usesPastureProductionLevel() throws IOException {
+		prepareGlobalMode();
+
+		// The Pasture production level doubles as the stocking rate.
+		Aft aft3 = AFTsLoader.getAftHash().get("AFT3");
+		aft3.getProductivityLevel().put("Pasture", 0.2);
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		// 500 * 0.2 = 100
+		assertEquals(100.0, aft3.getStockingCostPerHa(), 0.001);
+		assertTrue(ProductionCostUpdater.getStockingAftLabels().contains("AFT3"));
+	}
+
+	@Test
+	void globalStockingCost_zeroForAftsNotProducingPasture() throws IOException {
+		prepareGlobalMode();
+
+		Aft aft1 = AFTsLoader.getAftHash().get("AFT1");
+		aft1.getProductivityLevel().put("C3cereals", 1.0);
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		assertEquals(0.0, aft1.getStockingCostPerHa(), 0.001);
+		assertFalse(ProductionCostUpdater.getStockingAftLabels().contains("AFT1"));
+	}
+
+	@Test
+	void mixedAft_receivesBothNfertAndStockingCosts() throws IOException {
+		prepareGlobalMode();
+
+		/*
+		 * The case the data-driven gating exists for: one AFT that both fertilises a
+		 * crop and grazes livestock. Under the old category gating this was impossible
+		 * - an AFT had to be either Agri_Crops or Agri_pastoral.
+		 */
+		Aft mixed = AFTsLoader.getAftHash().get("AFT3");
+		mixed.setNfertRate(25.0);
+		mixed.getProductivityLevel().put("Pasture", 0.5);
+		mixed.getProductivityLevel().put("C3cereals", 0.5);
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		assertTrue(ProductionCostUpdater.getNfertAftLabels().contains("AFT3"));
+		assertTrue(ProductionCostUpdater.getStockingAftLabels().contains("AFT3"));
+
+		// 1.08 * 25.0 = 27.0
+		assertEquals(27.0, mixed.getNfertCostPerHa(), 0.001);
+		// 500 * 0.5 = 250
+		assertEquals(250.0, mixed.getStockingCostPerHa(), 0.001);
+		// 1.0 * (0.5 * 50 Pasture + 0.5 * 50 C3cereals) = 50
+		assertEquals(50.0, mixed.getIntensityCostPerHa(), 0.001);
+	}
+
+	@Test
+	void globalStockingCost_appliedWithoutStockingRowIsZeroAndWarns() throws IOException {
+		// global_costs.csv deliberately has no Stocking row
+		writeCsv(tempDir.resolve("costs").resolve("global"), "global_costs.csv",
+				"Item,Cost,Notes",
+				"Nfert,1.08,USD per kg",
+				"Pasture,50,USD per unit");
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = false;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("irrigation"),
+				"irrigation_cost.csv",
+				"ID,X,Y,irrigation_cost",
+				"0,0,0,0");
+
+		Aft aft3 = AFTsLoader.getAftHash().get("AFT3");
+		aft3.getProductivityLevel().put("Pasture", 1.0);
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		assertEquals(0.0, aft3.getStockingCostPerHa(), 0.001);
+	}
+
+	// =========================================================
+	// 13. Spatial stocking CSV loading
+	// =========================================================
+
+	@Test
+	void spatialStocking_processesPerAftColumns() throws IOException {
+		Path csv = writeCsv(tempDir, "stocking_test.csv",
+				"X,Y,AFT3",
+				"0,0,300.0",
+				"1,0,200.0",
+				"0,1,100.0");
+
+		ProductionCostUpdater.getStockingAftLabels().clear();
+		ProductionCostUpdater.getStockingAftLabels().add("AFT3");
+
+		CsvProcessors.processCSV(csv, CsvKind.STOCKING_COST);
+
+		Cell c00 = CellsLoader.hashCell.get("0,0");
+		assertEquals(300.0, c00.getStockingCosts().get("AFT3"), 0.001);
+
+		Cell c10 = CellsLoader.hashCell.get("1,0");
+		assertEquals(200.0, c10.getStockingCosts().get("AFT3"), 0.001);
+
+		Cell c01 = CellsLoader.hashCell.get("0,1");
+		assertEquals(100.0, c01.getStockingCosts().get("AFT3"), 0.001);
+	}
+
+	@Test
+	void spatialStocking_columnMissingLeavesCellUntouched() throws IOException {
+		Path csv = writeCsv(tempDir, "stocking_missing_col.csv",
+				"X,Y,AFT3",
+				"0,0,300.0");
+
+		// AFT1 has no column in the file, so it must not pick up a stocking cost.
+		ProductionCostUpdater.getStockingAftLabels().clear();
+		ProductionCostUpdater.getStockingAftLabels().add("AFT1");
+		ProductionCostUpdater.getStockingAftLabels().add("AFT3");
+
+		CsvProcessors.processCSV(csv, CsvKind.STOCKING_COST);
+
+		Cell c00 = CellsLoader.hashCell.get("0,0");
+		assertEquals(300.0, c00.getStockingCosts().get("AFT3"), 0.001);
+		assertFalse(c00.getStockingCosts().containsKey("AFT1"));
+	}
+
+	@Test
+	void costsDisabled_stockingCellMapRemainsEmpty() {
+		ConfigLoader.config.use_production_costs = false;
+		ConfigLoader.config.spatial_production_costs = false;
+
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		Cell c00 = CellsLoader.hashCell.get("0,0");
+		assertTrue(c00.getStockingCosts().isEmpty());
+	}
+
+	// =========================================================
+	// 14. Spatial file requirements follow eligibility
+	// =========================================================
+
+	@Test
+	void spatialPaths_optionalFilesSkippedAndLaterCostTypesStillLoaded() throws IOException {
+		createGlobalCostsFile();
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = true;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+
+		// No AFT fertilises, irrigates or produces Pasture, so the Nfert, irrigation
+		// and stocking files are all optional - and none of them are supplied.
+		for (String label : List.of("AFT1", "AFT2", "AFT3")) {
+			Aft aft = AFTsLoader.getAftHash().get(label);
+			aft.setNfertRate(0.0);
+			aft.setIrrigated(false);
+			aft.getProductivityLevel().put("Pasture", 0.0);
+		}
+
+		// Only the intensity files exist, one per simulated year.
+		Path intensityDir = tempDir.resolve("costs").resolve("spatial").resolve("intensity")
+				.resolve("TestScenario");
+		for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
+			writeCsv(intensityDir, "Intensity_costs_" + year + ".csv",
+					"X,Y,AFT1,AFT2,AFT3",
+					"0,0,11.0,22.0,33.0");
+		}
+
+		// LOGGER.fatal exits the JVM, so this would abort the run if any of the
+		// missing optional files were still treated as required.
+		ProductionCostUpdater updater = new ProductionCostUpdater();
+
+		/*
+		 * Intensity paths are resolved after Nfert and irrigation. They are only there
+		 * to load if skipping those optional files did not stop path resolution early.
+		 */
+		Timestep.setCurrentYear(Timestep.getStartYear());
+		updater.step();
+
+		Cell c00 = CellsLoader.hashCell.get("0,0");
+		assertEquals(11.0, c00.getIntensityCosts().get("AFT1"), 0.001);
+		assertEquals(33.0, c00.getIntensityCosts().get("AFT3"), 0.001);
+		assertTrue(c00.getNfertCosts().isEmpty());
+		assertTrue(c00.getIrrigationCosts().isEmpty());
+		assertTrue(c00.getStockingCosts().isEmpty());
 	}
 }

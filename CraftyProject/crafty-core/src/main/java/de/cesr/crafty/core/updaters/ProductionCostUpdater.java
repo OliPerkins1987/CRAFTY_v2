@@ -21,14 +21,22 @@ import de.cesr.crafty.core.utils.file.PathTools;
 public class ProductionCostUpdater extends AbstractUpdater {
 	private static final CustomLogger LOGGER = new CustomLogger(ProductionCostUpdater.class);
 
+	/**
+	 * The service whose production level doubles as the livestock stocking rate. An
+	 * AFT that produces it is stocked, whatever category it belongs to.
+	 */
+	private static final String PASTURE_SERVICE = "Pasture";
+
 	private static GlobalCostData globalCostData;
 	private static List<String> nfertAftLabels = Collections.synchronizedList(new ArrayList<>());
 	private static List<String> irrigatedAftLabels = Collections.synchronizedList(new ArrayList<>());
 	private static List<String> intensityAftLabels = Collections.synchronizedList(new ArrayList<>());
+	private static List<String> stockingAftLabels = Collections.synchronizedList(new ArrayList<>());
 
 	private Map<Integer, Path> nfertCostPaths = new TreeMap<>();
 	private Map<Integer, Path> irrigationCostPaths = new TreeMap<>();
 	private Map<Integer, Path> intensityCostPaths = new TreeMap<>();
+	private Map<Integer, Path> stockingCostPaths = new TreeMap<>();
 
 	public ProductionCostUpdater() {
 		if (!ConfigLoader.isUseProductionCosts()) {
@@ -41,6 +49,7 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 		if (!ConfigLoader.isSpatialProductionCosts()) {
 			cacheGlobalNfertCosts();
+			cacheGlobalStockingCosts();
 			cacheGlobalIntensityCosts();
 			loadStaticIrrigationCost();
 		} else {
@@ -60,11 +69,15 @@ public class ProductionCostUpdater extends AbstractUpdater {
 		nfertAftLabels.clear();
 		irrigatedAftLabels.clear();
 		intensityAftLabels.clear();
+		stockingAftLabels.clear();
 
 		AFTsLoader.getAftHash().forEach((label, aft) -> {
 			if (!aft.isInteract()) return;
 			if (aft.getNfertRate() > 0) {
 				nfertAftLabels.add(label);
+			}
+			if (aft.getProductivityLevel().getOrDefault(PASTURE_SERVICE, 0.0) > 0) {
+				stockingAftLabels.add(label);
 			}
 			if (aft.isIrrigated()) {
 				irrigatedAftLabels.add(label);
@@ -79,6 +92,7 @@ public class ProductionCostUpdater extends AbstractUpdater {
 			intensityAftLabels.add(label);
 		});
 		LOGGER.info("Nfert AFTs: " + nfertAftLabels);
+		LOGGER.info("Stocking AFTs: " + stockingAftLabels);
 		LOGGER.info("Irrigated AFTs: " + irrigatedAftLabels);
 		LOGGER.info("Intensity AFTs: " + intensityAftLabels);
 	}
@@ -113,6 +127,29 @@ public class ProductionCostUpdater extends AbstractUpdater {
 				aft.setNfertCostPerHa(unitCost * aft.getNfertRate());
 				LOGGER.info("Global Nfert cost for " + label + ": " + aft.getNfertCostPerHa() + " $/ha");
 			}
+		}
+	}
+
+	private void cacheGlobalStockingCosts() {
+		if (globalCostData == null) return;
+		if (stockingAftLabels.isEmpty()) {
+			LOGGER.info("No AFT produces " + PASTURE_SERVICE + "; no stocking costs applied");
+			return;
+		}
+
+		double unitCost = globalCostData.getStockingUnitCost();
+		if (unitCost <= 0.0) {
+			LOGGER.warn("Stocking row missing or zero in global_costs.csv but " + stockingAftLabels.size()
+					+ " AFT(s) produce " + PASTURE_SERVICE);
+		}
+
+		for (String label : stockingAftLabels) {
+			Aft aft = AFTsLoader.getAftHash().get(label);
+			if (aft == null) continue;
+			// In global mode the production level IS the stocking rate.
+			double stockingRate = aft.getProductivityLevel().getOrDefault(PASTURE_SERVICE, 0.0);
+			aft.setStockingCostPerHa(unitCost * stockingRate);
+			LOGGER.info("Global stocking cost for " + label + ": " + aft.getStockingCostPerHa() + " $/ha");
 		}
 	}
 
@@ -153,30 +190,55 @@ public class ProductionCostUpdater extends AbstractUpdater {
 		CsvProcessors.processCSV(irrigationCsv, CsvKind.IRRIGATION_COST);
 	}
 
+	/*
+	 * CLEANUP: this method used to be three near-identical blocks inside one year
+	 * loop, each resolving a per-year CSV and fatally erroring when it was missing.
+	 * They differed only in the directory to look in, the filename prefix and the map
+	 * to fill, which are the three parameters of resolveYearlyCostPaths() below.
+	 *
+	 * Each cost type's files are required only when at least one AFT is eligible for
+	 * that cost. With eligibility gated on data rather than category, a project can
+	 * legitimately have no fertilised, irrigated or pasture-producing AFTs, and must
+	 * not be forced to supply files that no AFT would ever read.
+	 */
 	private void buildSpatialPathMaps() {
 		String scenario = ProjectLoader.getScenario();
+		if (!resolveYearlyCostPaths(scenario, "Nfert", "Nfert_costs", nfertCostPaths,
+				!nfertAftLabels.isEmpty())) return;
+		if (!resolveYearlyCostPaths(scenario, "irrigation", "Irrigation_costs", irrigationCostPaths,
+				!irrigatedAftLabels.isEmpty())) return;
+		if (!resolveYearlyCostPaths(scenario, "intensity", "Intensity_costs", intensityCostPaths,
+				!intensityAftLabels.isEmpty())) return;
+		resolveYearlyCostPaths(scenario, "stocking", "stocking_costs", stockingCostPaths,
+				!stockingAftLabels.isEmpty());
+	}
+
+	/**
+	 * Resolves one per-year cost CSV for every simulated year.
+	 *
+	 * @param required when true, a missing file for any year is fatal; when false the
+	 *                 cost type is simply left unloaded, because no AFT would read it.
+	 * @return false only when a <em>required</em> file is missing. A missing optional
+	 *         file returns true, so that the caller carries on resolving the remaining
+	 *         cost types rather than stopping at the first one it can skip.
+	 */
+	private boolean resolveYearlyCostPaths(String scenario, String dirName, String filePrefix,
+			Map<Integer, Path> target, boolean required) {
 		for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
-			Path nfert = findCostFile("spatial", "Nfert", scenario, "Nfert_costs_" + year, ".csv");
-			if (nfert == null) {
-				LOGGER.fatal("Spatial Nfert_costs CSV not found for year " + year);
-				return;
+			Path path = findCostFile("spatial", dirName, scenario, filePrefix + "_" + year, ".csv");
+			if (path == null) {
+				if (required) {
+					LOGGER.fatal("Spatial " + filePrefix + " CSV not found for year " + year);
+					return false;
+				}
+				LOGGER.info("No spatial " + filePrefix + " CSV for year " + year
+						+ "; no AFT is eligible for this cost, so it will not be applied");
+				target.clear();
+				return true;
 			}
-			nfertCostPaths.put(year, nfert);
-
-			Path irrigation = findCostFile("spatial", "irrigation", scenario, "Irrigation_costs_" + year, ".csv");
-			if (irrigation == null) {
-				LOGGER.fatal("Spatial Irrigation_costs CSV not found for year " + year);
-				return;
-			}
-			irrigationCostPaths.put(year, irrigation);
-
-			Path intensity = findCostFile("spatial", "intensity", scenario, "Intensity_costs_" + year, ".csv");
-			if (intensity == null) {
-				LOGGER.fatal("Spatial Intensity_costs CSV not found for year " + year);
-				return;
-			}
-			intensityCostPaths.put(year, intensity);
+			target.put(year, path);
 		}
+		return true;
 	}
 
 	@Override
@@ -202,6 +264,12 @@ public class ProductionCostUpdater extends AbstractUpdater {
 		if (intensityPath != null) {
 			LOGGER.info("Loading spatial intensity costs for year " + year);
 			CsvProcessors.processCSV(intensityPath, CsvKind.INTENSITY_COST);
+		}
+
+		Path stockingPath = stockingCostPaths.get(year);
+		if (stockingPath != null) {
+			LOGGER.info("Loading spatial stocking costs for year " + year);
+			CsvProcessors.processCSV(stockingPath, CsvKind.STOCKING_COST);
 		}
 	}
 
@@ -239,5 +307,9 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 	public static List<String> getIntensityAftLabels() {
 		return intensityAftLabels;
+	}
+
+	public static List<String> getStockingAftLabels() {
+		return stockingAftLabels;
 	}
 }
