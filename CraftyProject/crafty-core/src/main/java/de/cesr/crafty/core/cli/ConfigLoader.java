@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -111,6 +112,15 @@ public class ConfigLoader {
 			Map.entry("use_price_explicit_givingUp", "use_price_explicit_giving_up"),
 			Map.entry("use_twinned_AFTs", "use_twinned_afts"));
 
+	/**
+	 * Other accepted spellings of current keys, mapped to the name used in
+	 * Config.java. Unlike LEGACY_KEYS these are not deprecated, so they are
+	 * accepted without a warning. Setting both spellings of one key stops the run,
+	 * because one of the two values would otherwise be silently ignored.
+	 */
+	private static final Map<String, String> ALTERNATIVE_SPELLINGS = Map.ofEntries(
+			Map.entry("reactive_fertiliser", "reactive_fertilizer"));
+
 	private static final Set<String> REMOVED_KEYS = Set.of(
 			"service_taxes_and_subsidies_path",
 			"services_taxes_subsidies_path",
@@ -134,6 +144,7 @@ public class ConfigLoader {
 		validateGiveUpConfig();
 		validateTwinnedAftConfig();
 		validatePriceUtilityConfig();
+		validateReactiveConfig();
 		try {
 			loadExternalRScriptRunnerConfig();
 		} catch (IOException e) {
@@ -163,6 +174,79 @@ public class ConfigLoader {
 		if (config.use_explicit_price_utility && config.use_price_only_utility) {
 			LOGGER.fatal("use_explicit_price_utility and use_price_only_utility are mutually exclusive");
 		}
+	}
+
+	/**
+	 * CRAFTY-react has a master switch (reactive_afts) and one switch per reactive
+	 * element. The run stops if an element is switched on without the master switch,
+	 * or if react is on without spatial production costs, which it writes. When the
+	 * master switch is on, the elements in use and how react's files are handed to
+	 * the model are logged. reactive_overwrite_inputs on its own only warns.
+	 */
+	static void validateReactiveConfig() {
+		if (config == null) return;
+		String error = reactiveConfigError(config);
+		if (error != null) {
+			LOGGER.fatal(error);
+			return;
+		}
+		String warning = reactiveOverwriteWarning(config);
+		if (warning != null) {
+			LOGGER.warn(warning);
+		}
+		if (config.reactive_afts) {
+			List<String> elements = enabledReactiveElements(config);
+			LOGGER.warn(elements.isEmpty()
+					? "CRAFTY-react is on (reactive_afts: true) but no reactive elements are switched on"
+					: "CRAFTY-react is on; reactive elements in use: " + elements);
+			LOGGER.warn(config.reactive_overwrite_inputs
+					? "CRAFTY-react will rewrite the reactive columns of the original capitals and cost files in place"
+					: "CRAFTY-react will write complete copies of each year's capitals and cost files to the run's "
+							+ "output folder; the original files are not modified");
+		}
+	}
+
+	/**
+	 * The rules behind {@link #validateReactiveConfig()}, kept separate because
+	 * LOGGER.fatal exits the JVM and so cannot be exercised from a test.
+	 *
+	 * @return the message to stop the run with, or null if the settings are valid
+	 */
+	static String reactiveConfigError(Config c) {
+		List<String> elements = enabledReactiveElements(c);
+		if (!c.reactive_afts && !elements.isEmpty()) {
+			return "Reactive elements " + elements + " are switched on but reactive_afts is false. "
+					+ "Set reactive_afts: true, or switch these elements off.";
+		}
+		if (c.reactive_afts && !(c.use_production_costs && c.spatial_production_costs)) {
+			return "reactive_afts is true, but CRAFTY-react writes spatial cost files, which the model only reads "
+					+ "when use_production_costs and spatial_production_costs are both true. Switch both on.";
+		}
+		return null;
+	}
+
+	/**
+	 * reactive_overwrite_inputs does nothing while CRAFTY-react is off. That is
+	 * allowed, but worth saying.
+	 *
+	 * @return the warning to log, or null if there is nothing to warn about
+	 */
+	static String reactiveOverwriteWarning(Config c) {
+		if (!c.reactive_afts && c.reactive_overwrite_inputs) {
+			return "reactive_overwrite_inputs is true but has no effect while reactive_afts is false";
+		}
+		return null;
+	}
+
+	/** The names of the reactive element switches that are on, in a fixed order. */
+	static List<String> enabledReactiveElements(Config c) {
+		List<String> elements = new ArrayList<>();
+		if (c.reactive_fertilizer) elements.add("reactive_fertilizer");
+		if (c.reactive_irrigation) elements.add("reactive_irrigation");
+		if (c.reactive_other_intensity) elements.add("reactive_other_intensity");
+		if (c.reactive_stocking) elements.add("reactive_stocking");
+		if (c.reactive_forestry) elements.add("reactive_forestry");
+		return elements;
 	}
 
 	static void validateGiveUpConfig() {
@@ -197,6 +281,42 @@ public class ConfigLoader {
 
 	public static boolean isUsePriceExplicitGivingUp() {
 		return config != null && config.use_price_explicit_giving_up;
+	}
+
+	public static boolean isReactiveAfts() {
+		return config != null && config.reactive_afts;
+	}
+
+	// Each element accessor also checks the master switch, so an element can never
+	// read as on while CRAFTY-react as a whole is off, even if validation was skipped.
+	public static boolean isReactiveFertilizer() {
+		return isReactiveAfts() && config.reactive_fertilizer;
+	}
+
+	public static boolean isReactiveIrrigation() {
+		return isReactiveAfts() && config.reactive_irrigation;
+	}
+
+	public static boolean isReactiveOtherIntensity() {
+		return isReactiveAfts() && config.reactive_other_intensity;
+	}
+
+	public static boolean isReactiveStocking() {
+		return isReactiveAfts() && config.reactive_stocking;
+	}
+
+	public static boolean isReactiveForestry() {
+		return isReactiveAfts() && config.reactive_forestry;
+	}
+
+	/** CRAFTY-react is on and rewrites the original capitals and cost files in place. */
+	public static boolean isReactiveOverwriteInputs() {
+		return isReactiveAfts() && config.reactive_overwrite_inputs;
+	}
+
+	/** CRAFTY-react is on and writes its copies of the capitals and cost files to the run's output folder. */
+	public static boolean isReactiveRunFolderMode() {
+		return isReactiveAfts() && !config.reactive_overwrite_inputs;
 	}
 
 	private static Config loadConfig() {
@@ -284,6 +404,19 @@ public class ConfigLoader {
 				System.out.println("[Config] Deprecated key '" + legacyKey + "'; use '" + canonicalKey + "'.");
 			}
 			normalised.remove(legacyKey);
+		}
+
+		for (Map.Entry<String, String> spelling : ALTERNATIVE_SPELLINGS.entrySet()) {
+			String alternativeKey = spelling.getKey();
+			String canonicalKey = spelling.getValue();
+			if (!normalised.containsKey(alternativeKey)) {
+				continue;
+			}
+			if (normalised.containsKey(canonicalKey)) {
+				throw new IllegalArgumentException("Configuration file " + configPath + " sets both '" + canonicalKey
+						+ "' and '" + alternativeKey + "', which are two spellings of the same key. Keep one.");
+			}
+			normalised.put(canonicalKey, normalised.remove(alternativeKey));
 		}
 		return normalised;
 	}

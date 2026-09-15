@@ -7,6 +7,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
@@ -502,5 +503,226 @@ class ConfigLoaderTest {
         assertEquals(0.05, cfg.land_abandonment_fraction);
         assertTrue(cfg.use_twinned_afts);
         assertEquals("goldenrun", cfg.output_folder_name);
+    }
+
+    // =========================================================
+    // CRAFTY-react switches
+    // =========================================================
+
+    private static final List<String> REACTIVE_ELEMENTS = List.of("reactive_fertilizer", "reactive_irrigation",
+            "reactive_other_intensity", "reactive_stocking", "reactive_forestry");
+
+    /** A default Config with the named boolean switches turned on. */
+    private static Config configWithSwitchesOn(String... fieldNames) throws Exception {
+        Config c = new Config();
+        for (String name : fieldNames) {
+            Config.class.getField(name).setBoolean(c, true);
+        }
+        return c;
+    }
+
+    @Test
+    void reactiveSwitchesShouldAllDefaultToFalse() {
+        Config c = new Config();
+
+        assertFalse(c.reactive_afts);
+        assertFalse(c.reactive_fertilizer);
+        assertFalse(c.reactive_irrigation);
+        assertFalse(c.reactive_other_intensity);
+        assertFalse(c.reactive_stocking);
+        assertFalse(c.reactive_forestry);
+        assertFalse(c.reactive_overwrite_inputs);
+        assertTrue(ConfigLoader.enabledReactiveElements(c).isEmpty());
+        assertNull(ConfigLoader.reactiveConfigError(c), "The default configuration must be valid");
+        assertNull(ConfigLoader.reactiveOverwriteWarning(c), "The default configuration must not warn");
+    }
+
+    @Test
+    void reactiveSwitchesShouldLoadFromYaml() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("reactive-config.yaml");
+        Files.writeString(configFile, """
+                reactive_afts: true
+                reactive_fertilizer: true
+                reactive_irrigation: true
+                reactive_other_intensity: true
+                reactive_stocking: true
+                reactive_forestry: true
+                reactive_overwrite_inputs: true
+                """);
+        ConfigLoader.configPath = configFile.toString();
+
+        Config cfg = invokeLoadConfig();
+
+        assertTrue(cfg.reactive_afts);
+        assertTrue(cfg.reactive_fertilizer);
+        assertTrue(cfg.reactive_irrigation);
+        assertTrue(cfg.reactive_other_intensity);
+        assertTrue(cfg.reactive_stocking);
+        assertTrue(cfg.reactive_forestry);
+        assertTrue(cfg.reactive_overwrite_inputs);
+    }
+
+    @Test
+    void aReactiveElementWithoutTheMasterSwitchShouldStopTheRun() throws Exception {
+        for (String element : REACTIVE_ELEMENTS) {
+            String error = ConfigLoader.reactiveConfigError(configWithSwitchesOn(element));
+
+            assertNotNull(error, element + " on with reactive_afts off must be rejected");
+            assertTrue(error.contains(element), "The message must name the offending switch. Got: " + error);
+            assertTrue(error.contains("reactive_afts"), "The message must say how to fix it. Got: " + error);
+        }
+    }
+
+    @Test
+    void theMasterSwitchWithSpatialCostsShouldBeValid() throws Exception {
+        Config c = configWithSwitchesOn("reactive_afts", "use_production_costs", "spatial_production_costs");
+
+        assertNull(ConfigLoader.reactiveConfigError(c));
+        assertTrue(ConfigLoader.enabledReactiveElements(c).isEmpty());
+    }
+
+    @Test
+    void elementsWithTheMasterSwitchShouldBeValidAndReportedInAFixedOrder() throws Exception {
+        // Switched on in reverse, to show the reported order does not depend on it.
+        Config c = configWithSwitchesOn("reactive_afts", "use_production_costs", "spatial_production_costs",
+                "reactive_forestry", "reactive_stocking", "reactive_other_intensity", "reactive_irrigation",
+                "reactive_fertilizer");
+
+        assertNull(ConfigLoader.reactiveConfigError(c));
+        assertEquals(REACTIVE_ELEMENTS, ConfigLoader.enabledReactiveElements(c));
+    }
+
+    @Test
+    void reactWithoutSpatialProductionCostsShouldStopTheRun() throws Exception {
+        // React writes spatial cost files; without both switches the model would never read them.
+        for (Config c : List.of(configWithSwitchesOn("reactive_afts"),
+                configWithSwitchesOn("reactive_afts", "use_production_costs"))) {
+            String error = ConfigLoader.reactiveConfigError(c);
+
+            assertNotNull(error, "React without spatial production costs must be rejected");
+            assertTrue(error.contains("use_production_costs") && error.contains("spatial_production_costs"),
+                    "The message must name both switches. Got: " + error);
+        }
+    }
+
+    @Test
+    void overwriteWithoutReactShouldWarnButNotStopTheRun() throws Exception {
+        Config strayOverwrite = configWithSwitchesOn("reactive_overwrite_inputs");
+
+        assertNull(ConfigLoader.reactiveConfigError(strayOverwrite), "Overwrite without react must not stop the run");
+        String warning = ConfigLoader.reactiveOverwriteWarning(strayOverwrite);
+        assertNotNull(warning);
+        assertTrue(warning.contains("reactive_overwrite_inputs") && warning.contains("reactive_afts"),
+                "The warning must name both switches. Got: " + warning);
+
+        Config inUse = configWithSwitchesOn("reactive_afts", "use_production_costs", "spatial_production_costs",
+                "reactive_overwrite_inputs");
+        assertNull(ConfigLoader.reactiveConfigError(inUse));
+        assertNull(ConfigLoader.reactiveOverwriteWarning(inUse), "Overwrite with react on is not a stray switch");
+    }
+
+    @Test
+    void fileModeAccessorsShouldFollowBothSwitches() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+
+        ConfigLoader.config = null;
+        assertFalse(ConfigLoader.isReactiveOverwriteInputs());
+        assertFalse(ConfigLoader.isReactiveRunFolderMode());
+
+        // React off: neither mode applies, whatever the overwrite switch says.
+        ConfigLoader.config = configWithSwitchesOn("reactive_overwrite_inputs");
+        assertFalse(ConfigLoader.isReactiveOverwriteInputs());
+        assertFalse(ConfigLoader.isReactiveRunFolderMode());
+
+        ConfigLoader.config = configWithSwitchesOn("reactive_afts");
+        assertFalse(ConfigLoader.isReactiveOverwriteInputs());
+        assertTrue(ConfigLoader.isReactiveRunFolderMode(), "Run-folder mode is the default when react is on");
+
+        ConfigLoader.config = configWithSwitchesOn("reactive_afts", "reactive_overwrite_inputs");
+        assertTrue(ConfigLoader.isReactiveOverwriteInputs());
+        assertFalse(ConfigLoader.isReactiveRunFolderMode());
+    }
+
+    @Test
+    void elementAccessorsShouldRequireTheMasterSwitch() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+
+        ConfigLoader.config = null;
+        assertFalse(ConfigLoader.isReactiveAfts(), "No config loaded means CRAFTY-react is off");
+        assertFalse(ConfigLoader.isReactiveFertilizer());
+
+        // Every element on, master off: an invalid state that validation would stop,
+        // but the accessors must still not report the elements as on.
+        ConfigLoader.config = configWithSwitchesOn(REACTIVE_ELEMENTS.toArray(new String[0]));
+        assertFalse(ConfigLoader.isReactiveAfts());
+        assertFalse(ConfigLoader.isReactiveFertilizer());
+        assertFalse(ConfigLoader.isReactiveIrrigation());
+        assertFalse(ConfigLoader.isReactiveOtherIntensity());
+        assertFalse(ConfigLoader.isReactiveStocking());
+        assertFalse(ConfigLoader.isReactiveForestry());
+
+        ConfigLoader.config.reactive_afts = true;
+        assertTrue(ConfigLoader.isReactiveAfts());
+        assertTrue(ConfigLoader.isReactiveFertilizer());
+        assertTrue(ConfigLoader.isReactiveIrrigation());
+        assertTrue(ConfigLoader.isReactiveOtherIntensity());
+        assertTrue(ConfigLoader.isReactiveStocking());
+        assertTrue(ConfigLoader.isReactiveForestry());
+    }
+
+    @Test
+    void theBritishSpellingOfFertiliserShouldBeAccepted() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("british-reactive.yaml");
+        Files.writeString(configFile, "reactive_afts: true\nreactive_fertiliser: true\n");
+        ConfigLoader.configPath = configFile.toString();
+
+        Config cfg = invokeLoadConfig();
+
+        assertTrue(cfg.reactive_fertilizer, "reactive_fertiliser must switch on the same setting as reactive_fertilizer");
+    }
+
+    @Test
+    void settingBothSpellingsOfFertiliserShouldStopTheRun() throws Exception {
+        // Otherwise one of the two values would be silently ignored.
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("both-spellings.yaml");
+        Files.writeString(configFile, "reactive_afts: true\nreactive_fertilizer: false\nreactive_fertiliser: true\n");
+
+        Throwable failure = loadConfigExpectingFailure(configFile);
+
+        assertInstanceOf(IllegalArgumentException.class, failure);
+        assertTrue(failure.getMessage().contains("reactive_fertilizer")
+                && failure.getMessage().contains("reactive_fertiliser"),
+                "Both spellings must be named. Got: " + failure.getMessage());
+    }
+
+    @Test
+    void aMisspeltReactiveSwitchShouldStillStopTheRun() throws Exception {
+        // Accepting two spellings must not open the door to any spelling.
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("misspelt-reactive.yaml");
+        Files.writeString(configFile, "reactive_afts: true\nreactive_fertlizer: true\n");
+
+        Throwable failure = loadConfigExpectingFailure(configFile);
+
+        assertInstanceOf(IllegalArgumentException.class, failure);
+        assertTrue(failure.getMessage().contains("reactive_fertlizer"),
+                "The unknown key must be named. Got: " + failure.getMessage());
     }
 }

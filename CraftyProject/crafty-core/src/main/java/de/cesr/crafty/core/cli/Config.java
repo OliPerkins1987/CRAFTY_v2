@@ -67,6 +67,20 @@ public class Config {
     public boolean use_twinned_cost = false;
     public double twinned_competition_rate = 1.0;
 
+    // CRAFTY-react: AFTs adjust their management endogenously (needs the crafty-react module).
+    // reactive_afts is the master switch; each element below can only be on when it is.
+    public boolean reactive_afts = false;
+    public boolean reactive_fertilizer = false;
+    public boolean reactive_irrigation = false;
+    public boolean reactive_other_intensity = false;
+    public boolean reactive_stocking = false;
+    public boolean reactive_forestry = false;
+    // How CRAFTY-react hands each year's capitals and cost files to the model:
+    // false - react writes complete copies into reactive_inputs/ in the run's output folder and the
+    //         model reads those; the original input files are never modified.
+    // true  - react rewrites only the reactive columns of the original input files, in place.
+    public boolean reactive_overwrite_inputs = false;
+
     // Regionalisation
     public boolean regionalisation = false;
     // CRAFTY Mechanisms
@@ -194,6 +208,13 @@ public class Config {
                 + "|-> use_twinned_afts=" + use_twinned_afts + "\n"
                 + "|-> use_twinned_cost=" + use_twinned_cost + "\n"
                 + "|-> twinned_competition_rate=" + twinned_competition_rate + "\n"
+                + "|-> reactive_afts=" + reactive_afts + "\n"
+                + "|-> reactive_fertilizer=" + reactive_fertilizer + "\n"
+                + "|-> reactive_irrigation=" + reactive_irrigation + "\n"
+                + "|-> reactive_other_intensity=" + reactive_other_intensity + "\n"
+                + "|-> reactive_stocking=" + reactive_stocking + "\n"
+                + "|-> reactive_forestry=" + reactive_forestry + "\n"
+                + "|-> reactive_overwrite_inputs=" + reactive_overwrite_inputs + "\n"
                 + "] \n\n";
     }
 
