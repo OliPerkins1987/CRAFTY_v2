@@ -649,6 +649,30 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void reactWritesCapitalsOnlyWhenAnIntensityInputIsReactive() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+
+        ConfigLoader.config = null;
+        assertFalse(ConfigLoader.isReactiveCapitals());
+
+        ConfigLoader.config = configWithSwitchesOn("reactive_afts");
+        assertFalse(ConfigLoader.isReactiveCapitals(), "No reactive input: suitabilities stay at their defaults");
+
+        ConfigLoader.config = configWithSwitchesOn("reactive_afts", "reactive_overwrite_inputs");
+        assertFalse(ConfigLoader.isReactiveCapitals(), "A react setting that is not an intensity input");
+
+        for (String element : List.of("reactive_fertilizer", "reactive_irrigation", "reactive_other_intensity",
+                "reactive_stocking")) {
+            ConfigLoader.config = configWithSwitchesOn("reactive_afts", element);
+            assertTrue(ConfigLoader.isReactiveCapitals(), element + " changes yields, so react writes capitals");
+
+            ConfigLoader.config = configWithSwitchesOn(element);
+            assertFalse(ConfigLoader.isReactiveCapitals(), element + " without reactive_afts does nothing");
+        }
+    }
+
+    @Test
     void elementAccessorsShouldRequireTheMasterSwitch() throws Exception {
         originalConfigPath = ConfigLoader.configPath;
         originalConfig = ConfigLoader.config;

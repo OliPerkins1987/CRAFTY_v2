@@ -12,5 +12,6 @@
 		<module>crafty-gui</module>
 		<module>crafty-institution</module>
 		<module>crafty-plum</module>
+		<module>crafty-react</module>
 	</modules>
 </project>

@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -14,6 +15,7 @@ import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.dataLoader.CsvKind;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
+import de.cesr.crafty.core.dataLoader.RunInputFiles;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.costs.GlobalCostData;
 import de.cesr.crafty.core.utils.file.PathTools;
@@ -26,6 +28,12 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	 * AFT that produces it is stocked, whatever category it belongs to.
 	 */
 	private static final String PASTURE_SERVICE = "Pasture";
+
+	/** The spatial cost types, as used by {@link #getSpatialCostPaths} and {@link #isReactiveCostType}. */
+	public static final String NFERT_COSTS = "Nfert";
+	public static final String IRRIGATION_COSTS = "irrigation";
+	public static final String INTENSITY_COSTS = "intensity";
+	public static final String STOCKING_COSTS = "stocking";
 
 	private static GlobalCostData globalCostData;
 	private static List<String> nfertAftLabels = Collections.synchronizedList(new ArrayList<>());
@@ -248,28 +256,79 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 		int year = Timestep.getCurrentYear();
 
+		// Each path is the file found at startup. In run-folder mode, RunInputFiles swaps
+		// in CRAFTY-react's version for the cost types react writes.
 		Path nfertPath = nfertCostPaths.get(year);
 		if (nfertPath != null) {
 			LOGGER.info("Loading spatial Nfert costs for year " + year);
-			CsvProcessors.processCSV(nfertPath, CsvKind.NFERT_COST);
+			CsvProcessors.processCSV(RunInputFiles.resolveForReading(nfertPath, isReactiveCostType(NFERT_COSTS)),
+					CsvKind.NFERT_COST);
 		}
 
 		Path irrigationPath = irrigationCostPaths.get(year);
 		if (irrigationPath != null) {
 			LOGGER.info("Loading spatial irrigation costs for year " + year);
-			CsvProcessors.processCSV(irrigationPath, CsvKind.IRRIGATION_COST);
+			CsvProcessors.processCSV(
+					RunInputFiles.resolveForReading(irrigationPath, isReactiveCostType(IRRIGATION_COSTS)),
+					CsvKind.IRRIGATION_COST);
 		}
 
 		Path intensityPath = intensityCostPaths.get(year);
 		if (intensityPath != null) {
 			LOGGER.info("Loading spatial intensity costs for year " + year);
-			CsvProcessors.processCSV(intensityPath, CsvKind.INTENSITY_COST);
+			CsvProcessors.processCSV(
+					RunInputFiles.resolveForReading(intensityPath, isReactiveCostType(INTENSITY_COSTS)),
+					CsvKind.INTENSITY_COST);
 		}
 
 		Path stockingPath = stockingCostPaths.get(year);
 		if (stockingPath != null) {
 			LOGGER.info("Loading spatial stocking costs for year " + year);
-			CsvProcessors.processCSV(stockingPath, CsvKind.STOCKING_COST);
+			CsvProcessors.processCSV(
+					RunInputFiles.resolveForReading(stockingPath, isReactiveCostType(STOCKING_COSTS)),
+					CsvKind.STOCKING_COST);
+		}
+	}
+
+	/**
+	 * Whether CRAFTY-react writes this cost type, which follows the matching element
+	 * switch. Intensity covers both cropland other intensity and pasture husbandry.
+	 */
+	public static boolean isReactiveCostType(String costType) {
+		switch (costType) {
+		case NFERT_COSTS:
+			return ConfigLoader.isReactiveFertilizer();
+		case IRRIGATION_COSTS:
+			return ConfigLoader.isReactiveIrrigation();
+		case INTENSITY_COSTS:
+			return ConfigLoader.isReactiveOtherIntensity();
+		case STOCKING_COSTS:
+			return ConfigLoader.isReactiveStocking();
+		default:
+			return false;
+		}
+	}
+
+	/**
+	 * Where the model finds each year's spatial cost files, keyed by cost type
+	 * ({@link #NFERT_COSTS}, {@link #IRRIGATION_COSTS}, {@link #INTENSITY_COSTS},
+	 * {@link #STOCKING_COSTS}), in that order. A type with no file for that year is
+	 * left out. These are the input files found at startup. CRAFTY-react overwrites
+	 * the reactive types' files in place in overwrite mode, and writes its versions
+	 * to {@link RunInputFiles#resolve} of them in run-folder mode.
+	 */
+	public Map<String, Path> getSpatialCostPaths(int year) {
+		Map<String, Path> paths = new LinkedHashMap<>();
+		putIfPresent(paths, NFERT_COSTS, nfertCostPaths.get(year));
+		putIfPresent(paths, IRRIGATION_COSTS, irrigationCostPaths.get(year));
+		putIfPresent(paths, INTENSITY_COSTS, intensityCostPaths.get(year));
+		putIfPresent(paths, STOCKING_COSTS, stockingCostPaths.get(year));
+		return paths;
+	}
+
+	private static void putIfPresent(Map<String, Path> paths, String costType, Path path) {
+		if (path != null) {
+			paths.put(costType, path);
 		}
 	}
 

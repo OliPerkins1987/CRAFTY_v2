@@ -1,13 +1,17 @@
 package de.cesr.crafty.core.updaters;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mock;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +22,10 @@ import de.cesr.crafty.core.ToyData;
 import de.cesr.crafty.core.cli.Config;
 import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
+import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.core.dataLoader.ProjectLoader;
+import de.cesr.crafty.core.dataLoader.RunInputFiles;
+import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.utils.file.CsvTools;
 
 /**
@@ -104,5 +112,67 @@ class CapitalUpdaterTest {
 		assertFalse(CapitalUpdater.isSuitability("capi1"));
 		assertTrue(CapitalUpdater.isSuitability("capi2"));
 		assertTrue(CapitalUpdater.isSuitability("capi3"));
+	}
+
+	@SuppressWarnings("unchecked")
+	private static Map<Integer, Path> capitalsFilesByYear() throws Exception {
+		Field field = CapitalUpdater.class.getDeclaredField("capitals_directory");
+		field.setAccessible(true);
+		return (Map<Integer, Path>) field.get(null);
+	}
+
+	@Test
+	void step_inRunFolderMode_readsReactsVersionOnlyWhenAnIntensityInputIsReactive() throws Exception {
+		int year = 2003;
+		CellsLoader.hashCell.clear();
+		Cell cell = new Cell(0, 0);
+		CellsLoader.hashCell.put("0,0", cell);
+
+		// An original capitals file inside the project folder, as if found at startup.
+		Path original = ProjectLoader.getProjectPath().resolve("worlds").resolve("capitals")
+				.resolve("TestScenario_" + year + ".csv");
+		Files.createDirectories(original.getParent());
+		Files.writeString(original, "X,Y,capi1,capi2,capi3\n0,0,1.0,1.0,1.0\n");
+		Map<Integer, Path> filesByYear = capitalsFilesByYear();
+		Path previous = filesByYear.put(year, original);
+
+		// The config object is shared by every test in this JVM, so the switches are restored.
+		boolean reactiveAfts = ConfigLoader.config.reactive_afts;
+		boolean reactiveFertilizer = ConfigLoader.config.reactive_fertilizer;
+
+		// The constructor needs full project metadata, so step() is run on an instance built without it.
+		CapitalUpdater updater = mock(CapitalUpdater.class, CALLS_REAL_METHODS);
+		Timestep.setCurrentYear(year);
+		try {
+			updater.step();
+			assertEquals(1.0, cell.getCapitals().get("capi1"), "Without a run folder the original is read");
+
+			RunInputFiles.useRunFolder(tempDir.resolve("run"));
+			Path runVersion = RunInputFiles.resolve(original);
+			Files.createDirectories(runVersion.getParent());
+			Files.writeString(runVersion, "X,Y,capi1,capi2,capi3\n0,0,2.0,2.0,2.0\n");
+
+			// React on, but no input that changes yields: react does not write the capitals file.
+			ConfigLoader.config.reactive_afts = true;
+			ConfigLoader.config.reactive_fertilizer = false;
+			updater.step();
+			assertEquals(1.0, cell.getCapitals().get("capi1"),
+					"With no reactive intensity input the original capitals file is read");
+
+			ConfigLoader.config.reactive_fertilizer = true;
+			updater.step();
+			assertEquals(2.0, cell.getCapitals().get("capi1"),
+					"With a reactive intensity input react's version is read");
+		} finally {
+			ConfigLoader.config.reactive_afts = reactiveAfts;
+			ConfigLoader.config.reactive_fertilizer = reactiveFertilizer;
+			RunInputFiles.clearRunFolder();
+			if (previous == null) {
+				filesByYear.remove(year);
+			} else {
+				filesByYear.put(year, previous);
+			}
+			CellsLoader.hashCell.clear();
+		}
 	}
 }

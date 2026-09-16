@@ -3,11 +3,14 @@ package de.cesr.crafty.core.modelRunner;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Arrays;
@@ -28,6 +31,7 @@ import de.cesr.crafty.core.crafty.Service;
 import de.cesr.crafty.core.crafty.RegionalModelRunner;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
+import de.cesr.crafty.core.updaters.CapitalUpdater;
 import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
@@ -316,6 +320,150 @@ class ModelRunnerTest {
 		modelRunner.step();
 		assertEquals(1, inputSteps.get());
 		assertEquals(2, regularSteps.get());
+	}
+
+	// =========================================================
+	// Year-zero order and CRAFTY-react's step
+	// =========================================================
+
+	/** A step that records its name in a shared log each time it runs. */
+	private static class RecordingState implements ModelState {
+		private final String name;
+		private final List<String> log;
+
+		RecordingState(String name, List<String> log) {
+			this.name = name;
+			this.log = log;
+		}
+
+		@Override
+		public void setup(AbstractModelRunner modelRunner) {
+		}
+
+		@Override
+		public void toSchedule() {
+		}
+
+		@Override
+		public void step() {
+			log.add(name);
+		}
+	}
+
+	/** A step with a no-argument constructor, to create by class name. */
+	static class NoArgumentStep implements ModelState {
+		@Override
+		public void setup(AbstractModelRunner modelRunner) {
+		}
+
+		@Override
+		public void toSchedule() {
+		}
+
+		@Override
+		public void step() {
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private static List<ModelState> initialStateUpdaters(ModelRunner runner) throws Exception {
+		Field field = ModelRunner.class.getDeclaredField("initialStateUpdaters");
+		field.setAccessible(true);
+		return (List<ModelState>) field.get(runner);
+	}
+
+	@Test
+	void prepareInitialState_runsTheInitialStateUpdatersInListOrder() throws Exception {
+		// prepareInitialState() used to call eight fields by name, in an order that
+		// differed from initialStateUpdaters. It now runs the list itself, so the
+		// list order is the run order.
+		ModelRunner runner = new ModelRunner();
+		List<String> log = new ArrayList<>();
+		initialStateUpdaters(runner).addAll(List.of(new RecordingState("first", log),
+				new RecordingState("second", log), new RecordingState("third", log)));
+
+		Method prepare = ModelRunner.class.getDeclaredMethod("prepareInitialState");
+		prepare.setAccessible(true);
+		prepare.invoke(runner);
+
+		assertEquals(List.of("first", "second", "third"), log);
+	}
+
+	@Test
+	void addBeforeCapitalUpdater_placesTheStepDirectlyBeforeCapitalUpdaterInBothLists() throws Exception {
+		CapitalUpdater originalCapitalUpdater = ModelRunner.capitalUpdater;
+		try {
+			ModelRunner runner = new ModelRunner();
+			List<String> log = new ArrayList<>();
+			ModelState before = new RecordingState("before", log);
+			ModelState after = new RecordingState("after", log);
+			ModelState react = new RecordingState("react", log);
+			ModelRunner.capitalUpdater = mock(CapitalUpdater.class);
+			runner.getScheduled().addAll(List.of(before, ModelRunner.capitalUpdater, after));
+			initialStateUpdaters(runner).addAll(List.of(before, ModelRunner.capitalUpdater, after));
+
+			runner.addBeforeCapitalUpdater(react);
+
+			assertEquals(List.of(before, react, ModelRunner.capitalUpdater, after), runner.getScheduled());
+			assertEquals(List.of(before, react, ModelRunner.capitalUpdater, after), initialStateUpdaters(runner));
+		} finally {
+			ModelRunner.capitalUpdater = originalCapitalUpdater;
+		}
+	}
+
+	@Test
+	void theStepBeforeCapitalUpdater_runsForYearZeroAndIsSkippedOnceInTheFirstYear() throws Exception {
+		CapitalUpdater originalCapitalUpdater = ModelRunner.capitalUpdater;
+		try {
+			ModelRunner runner = new ModelRunner();
+			List<String> log = new ArrayList<>();
+			ModelState react = new RecordingState("react", log);
+			ModelState laterStep = new RecordingState("later", log);
+			ModelRunner.capitalUpdater = mock(CapitalUpdater.class);
+			runner.getScheduled().addAll(List.of(ModelRunner.capitalUpdater, laterStep));
+			initialStateUpdaters(runner).add(ModelRunner.capitalUpdater);
+
+			runner.addBeforeCapitalUpdater(react);
+
+			Method prepare = ModelRunner.class.getDeclaredMethod("prepareInitialState");
+			prepare.setAccessible(true);
+			prepare.invoke(runner);
+			assertEquals(List.of("react"), log, "It runs in the year-zero initial state");
+
+			Field preparedField = ModelRunner.class.getDeclaredField("initialStatePrepared");
+			preparedField.setAccessible(true);
+			preparedField.setBoolean(runner, true);
+
+			log.clear();
+			runner.step();
+			assertEquals(List.of("later"), log, "The first year skips it: it already ran for year zero");
+
+			log.clear();
+			runner.step();
+			assertEquals(List.of("react", "later"), log, "Later years run it before CapitalUpdater as usual");
+		} finally {
+			ModelRunner.capitalUpdater = originalCapitalUpdater;
+		}
+	}
+
+	@Test
+	void createStepByClassName_createsAnInstanceOfTheNamedStep() throws Exception {
+		ModelState step = ModelRunner.createStepByClassName(NoArgumentStep.class.getName());
+
+		assertInstanceOf(NoArgumentStep.class, step);
+	}
+
+	@Test
+	void createStepByClassName_cannotFindReactWithoutTheReactModule() {
+		// crafty-core's own tests run without crafty-react, so this is the situation
+		// in which the run stops with "crafty-react is not on the classpath".
+		assertThrows(ClassNotFoundException.class,
+				() -> ModelRunner.createStepByClassName(ModelRunner.REACTIVE_UPDATER_CLASS));
+	}
+
+	@Test
+	void createStepByClassName_rejectsAClassThatIsNotAStep() {
+		assertThrows(ClassCastException.class, () -> ModelRunner.createStepByClassName("java.lang.StringBuilder"));
 	}
 
 	private static ModelState countingState(AtomicInteger counter) {

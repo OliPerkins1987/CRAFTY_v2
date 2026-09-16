@@ -90,6 +90,15 @@ import de.cesr.crafty.core.utils.analysis.LandscapeFragmentationListener;
 
 public class ModelRunner extends AbstractModelRunner {
 
+    private static final CustomLogger LOGGER = new CustomLogger(ModelRunner.class);
+
+    /**
+     * CRAFTY-react's yearly step, in the crafty-react module. It is named rather than
+     * imported: crafty-react depends on crafty-core, so it is built after core and
+     * core's source cannot refer to its classes.
+     */
+    public static final String REACTIVE_UPDATER_CLASS = "de.cesr.crafty.react.ReactiveUpdater";
+
     public static CellsLoader cellsSet;
     public static CapitalUpdater capitalUpdater;
     public static AftsUpdater aftsUpdater;
@@ -117,12 +126,14 @@ public class ModelRunner extends AbstractModelRunner {
         flagUpdater = new FlagUpdater();
         cellBehaviourUpdater = new CellBehaviourUpdater();
         landMaskUpdater = new LandMaskUpdater();
+        // This list is both the set of year-zero updaters and the order
+        // prepareInitialState() runs them in.
         initialStateUpdaters.clear();
         initialStateUpdaters.add(flagUpdater);
         initialStateUpdaters.add(capitalUpdater);
-        initialStateUpdaters.add(aftsUpdater);
         initialStateUpdaters.add(productionCostUpdater);
         initialStateUpdaters.add(subsidyUpdater);
+        initialStateUpdaters.add(aftsUpdater);
         initialStateUpdaters.add(cellBehaviourUpdater);
         initialStateUpdaters.add(landMaskUpdater);
         initialStateUpdaters.add(capital_Degradation_Updater);
@@ -145,6 +156,49 @@ public class ModelRunner extends AbstractModelRunner {
         getScheduled().add(new Tracker());
         getScheduled().add(regionsModelRunnerUpdater);
         getScheduled().add(new Timestep());
+
+        if (ConfigLoader.isReactiveAfts()) {
+            addBeforeCapitalUpdater(loadReactiveUpdater());
+        }
+    }
+
+    /**
+     * Creates CRAFTY-react's yearly step, stopping the run if the crafty-react
+     * module is not on the classpath.
+     */
+    private static ModelState loadReactiveUpdater() {
+        try {
+            return createStepByClassName(REACTIVE_UPDATER_CLASS);
+        } catch (ClassNotFoundException e) {
+            LOGGER.fatal("reactive_afts is true but the crafty-react module is not on the classpath, so CRAFTY-react "
+                    + "cannot run. Run CRAFTY from the crafty-react jar, or set reactive_afts: false.");
+        } catch (ReflectiveOperationException | ClassCastException e) {
+            LOGGER.fatal("Could not create CRAFTY-react's step " + REACTIVE_UPDATER_CLASS + ": " + e);
+        }
+        return null;
+    }
+
+    /**
+     * Creates a step from its class name, found when the model runs rather than when
+     * core is compiled. The class must be a ModelState with a no-argument constructor.
+     */
+    static ModelState createStepByClassName(String className) throws ReflectiveOperationException {
+        Class<?> type = Class.forName(className);
+        if (!ModelState.class.isAssignableFrom(type)) {
+            throw new ClassCastException(className + " is not a ModelState");
+        }
+        return (ModelState) type.getDeclaredConstructor().newInstance();
+    }
+
+    /**
+     * Runs the step directly before CapitalUpdater, both every year and in the
+     * year-zero initial state, so it can write each year's capitals and cost files
+     * before they are read. The same instance goes in both lists, which is what lets
+     * the first yearly step skip it along with the other year-zero updaters.
+     */
+    void addBeforeCapitalUpdater(ModelState step) {
+        getScheduled().add(getScheduled().indexOf(capitalUpdater), step);
+        initialStateUpdaters.add(initialStateUpdaters.indexOf(capitalUpdater), step);
     }
 
     public void initialzeRun() {
@@ -166,14 +220,9 @@ public class ModelRunner extends AbstractModelRunner {
      * initial demand calibration is calculated.
      */
     private void prepareInitialState() {
-        flagUpdater.step();
-        capitalUpdater.step();
-        productionCostUpdater.step();
-        subsidyUpdater.step();
-        aftsUpdater.step();
-        cellBehaviourUpdater.step();
-        landMaskUpdater.step();
-        capital_Degradation_Updater.step();
+        for (ModelState updater : initialStateUpdaters) {
+            updater.step();
+        }
     }
 
     /**

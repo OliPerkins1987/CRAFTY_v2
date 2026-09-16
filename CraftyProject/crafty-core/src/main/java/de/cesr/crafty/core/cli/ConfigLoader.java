@@ -319,6 +319,16 @@ public class ConfigLoader {
 		return isReactiveAfts() && !config.reactive_overwrite_inputs;
 	}
 
+	/**
+	 * CRAFTY-react writes the capitals file only when at least one management input
+	 * that changes yields is reactive. Otherwise the suitabilities are the default
+	 * values in the original capitals file, which is read unchanged. Forestry
+	 * rotation joins these inputs when forestry is implemented.
+	 */
+	public static boolean isReactiveCapitals() {
+		return isReactiveFertilizer() || isReactiveIrrigation() || isReactiveOtherIntensity() || isReactiveStocking();
+	}
+
 	private static Config loadConfig() {
 		InputStream inputStream = null;
 		try {

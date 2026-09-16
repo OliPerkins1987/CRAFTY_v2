@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,8 @@ import de.cesr.crafty.core.crafty.AftCategory;
 import de.cesr.crafty.core.crafty.Cell;
 import de.cesr.crafty.core.dataLoader.CsvKind;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
+import de.cesr.crafty.core.dataLoader.ProjectLoader;
+import de.cesr.crafty.core.dataLoader.RunInputFiles;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.afts.AftCategorised;
 import de.cesr.crafty.core.dataLoader.costs.GlobalCostData;
@@ -710,5 +713,130 @@ class ProductionCostUpdaterTest {
 		assertTrue(c00.getNfertCosts().isEmpty());
 		assertTrue(c00.getIrrigationCosts().isEmpty());
 		assertTrue(c00.getStockingCosts().isEmpty());
+	}
+
+	// =========================================================
+	// CRAFTY-react run-folder mode
+	// =========================================================
+
+	/**
+	 * A spatial-costs project where only the intensity files are needed, as in the
+	 * test above, but with the cost files inside the project folder so their
+	 * run-folder versions keep a short relative path.
+	 */
+	private ProductionCostUpdater intensityOnlySpatialUpdater(double intensityCost) throws IOException {
+		Path costs = ProjectLoader.getProjectPath().resolve("costs");
+		writeCsv(costs.resolve("global"), "global_costs.csv",
+				"Item,Cost,Notes",
+				"Nfert,1.08,USD per kg",
+				"Pasture,50,USD per unit");
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = true;
+		ConfigLoader.config.costs_directory = costs.toString();
+
+		for (String label : List.of("AFT1", "AFT2", "AFT3")) {
+			Aft aft = AFTsLoader.getAftHash().get(label);
+			aft.setNfertRate(0.0);
+			aft.setIrrigated(false);
+			aft.getProductivityLevel().put("Pasture", 0.0);
+		}
+
+		Path intensityDir = costs.resolve("spatial").resolve("intensity").resolve("TestScenario");
+		for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
+			writeCsv(intensityDir, "Intensity_costs_" + year + ".csv",
+					"X,Y,AFT1,AFT2,AFT3",
+					"0,0," + intensityCost + ",0,0");
+		}
+		return new ProductionCostUpdater();
+	}
+
+	@Test
+	void spatialCosts_inRunFolderMode_readReactsVersionOnlyForReactiveCostTypes() throws IOException {
+		ProductionCostUpdater updater = intensityOnlySpatialUpdater(11.0);
+		int year = Timestep.getStartYear();
+		Timestep.setCurrentYear(year);
+		Cell c00 = CellsLoader.hashCell.get("0,0");
+
+		// The config object is shared by every test in this JVM, so the switches are restored.
+		boolean reactiveAfts = ConfigLoader.config.reactive_afts;
+		boolean reactiveOtherIntensity = ConfigLoader.config.reactive_other_intensity;
+		try {
+			updater.step();
+			assertEquals(11.0, c00.getIntensityCosts().get("AFT1"), 0.001, "Without a run folder the original is read");
+
+			RunInputFiles.useRunFolder(tempDir.resolve("run"));
+			Path runVersion = RunInputFiles.resolve(
+					updater.getSpatialCostPaths(year).get(ProductionCostUpdater.INTENSITY_COSTS));
+			writeCsv(runVersion.getParent(), runVersion.getFileName().toString(),
+					"X,Y,AFT1,AFT2,AFT3",
+					"0,0,99.0,0,0");
+
+			// React on, but other intensity not reactive: react does not write the intensity costs.
+			ConfigLoader.config.reactive_afts = true;
+			ConfigLoader.config.reactive_other_intensity = false;
+			updater.step();
+			assertEquals(11.0, c00.getIntensityCosts().get("AFT1"), 0.001,
+					"A cost type react does not write is read from the original");
+
+			ConfigLoader.config.reactive_other_intensity = true;
+			updater.step();
+			assertEquals(99.0, c00.getIntensityCosts().get("AFT1"), 0.001,
+					"A cost type react writes is read from react's version");
+		} finally {
+			ConfigLoader.config.reactive_afts = reactiveAfts;
+			ConfigLoader.config.reactive_other_intensity = reactiveOtherIntensity;
+			RunInputFiles.clearRunFolder();
+		}
+	}
+
+	@Test
+	void isReactiveCostType_followsTheMatchingElementSwitch() {
+		Config original = ConfigLoader.config;
+		try {
+			ConfigLoader.config = new Config();
+			ConfigLoader.config.reactive_afts = true;
+			ConfigLoader.config.reactive_fertilizer = true;
+			ConfigLoader.config.reactive_stocking = true;
+
+			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.NFERT_COSTS));
+			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.IRRIGATION_COSTS));
+			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.INTENSITY_COSTS));
+			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.STOCKING_COSTS));
+			assertFalse(ProductionCostUpdater.isReactiveCostType("unknown"));
+
+			ConfigLoader.config.reactive_irrigation = true;
+			ConfigLoader.config.reactive_other_intensity = true;
+			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.IRRIGATION_COSTS));
+			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.INTENSITY_COSTS));
+
+			// React off: no cost type is react's, whatever the element switches say.
+			ConfigLoader.config.reactive_afts = false;
+			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.NFERT_COSTS));
+			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.STOCKING_COSTS));
+		} finally {
+			ConfigLoader.config = original;
+		}
+	}
+
+	@Test
+	void getSpatialCostPaths_listsTheInputFilesFoundAtStartup() throws IOException {
+		ProductionCostUpdater updater = intensityOnlySpatialUpdater(11.0);
+		int year = Timestep.getStartYear();
+
+		Map<String, Path> paths = updater.getSpatialCostPaths(year);
+
+		assertEquals(List.of(ProductionCostUpdater.INTENSITY_COSTS), List.copyOf(paths.keySet()),
+				"Only cost types with a file for the year are listed");
+		assertTrue(paths.get(ProductionCostUpdater.INTENSITY_COSTS).endsWith("Intensity_costs_" + year + ".csv"),
+				"Got: " + paths);
+
+		// The same with a run folder in use: react needs the input files' locations to
+		// know where to write its versions.
+		RunInputFiles.useRunFolder(tempDir.resolve("run"));
+		try {
+			assertEquals(paths, updater.getSpatialCostPaths(year));
+		} finally {
+			RunInputFiles.clearRunFolder();
+		}
 	}
 }
