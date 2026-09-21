@@ -17,6 +17,11 @@ import de.cesr.crafty.core.updaters.AbstractUpdater;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
 import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
+import de.cesr.crafty.react.data.CoreFacts;
+import de.cesr.crafty.react.data.ReactConfigLoader;
+import de.cesr.crafty.react.data.ReactInputException;
+import de.cesr.crafty.react.data.ReactInputs;
+import de.cesr.crafty.react.data.ReactRunContext;
 
 /**
  * The yearly CRAFTY-react step, and the one class crafty-core knows about.
@@ -45,16 +50,25 @@ public class ReactiveUpdater extends AbstractUpdater {
 	/** Finds the input files react writes for a year. Replaceable for tests. */
 	private final IntFunction<List<Path>> filesReactWrites;
 
+	/** React's inputs: the checked project, and the year being simulated. Null only in phase 0 tests. */
+	private final ReactInputs inputs;
+
 	/** Year zero is written during initialisation; this stops it being written twice. */
 	private Integer lastYearWritten = null;
 
 	/**
-	 * The constructor crafty-core calls. In run-folder mode it also tells the model
-	 * to read each year's files from {@value RunInputFiles#RUN_FOLDER_NAME} in the
-	 * run's output folder.
+	 * The constructor crafty-core calls, at the end of {@code ModelRunner.start()}.
+	 *
+	 * It reads react's own settings, gathers what react needs from core, and runs the startup checks.
+	 * Everything the checks need - services, AFT metadata, cells, the years, the spatial cost files - has
+	 * been loaded by this point. A project react cannot use stops the run here, before any year is
+	 * simulated. (The log files are not open yet, so that message reaches the console only.)
+	 *
+	 * In run-folder mode it also tells the model to read each year's files from
+	 * {@value RunInputFiles#RUN_FOLDER_NAME} in the run's output folder.
 	 */
 	public ReactiveUpdater() {
-		this(ReactiveUpdater::filesReactWrites);
+		this(ReactiveUpdater::filesReactWrites, createInputs());
 		if (ConfigLoader.isReactiveRunFolderMode()) {
 			// By now output_folder_name holds the run's full output folder path.
 			Path runFolder = Paths.get(ConfigLoader.config.output_folder_name, RunInputFiles.RUN_FOLDER_NAME);
@@ -64,7 +78,23 @@ public class ReactiveUpdater extends AbstractUpdater {
 	}
 
 	ReactiveUpdater(IntFunction<List<Path>> filesReactWrites) {
+		this(filesReactWrites, null);
+	}
+
+	ReactiveUpdater(IntFunction<List<Path>> filesReactWrites, ReactInputs inputs) {
 		this.filesReactWrites = filesReactWrites;
+		this.inputs = inputs;
+	}
+
+	/** Loads react's settings and checks the project, stopping the run if it cannot be used. */
+	private static ReactInputs createInputs() {
+		ReactRunContext context = CoreFacts.fromCore();
+		try {
+			return ReactInputs.create(ReactConfigLoader.load(context.projectPath()), context);
+		} catch (ReactInputException e) {
+			LOGGER.fatal(e.getMessage());
+			return null; // not reached: LOGGER.fatal stops the run
+		}
 	}
 
 	/**
@@ -99,8 +129,17 @@ public class ReactiveUpdater extends AbstractUpdater {
 		if (lastYearWritten != null && lastYearWritten == year) {
 			return;
 		}
+		if (inputs != null) {
+			// This year's LPJ-GUESS data; the year before is released. Phases 2-4 use it.
+			inputs.forYear(year);
+		}
 		writeInputFiles(year);
 		lastYearWritten = year;
+	}
+
+	/** React's inputs, once the checks have passed. */
+	public ReactInputs getInputs() {
+		return inputs;
 	}
 
 	/** Phase 0 pass-through; see the class comment. */

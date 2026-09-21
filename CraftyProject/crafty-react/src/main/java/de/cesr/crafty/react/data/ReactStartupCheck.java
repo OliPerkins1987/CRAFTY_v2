@@ -60,7 +60,7 @@ public final class ReactStartupCheck {
 	 */
 	public record Result(ReactiveParameters parameters, ReactServiceKey services, ReactBaseCosts baseCosts,
 			CellKey cellKey, IrrigationCostGrid irrigationCost, Map<LpjgType, Map<Integer, Path>> suitabilityFiles,
-			Map<Integer, Path> capitalsFiles) {
+			Map<Integer, Path> capitalsFiles, List<AftReactParameters> irrigatedCrops) {
 	}
 
 	private final ReactConfig config;
@@ -98,13 +98,15 @@ public final class ReactStartupCheck {
 				cellKey.requireEveryCell(context.cellIds());
 				return null;
 			});
+			checkRegions(cellKey);
 		}
 
 		IrrigationCostGrid irrigationCost = null;
 		Map<LpjgType, Map<Integer, Path>> suitabilityFiles = new EnumMap<>(LpjgType.class);
 		Map<Integer, Path> capitalsFiles = new LinkedHashMap<>();
+		List<AftReactParameters> irrigatedCrops = parameters == null ? List.of() : irrigatedCrops(parameters);
 		if (parameters != null && context.anyReactive()) {
-			if (cellKey != null && !irrigatedCrops(parameters).isEmpty()) {
+			if (cellKey != null && !irrigatedCrops.isEmpty()) {
 				irrigationCost = attempt(() -> IrrigationCostGrid.load(config.irrigationCostFile(project), cellKey.grid()));
 			}
 			checkSuitabilities(parameters, suitabilityFiles);
@@ -117,10 +119,18 @@ public final class ReactStartupCheck {
 			throw new ReactInputException("CRAFTY-react cannot start: " + problems.size() + " problem(s)\n  - "
 					+ String.join("\n  - ", problems));
 		}
+		if (!context.anyReactive()) {
+			LOGGER.warn("CRAFTY-react is on but no element is reactive, so react changes nothing. The startup checks"
+					+ " have run; no year data is loaded");
+		}
+		warnIfIrrigationIsLeftBehind(irrigatedCrops);
 		LOGGER.info("CRAFTY-react startup checks passed: " + parameters.reactive().size() + " reactive AFT(s) "
 				+ parameters.reactive().stream().map(AftReactParameters::label).toList() + ", reactive elements "
-				+ context.reactive() + ", " + cellKey.cellCount() + " cells in " + cellKey.grid().size() + " pixels");
-		return new Result(parameters, services, baseCosts, cellKey, irrigationCost, suitabilityFiles, capitalsFiles);
+				+ context.reactive() + ", " + cellKey.cellCount() + " cells in " + cellKey.grid().size() + " pixels, "
+				+ cellKey.regions().size() + " region(s), " + cellKey.pixelsSpanningRegions()
+				+ " pixel(s) spanning more than one region");
+		return new Result(parameters, services, baseCosts, cellKey, irrigationCost, suitabilityFiles, capitalsFiles,
+				irrigatedCrops);
 	}
 
 	// ---- check 2: the same AFTs in the sheet and in core ----
@@ -140,6 +150,56 @@ public final class ReactStartupCheck {
 		}
 	}
 
+	/**
+	 * Fertiliser reactive with irrigation not reactive is an odd pairing, so say plainly what react will
+	 * do: irrigation demand is read at the baseline N and stays there while N moves, and the irrigation
+	 * costs the model charges come from its own pre-written files, so they do not follow that year's
+	 * runoff. Switch irrigation on if you want irrigation to respond to N and to the water available.
+	 */
+	private void warnIfIrrigationIsLeftBehind(List<AftReactParameters> irrigatedCrops) {
+		if (irrigatedCrops.isEmpty() || !context.isReactive(ReactElement.FERTILISER)
+				|| context.isReactive(ReactElement.IRRIGATION)) {
+			return;
+		}
+		LOGGER.warn("CRAFTY-react: fertiliser is reactive but irrigation is not, for "
+				+ irrigatedCrops.stream().map(AftReactParameters::label).toList() + ". Their irrigation demand is read"
+				+ " at the baseline N (Nfert_rate), so water applied stays at min(runoff, demand at baseline N) while"
+				+ " N changes, and the model charges the irrigation costs in its own spatial files, which do not"
+				+ " follow that year's runoff. Switch reactive_irrigation on for irrigation to respond");
+	}
+
+	// ---- check 12: regions ----
+
+	/**
+	 * The key's regions must be ones the model knows, because react prices a pixel's produce with that
+	 * region's service weights. Cells whose key region differs from the model's are counted in one
+	 * warning: a few are expected where a pixel straddles a border, but many mean the key is wrong.
+	 */
+	private void checkRegions(CellKey cellKey) {
+		List<String> unknown = cellKey.regions().stream().filter(r -> !context.regions().contains(r)).toList();
+		if (!unknown.isEmpty()) {
+			problems.add(config.cellKeyFile(project) + ": region(s) " + unknown + " are not regions of this model "
+					+ context.regions());
+		}
+		int differing = 0;
+		String example = null;
+		for (String cell : context.cellIds()) {
+			String keyRegion = cellKey.regionOfCell(cell);
+			if (keyRegion != null && !keyRegion.equals(context.regionOfCell(cell))) {
+				differing++;
+				if (example == null) {
+					example = cell + " (key " + keyRegion + ", model " + context.regionOfCell(cell) + ")";
+				}
+			}
+		}
+		if (differing > 0) {
+			LOGGER.warn("CRAFTY-react: " + differing + " of " + context.cellIds().size()
+					+ " cells are in a different region in " + config.cellKeyFile(project)
+					+ " than in the model, e.g. " + example
+					+ ". A few are expected where a pixel straddles a border; many mean the key is wrong");
+		}
+	}
+
 	// ---- check 8: base costs ----
 
 	private void checkBaseCosts(ReactiveParameters parameters, ReactBaseCosts baseCosts) {
@@ -148,6 +208,8 @@ public final class ReactStartupCheck {
 			needed.put(ReactBaseCosts.NFERT, "fertiliser is reactive");
 		}
 		if (context.isReactive(ReactElement.IRRIGATION) && !irrigatedCrops(parameters).isEmpty()) {
+			// Only react's own irrigation costs use the base water price; with the switch off, the costs
+			// come from core's pre-written files.
 			needed.put(ReactBaseCosts.WATER, "irrigation is reactive");
 		}
 		if (context.isReactive(ReactElement.STOCKING) && !parameters.reactive(LpjgType.PASTURE).isEmpty()) {
@@ -273,11 +335,13 @@ public final class ReactStartupCheck {
 
 	// ---- helpers ----
 
-	/** The reactive crops AFTs that irrigate, when irrigation is reactive; otherwise none. */
+	/**
+	 * The reactive crops AFTs that irrigate, whether or not irrigation is reactive. The switch decides
+	 * whether react changes the water applied, not whether the AFT irrigates: with irrigation switched
+	 * off, water applied is still min(runoff, demand), which sets the irrigation level in the yield
+	 * surface. So the demand, runoff and irrigation cost files are needed either way.
+	 */
 	private List<AftReactParameters> irrigatedCrops(ReactiveParameters parameters) {
-		if (!context.isReactive(ReactElement.IRRIGATION)) {
-			return List.of();
-		}
 		return parameters.reactive(LpjgType.CROPS).stream().filter(AftReactParameters::isIrrigated).toList();
 	}
 

@@ -4,11 +4,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+
+import de.cesr.crafty.core.cli.CustomLogger;
 
 /**
  * Finds a year's file in a "year folder": a folder holding one .csv per year, with any file name.
@@ -21,6 +24,8 @@ import java.util.stream.Stream;
  * these folders hold only react's per-year inputs and the one-file rule catches any clash.
  */
 public final class YearFileFinder {
+
+	private static final CustomLogger LOGGER = new CustomLogger(YearFileFinder.class);
 
 	private YearFileFinder() {
 	}
@@ -56,7 +61,21 @@ public final class YearFileFinder {
 		if (!problems.isEmpty()) {
 			throw new ReactInputException(String.join("\n", problems));
 		}
+		warnAboutSpareFiles(folder, csvFiles, files.values());
 		return files;
+	}
+
+	/**
+	 * Files in a year folder that no year of the run matched. They are ignored, but saying so once makes
+	 * a folder holding, say, 2015 alongside 2020–2030 obvious rather than silent.
+	 */
+	private static void warnAboutSpareFiles(Path folder, List<Path> csvFiles, Collection<Path> used) {
+		List<String> spare = csvFiles.stream().filter(p -> !used.contains(p)).map(p -> p.getFileName().toString())
+				.toList();
+		if (!spare.isEmpty()) {
+			LOGGER.warn(folder + " holds " + spare.size() + " .csv file(s) for years this run does not use; they are"
+					+ " ignored: " + spare);
+		}
 	}
 
 	/** Whether a file name contains the year as a number on its own. */

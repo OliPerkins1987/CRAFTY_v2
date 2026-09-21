@@ -97,12 +97,40 @@ class ReactStartupCheckTest {
 	}
 
 	@Test
-	void irrigationFilesAreOnlyNeededWhenIrrigationIsReactive() throws IOException {
+	void irrigationFilesAreNeededWheneverAReactiveAftIrrigatesEvenWithIrrigationOff() throws IOException {
+		// The switch decides whether react changes the water applied, not whether the AFT irrigates:
+		// water applied is still min(runoff, demand), which sets the irrigation level in the yield.
 		deleteFolder("worlds/react/irrigation");
 
+		String message = problems(ReactToyData.context(dir).off(ReactElement.IRRIGATION));
+
+		assertMentions(message, "Irrigation_demand_2020.csv");
+		assertMentions(message, "Runoff_2020.csv");
+		assertMentions(message, "Irrigation_cost.csv");
+	}
+
+	@Test
+	void fertiliserReactiveWithIrrigationNotReactiveIsAllowedAndExplained() {
+		// An odd pairing: react then reads irrigation demand at the baseline N, and the model charges its
+		// own irrigation costs. The run goes ahead; the log says so. (Checked here by the run passing; the
+		// wording lives in ReactStartupCheck.)
 		ReactStartupCheck.Result result = run(ReactToyData.context(dir).off(ReactElement.IRRIGATION));
 
+		assertEquals(List.of("IntC3C_irrig"),
+				result.irrigatedCrops().stream().map(AftReactParameters::label).toList());
+		assertNotNull(result.irrigationCost(), "The index is still loaded: water applied still limits the yield");
+	}
+
+	@Test
+	void irrigationFilesAreNotNeededWhenNoReactiveAftIrrigates() throws IOException {
+		// IntC3C_irrig is the only irrigated AFT in the toy project; core says it is not irrigated here.
+		deleteFolder("worlds/react/irrigation");
+
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).aft("IntC3C_irrig", 200, 0.75, false, false)
+				.off(ReactElement.IRRIGATION));
+
 		assertNull(result.irrigationCost());
+		assertTrue(result.irrigatedCrops().isEmpty());
 	}
 
 	// ---- check 2: the same AFTs in the sheet and in core ----

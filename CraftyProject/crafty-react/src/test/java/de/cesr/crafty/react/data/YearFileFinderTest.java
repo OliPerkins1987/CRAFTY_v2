@@ -91,6 +91,18 @@ class YearFileFinderTest {
 	}
 
 	@Test
+	void filesForYearsTheRunDoesNotUseAreIgnored() {
+		// They only warn (G12); the run carries on with the years it needs.
+		for (int year = 2018; year <= 2022; year++) {
+			ReactToyData.write(dir, "f/caps_" + year + ".csv", "Lon,Lat");
+		}
+
+		Map<Integer, Path> files = YearFileFinder.findAll(dir.resolve("f"), 2020, 2021);
+
+		assertEquals(List.of(2020, 2021), List.copyOf(files.keySet()));
+	}
+
+	@Test
 	void aMissingFolderIsAnError() {
 		ReactInputException e = assertThrows(ReactInputException.class,
 				() -> YearFileFinder.find(dir.resolve("nope"), 2020));

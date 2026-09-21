@@ -17,19 +17,19 @@ import de.cesr.crafty.react.data.ReactRunContext.AftBaseline;
  * Tiny react input files for tests, written into a test's temporary folder. The pixels and values
  * mirror the sandbox project's, so failures are easy to relate to real data.
  */
-final class ReactToyData {
+public final class ReactToyData {
 
 	/** Two pixels from the sandbox, and one pixel with no CRAFTY cells. */
-	static final String PIXEL_A = "-91.25,17.75";
-	static final String PIXEL_B = "-121.75,37.25";
-	static final String PIXEL_NO_CELLS = "5.25,52.25";
+	public static final String PIXEL_A = "-91.25,17.75";
+	public static final String PIXEL_B = "-121.75,37.25";
+	public static final String PIXEL_NO_CELLS = "5.25,52.25";
 
 	/** The years of the toy project. */
-	static final int FIRST_YEAR = 2020;
-	static final int LAST_YEAR = 2021;
+	public static final int FIRST_YEAR = 2020;
+	public static final int LAST_YEAR = 2021;
 
 	/** The parameters sheet header, in the 27b layout (Type is kept, and ignored). */
-	static final String PARAMETERS_HEADER = "Label,Type,react_isReactive,react_service,react_N_type,react_N_capital,"
+	public static final String PARAMETERS_HEADER = "Label,Type,react_isReactive,react_service,react_N_type,react_N_capital,"
 			+ "react_N_par,react_I_eff,react_O_capital,react_O_par,react_S_par,react_R_par";
 
 	/**
@@ -37,7 +37,7 @@ final class ReactToyData {
 	 * doesn't react, a pasture AFT, a non-reactive crop, a non-reactive forest AFT that still names its
 	 * service, and a mask.
 	 */
-	static final String[] STANDARD_ROWS = {
+	public static final String[] STANDARD_ROWS = {
 			"IntC3C_irrig,AFT,1,C3cereals,Prospect,,0,0.9,react_GDP_100,0.2,,",
 			"ExtC3C,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,",
 			"IntP,AFT,1,Pasture,,,,,react_GDP_50,1,0,",
@@ -49,7 +49,7 @@ final class ReactToyData {
 	}
 
 	/** Writes lines to a file under {@code dir}, creating folders as needed. */
-	static Path write(Path dir, String relativePath, String... lines) {
+	public static Path write(Path dir, String relativePath, String... lines) {
 		Path file = dir.resolve(relativePath);
 		try {
 			Files.createDirectories(file.getParent());
@@ -60,17 +60,21 @@ final class ReactToyData {
 		return file;
 	}
 
-	/** A cell key: cells (1,1) and (1,2) in pixel A, cell (2,1) in pixel B. */
-	static Path cellKey(Path dir) {
+	/**
+	 * A cell key: cells (1,1) and (1,2) in pixel A, cell (2,1) in pixel B. Pixel A straddles a border,
+	 * so its two cells are in different regions, which is what phase 3's per-region pricing has to cope
+	 * with.
+	 */
+	public static Path cellKey(Path dir) {
 		return write(dir, "worlds/react/cell_key.csv",
-				"ID,X,Y,LPJ_cell_x,LPJ_cell_y",
-				"100,1,1," + PIXEL_A,
-				"101,1,2," + PIXEL_A,
-				"102,2,1," + PIXEL_B);
+				"ID,X,Y,LPJ_cell_x,LPJ_cell_y,region",
+				"100,1,1," + PIXEL_A + ",North",
+				"101,1,2," + PIXEL_A + ",South",
+				"102,2,1," + PIXEL_B + ",North");
 	}
 
 	/** Services.csv as in the sandbox, cut down. */
-	static Path services(Path dir) {
+	public static Path services(Path dir) {
 		return write(dir, "csv/Services.csv",
 				"Name,LPJG_name,LPJG_type,Description",
 				"C3cereals,CerealsC3,crops,C3 cereal crops (Wheat; barley; rye) for food",
@@ -80,7 +84,7 @@ final class ReactToyData {
 	}
 
 	/** global_costs.csv as in the sandbox, cut down. */
-	static Path globalCosts(Path dir) {
+	public static Path globalCosts(Path dir) {
 		return write(dir, "costs/global/global_costs.csv",
 				"Item,Cost,Notes",
 				"Nfert,1.08,PLUM value in 2017US$ kg-1",
@@ -92,7 +96,7 @@ final class ReactToyData {
 	}
 
 	/** The parameters sheet, with {@link #PARAMETERS_HEADER} and the given rows. */
-	static Path parameters(Path dir, String... rows) {
+	public static Path parameters(Path dir, String... rows) {
 		String[] lines = new String[rows.length + 1];
 		lines[0] = PARAMETERS_HEADER;
 		System.arraycopy(rows, 0, lines, 1, rows.length);
@@ -100,7 +104,7 @@ final class ReactToyData {
 	}
 
 	/** A complete small project for 2020–2021, with everything the startup checks read. */
-	static void project(Path dir) {
+	public static void project(Path dir) {
 		cellKey(dir);
 		services(dir);
 		globalCosts(dir);
@@ -125,7 +129,7 @@ final class ReactToyData {
 	}
 
 	/** A context matching {@link #project}; change it with the builder's methods. */
-	static Context context(Path dir) {
+	public static Context context(Path dir) {
 		return new Context(dir);
 	}
 
@@ -133,13 +137,16 @@ final class ReactToyData {
 	 * Builds a {@link ReactRunContext} for the toy project: the AFTs of {@link #STANDARD_ROWS} with
 	 * sensible baselines, every element reactive, and every core cost file found for every year.
 	 */
-	static final class Context {
+	public static final class Context {
 		private final Path project;
 		private final Map<String, AftBaseline> afts = new LinkedHashMap<>();
 		private final Set<String> services = new LinkedHashSet<>(List.of("C3cereals", "Pasture", "Hardwood", "Carbon"));
-		private final Set<String> cells = new LinkedHashSet<>(List.of("1,1", "1,2", "2,1"));
+		private final Map<String, String> cells = new LinkedHashMap<>(
+				Map.of("1,1", "North", "1,2", "South", "2,1", "North"));
+		private final Set<String> regions = new LinkedHashSet<>(List.of("North", "South"));
 		private final Set<ReactElement> reactive = EnumSet.allOf(ReactElement.class);
 		private final Map<Integer, Set<ReactElement>> costFiles = new LinkedHashMap<>();
+		private ReactRunContext.PriceSource prices = (service, region, year) -> 100.0;
 
 		private Context(Path project) {
 			this.project = project;
@@ -155,28 +162,51 @@ final class ReactToyData {
 		}
 
 		/** Adds or replaces an AFT's baselines. */
-		Context aft(String label, double nfertRate, double otherIntensity, boolean irrigated, boolean producesPasture) {
+		public Context aft(String label, double nfertRate, double otherIntensity, boolean irrigated, boolean producesPasture) {
 			afts.put(label, new AftBaseline(nfertRate, otherIntensity, irrigated, producesPasture));
 			return this;
 		}
 
-		Context withoutAft(String label) {
+		public Context withoutAft(String label) {
 			afts.remove(label);
 			return this;
 		}
 
-		Context withoutService(String service) {
+		public Context withoutService(String service) {
 			services.remove(service);
 			return this;
 		}
 
-		Context cell(String cellId) {
-			cells.add(cellId);
+		/** Adds a cell the model knows, in a region. */
+		public Context cell(String cellId, String region) {
+			cells.put(cellId, region);
+			regions.add(region);
+			return this;
+		}
+
+		/** Adds a cell the model knows, in the North. */
+		public Context cell(String cellId) {
+			return cell(cellId, "North");
+		}
+
+		/** Puts one of the model's cells in another region, without telling the key. */
+		public Context cellRegion(String cellId, String region) {
+			cells.put(cellId, region);
+			return this;
+		}
+
+		public Context withoutRegion(String region) {
+			regions.remove(region);
+			return this;
+		}
+
+		public Context prices(ReactRunContext.PriceSource prices) {
+			this.prices = prices;
 			return this;
 		}
 
 		/** Switches elements off. */
-		Context off(ReactElement... elements) {
+		public Context off(ReactElement... elements) {
 			for (ReactElement element : elements) {
 				reactive.remove(element);
 			}
@@ -184,17 +214,19 @@ final class ReactToyData {
 		}
 
 		/** Pretends core found no cost file for an element in one year. */
-		Context noCostFile(int year, ReactElement element) {
+		public Context noCostFile(int year, ReactElement element) {
 			costFiles.get(year).remove(element);
 			return this;
 		}
 
-		ReactRunContext build() {
+		public ReactRunContext build() {
 			Map<Integer, Set<ReactElement>> costFilesCopy = new LinkedHashMap<>();
 			costFiles.forEach((year, elements) -> costFilesCopy.put(year, EnumSet.copyOf(elements)));
 			return new ReactRunContext(project, "ssp126", FIRST_YEAR, LAST_YEAR, project.resolve("csv/Services.csv"),
-					new LinkedHashMap<>(afts), new LinkedHashSet<>(services), new LinkedHashSet<>(cells),
-					reactive.isEmpty() ? EnumSet.noneOf(ReactElement.class) : EnumSet.copyOf(reactive), costFilesCopy);
+					new LinkedHashMap<>(afts), new LinkedHashSet<>(services), new LinkedHashMap<>(cells),
+					new LinkedHashSet<>(regions),
+					reactive.isEmpty() ? EnumSet.noneOf(ReactElement.class) : EnumSet.copyOf(reactive), costFilesCopy,
+					prices);
 		}
 	}
 }

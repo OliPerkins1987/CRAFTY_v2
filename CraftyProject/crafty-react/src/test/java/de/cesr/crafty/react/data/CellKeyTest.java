@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,6 +40,48 @@ class CellKeyTest {
 	}
 
 	@Test
+	void eachCellCarriesItsRegionAndAPixelMayStraddleABorder() {
+		CellKey key = CellKey.load(ReactToyData.cellKey(dir));
+		int pixelA = key.grid().indexOf(-91.25, 17.75);
+		int pixelB = key.grid().indexOf(-121.75, 37.25);
+
+		assertEquals("North", key.regionOfCell("1,1"));
+		assertEquals("South", key.regionOfCell("1,2"));
+		assertEquals(Set.of("North", "South"), key.regions());
+		assertEquals(List.of("North", "South"), key.regionsIn(pixelA), "Pixel A straddles a border");
+		assertEquals(List.of("North"), key.regionsIn(pixelB));
+		assertEquals(1, key.pixelsSpanningRegions());
+	}
+
+	@Test
+	void theDominantRegionIsTheOneWithMostCellsAndTiesGoToTheFirstName() {
+		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region",
+				"1,1," + ReactToyData.PIXEL_A + ",South",
+				"1,2," + ReactToyData.PIXEL_A + ",North",
+				"1,3," + ReactToyData.PIXEL_A + ",North",
+				"2,1," + ReactToyData.PIXEL_B + ",South",
+				"2,2," + ReactToyData.PIXEL_B + ",North");
+
+		CellKey key = CellKey.load(file);
+
+		assertEquals("North", key.dominantRegion(key.grid().indexOf(-91.25, 17.75)), "Two cells against one");
+		assertEquals("North", key.dominantRegion(key.grid().indexOf(-121.75, 37.25)), "A tie goes to the first name");
+	}
+
+	@Test
+	void aBlankOrMissingRegionIsAnError() {
+		Path blank = ReactToyData.write(dir, "blank.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region",
+				"1,1," + ReactToyData.PIXEL_A + ",");
+		Path missing = ReactToyData.write(dir, "missing.csv", "X,Y,LPJ_cell_x,LPJ_cell_y",
+				"1,1," + ReactToyData.PIXEL_A);
+
+		assertTrue(assertThrows(ReactInputException.class, () -> CellKey.load(blank)).getMessage()
+				.contains("region is blank"));
+		assertTrue(assertThrows(ReactInputException.class, () -> CellKey.load(missing)).getMessage()
+				.contains("[region]"));
+	}
+
+	@Test
 	void cellIdsMatchCoresFormat() {
 		// Core stores cells under x + "," + y (CsvProcessors.createCells).
 		assertEquals("386,368", CellKey.cellId(386, 368));
@@ -58,8 +101,8 @@ class CellKeyTest {
 
 	@Test
 	void aCellListedTwiceIsAnError() {
-		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y",
-				"1,1," + ReactToyData.PIXEL_A, "1,1," + ReactToyData.PIXEL_B);
+		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region",
+				"1,1," + ReactToyData.PIXEL_A + ",North", "1,1," + ReactToyData.PIXEL_B + ",North");
 
 		ReactInputException e = assertThrows(ReactInputException.class, () -> CellKey.load(file));
 
@@ -68,7 +111,7 @@ class CellKeyTest {
 
 	@Test
 	void cellCoordinatesMustBeWholeNumbers() {
-		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y", "1.5,1," + ReactToyData.PIXEL_A);
+		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region", "1.5,1," + ReactToyData.PIXEL_A + ",North");
 
 		ReactInputException e = assertThrows(ReactInputException.class, () -> CellKey.load(file));
 
@@ -77,15 +120,15 @@ class CellKeyTest {
 
 	@Test
 	void wholeNumbersWrittenWithADecimalPointAreAccepted() {
-		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y", "386.0,368," + ReactToyData.PIXEL_A);
+		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region", "386.0,368," + ReactToyData.PIXEL_A + ",North");
 
 		assertEquals(0, CellKey.load(file).pixelOf("386,368"));
 	}
 
 	@Test
 	void pixelsAreNumberedInFileOrder() {
-		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y",
-				"1,1," + ReactToyData.PIXEL_B, "2,1," + ReactToyData.PIXEL_A, "3,1," + ReactToyData.PIXEL_B);
+		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region",
+				"1,1," + ReactToyData.PIXEL_B + ",North", "2,1," + ReactToyData.PIXEL_A + ",South", "3,1," + ReactToyData.PIXEL_B + ",North");
 
 		CellKey key = CellKey.load(file);
 
@@ -97,7 +140,7 @@ class CellKeyTest {
 
 	@Test
 	void aPixelOffTheGlobeIsReportedWithItsLine() {
-		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y", "1,1,17.75,-91.25");
+		Path file = ReactToyData.write(dir, "key.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region", "1,1,17.75,-91.25,North");
 
 		ReactInputException e = assertThrows(ReactInputException.class, () -> CellKey.load(file));
 
@@ -107,10 +150,10 @@ class CellKeyTest {
 	@Test
 	void missingColumnsAndEmptyKeysAreErrors() {
 		Path noColumns = ReactToyData.write(dir, "a.csv", "ID,X,Y", "1,1,1");
-		Path noRows = ReactToyData.write(dir, "b.csv", "X,Y,LPJ_cell_x,LPJ_cell_y");
+		Path noRows = ReactToyData.write(dir, "b.csv", "X,Y,LPJ_cell_x,LPJ_cell_y,region");
 
 		assertTrue(assertThrows(ReactInputException.class, () -> CellKey.load(noColumns)).getMessage()
-				.contains("[LPJ_cell_x, LPJ_cell_y]"));
+				.contains("[LPJ_cell_x, LPJ_cell_y, region]"));
 		assertTrue(assertThrows(ReactInputException.class, () -> CellKey.load(noRows)).getMessage()
 				.contains("no rows"));
 	}
