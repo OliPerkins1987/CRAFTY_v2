@@ -22,12 +22,19 @@
 	</properties>
 
 	<dependencies>
-		<!-- crafty-core's compile dependencies (snakeyaml, log4j, tablesaw, ...)
-		     come through transitively, so they are not repeated here. -->
+		<!-- crafty-core's other libraries (log4j, tablesaw, ...) come through
+		     with it. A library that react's own code imports is listed here too,
+		     at crafty-core's version, as the other modules do. -->
 		<dependency>
 			<groupId>de.cesr</groupId>
 			<artifactId>crafty-core</artifactId>
 			<version>0.0.1-SNAPSHOT</version>
+		</dependency>
+		<!-- ReactConfigLoader reads react_config.yaml. -->
+		<dependency>
+			<groupId>org.yaml</groupId>
+			<artifactId>snakeyaml</artifactId>
+			<version>2.0</version>
 		</dependency>
 
 		<!-- Test dependencies are not transitive, so these match crafty-core's. -->
