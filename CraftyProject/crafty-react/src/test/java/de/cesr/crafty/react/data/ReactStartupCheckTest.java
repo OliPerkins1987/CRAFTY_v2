@@ -136,6 +136,48 @@ class ReactStartupCheckTest {
 	// ---- check 2: the same AFTs in the sheet and in core ----
 
 	@Test
+	void theModelsOwnAbandonedAftNeedsNoRow() {
+		// The model adds "Abandoned" itself (AFTsLoader), so it is not in AFTsMetaData.csv and the react
+		// sheet is not expected to list it.
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).aft(ReactStartupCheck.ABANDONED, 0, 1, false,
+				false));
+
+		assertEquals(3, result.parameters().reactive().size());
+	}
+
+	@Test
+	void abandonedCannotBeReactive() {
+		ReactToyData.parameters(dir, "IntC3C_irrig,AFT,1,C3cereals,Prospect,,0,0.9,react_GDP_100,0.2,,",
+				"ExtC3C,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,", "IntP,AFT,1,Pasture,,,,,react_GDP_50,1,0,",
+				"IntFodder,AFT,0,,,,,,,,,", "AF,AFT,0,Hardwood,,,,,,,,0.1", "Urban,Mask,0,,,,,,,,,",
+				"Abandoned,AFT,1,C3cereals,Prospect,,0,,,,,");
+
+		String message = problems(ReactToyData.context(dir).aft(ReactStartupCheck.ABANDONED, 200, 0.75, false, false));
+
+		assertMentions(message, "Abandoned cannot be reactive");
+	}
+
+	// ---- check 12: regions ----
+
+	@Test
+	void aProjectWithManyRegionsMustUseRegionsTheModelKnows() {
+		// The model has North and East; the key still says South.
+		String message = problems(ReactToyData.context(dir).withoutRegion("South").cell("1,2", "East"));
+
+		assertMentions(message, "region(s) [South] are not regions of this model");
+	}
+
+	@Test
+	void aProjectWithOneRegionDoesNotHaveToMatchTheKey() {
+		// Not regionalised: the model has a single region covering every cell, so the key's own regions
+		// are not used and not checked. Nothing is reported per cell, however many cells there are.
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).withoutRegion("South")
+				.withoutRegion("North").cell("1,1", "EU").cellRegion("1,2", "EU").cellRegion("2,1", "EU"));
+
+		assertEquals(Set.of("North", "South"), result.cellKey().regions(), "The key keeps its own regions");
+	}
+
+	@Test
 	void theSheetAndCoreMustListTheSameAfts() {
 		String message = problems(ReactToyData.context(dir).withoutAft("AF").aft("NewAFT", 0, 1, false, false));
 

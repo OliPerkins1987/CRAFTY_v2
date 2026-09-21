@@ -23,7 +23,8 @@ import de.cesr.crafty.core.cli.CustomLogger;
  * <ol>
  * <li>each year folder has exactly one file for every year of the run, and the named per-year
  * files exist;</li>
- * <li>the parameters sheet and core list the same AFTs (masks included);</li>
+ * <li>the parameters sheet and core list the same AFTs (masks included, but not the model's own
+ * {@value #ABANDONED});</li>
  * <li>each reactive AFT's service is in Services.csv and in the model (in {@link ReactiveParameters});</li>
  * <li>its LPJG_type is crops or pasture (in {@link ReactiveParameters});</li>
  * <li>the LPJ-GUESS columns react needs are in every year's file (headers only);</li>
@@ -50,6 +51,13 @@ public final class ReactStartupCheck {
 
 	/** The runoff file's value column. */
 	public static final String RUNOFF = "Total";
+
+	/**
+	 * The AFT the model adds itself, for land nobody manages: {@code AFTsLoader} puts it in the AFT list
+	 * alongside the ones read from {@code AFTsMetaData.csv}. It is not in the metadata, so the react
+	 * sheet is not expected to have a row for it, and it cannot react.
+	 */
+	public static final String ABANDONED = "Abandoned";
 
 	/**
 	 * Everything the checks loaded, for the per-year loading (27c) to use.
@@ -143,10 +151,17 @@ public final class ReactStartupCheck {
 			}
 		}
 		for (String label : context.afts().keySet()) {
+			if (ABANDONED.equals(label)) {
+				continue;
+			}
 			if (!parameters.labels().contains(label)) {
 				problems.add(sheet + " has no row for AFT " + label + "; every AFT, masks included, needs a row"
 						+ " (use react_isReactive = 0 for AFTs that don't react)");
 			}
+		}
+		if (parameters.isReactive(ABANDONED)) {
+			problems.add(sheet + ": " + ABANDONED + " cannot be reactive. The model makes it itself, for land nobody"
+					+ " manages, and it produces nothing");
 		}
 	}
 
@@ -174,8 +189,20 @@ public final class ReactStartupCheck {
 	 * The key's regions must be ones the model knows, because react prices a pixel's produce with that
 	 * region's service weights. Cells whose key region differs from the model's are counted in one
 	 * warning: a few are expected where a pixel straddles a border, but many mean the key is wrong.
+	 *
+	 * A project that is not regionalised has a single region covering every cell (core names it after
+	 * the GIS file, and falls back to it when there is no demand file per region). The key's own regions
+	 * are then neither matched nor used: everything is priced in that one region. They are left in the
+	 * key, where they cost nothing and become useful if the project is regionalised later.
 	 */
 	private void checkRegions(CellKey cellKey) {
+		if (context.regions().size() <= 1) {
+			String only = context.regions().isEmpty() ? "none" : context.regions().iterator().next();
+			LOGGER.info("CRAFTY-react: the model has a single region (" + only + "), so every pixel is priced there."
+					+ " The " + cellKey.regions().size() + " region(s) named in " + config.cellKeyFile(project)
+					+ " are not used, and are not checked, until the project is regionalised");
+			return;
+		}
 		List<String> unknown = cellKey.regions().stream().filter(r -> !context.regions().contains(r)).toList();
 		if (!unknown.isEmpty()) {
 			problems.add(config.cellKeyFile(project) + ": region(s) " + unknown + " are not regions of this model "
