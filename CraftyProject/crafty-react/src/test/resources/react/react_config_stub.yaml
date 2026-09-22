@@ -48,3 +48,6 @@ stocking:                     # pasture stocking rate
   step: 0.05
   min: 0.05
   max: 1.0
+
+yield_tech_change: 0          # crop yield change per year from technology: yields are multiplied by
+                              # (1 + yield_tech_change x years since start_year); 0 = no change

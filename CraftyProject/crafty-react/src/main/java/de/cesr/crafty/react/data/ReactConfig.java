@@ -92,6 +92,9 @@ public final class ReactConfig {
 	double stockingStep = 0.05;
 	double stockingMin = 0.05;
 	double stockingMax = 1.0;
+	// Crop yield change per year from technology: the yield surface is multiplied by
+	// (1 + yield_tech_change x years since start_year). 0 means no change.
+	double yieldTechChange = 0;
 
 	/** A config holding every default. */
 	public static ReactConfig defaults() {
@@ -209,6 +212,11 @@ public final class ReactConfig {
 		return stockingMax;
 	}
 
+	/** Crop yield change per year from technology, as a fraction of the LPJ-GUESS yield (0 = none). */
+	public double yieldTechChange() {
+		return yieldTechChange;
+	}
+
 	// ---- checks ----
 
 	/** Everything wrong with the settings, as messages; empty if they can be used. */
@@ -256,6 +264,9 @@ public final class ReactConfig {
 		if (!(0 < stockingMin && stockingMin <= stockingInitial && stockingInitial <= stockingMax)) {
 			problems.add("stocking values must satisfy 0 < min <= initial <= max");
 		}
+		if (yieldTechChange <= -1) {
+			problems.add("yield_tech_change must be above -1, so a year's technology change cannot take yields to 0");
+		}
 		return problems;
 	}
 
@@ -293,6 +304,7 @@ public final class ReactConfig {
 				"prospect: alpha " + prospectAlpha + ", beta " + prospectBeta
 						+ ", lambda " + prospectLambda,
 				"stocking: initial " + stockingInitial + ", step " + stockingStep + ", min " + stockingMin + ", max "
-						+ stockingMax);
+						+ stockingMax,
+				"yield_tech_change: " + yieldTechChange);
 	}
 }

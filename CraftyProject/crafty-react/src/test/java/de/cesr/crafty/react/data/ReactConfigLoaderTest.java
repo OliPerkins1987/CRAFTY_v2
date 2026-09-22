@@ -43,6 +43,7 @@ class ReactConfigLoaderTest {
 		assertEquals(0.05, config.stockingStep());
 		assertEquals(0.05, config.stockingMin());
 		assertEquals(1.0, config.stockingMax());
+		assertEquals(0.0, config.yieldTechChange(), "No technology change unless the file sets one");
 		assertEquals(10, config.yieldFileUnits().toTonnesPerHectare());
 		assertEquals(10, config.irrigationFileUnits().toCubicMetresPerHectare());
 	}
@@ -81,10 +82,12 @@ class ReactConfigLoaderTest {
 				"prospect:",
 				"  lambda: 3",
 				"stocking:",
-				"  max: 0.9");
+				"  max: 0.9",
+				"yield_tech_change: 0.01");
 
 		ReactConfig config = ReactConfigLoader.load(project);
 
+		assertEquals(0.01, config.yieldTechChange());
 		assertEquals(project.resolve("data/caps/ssp126"), config.capitalsFolder(project, "ssp126"));
 		assertEquals(1, config.yieldFileUnits().toTonnesPerHectare());
 		assertEquals(1, config.irrigationFileUnits().toCubicMetresPerHectare());
@@ -194,7 +197,8 @@ class ReactConfigLoaderTest {
 				"  lambda: 0",
 				"stocking:",
 				"  initial: 1.5",
-				"  step: 0");
+				"  step: 0",
+				"yield_tech_change: -1");
 
 		String message = e.getMessage();
 		assertTrue(message.contains("spinup_iterations must be 0 or more"), message);
@@ -204,6 +208,7 @@ class ReactConfigLoaderTest {
 		assertTrue(message.contains("prospect.lambda"), message);
 		assertTrue(message.contains("stocking.step"), message);
 		assertTrue(message.contains("0 < min <= initial <= max"), message);
+		assertTrue(message.contains("yield_tech_change must be above -1"), message);
 	}
 
 	@Test

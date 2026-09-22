@@ -108,6 +108,8 @@ public final class ReactConfigLoader {
 		c.stockingMax = stocking.number("max", c.stockingMax);
 		stocking.rejectUnknownKeys();
 
+		c.yieldTechChange = root.number("yield_tech_change", c.yieldTechChange);
+
 		root.rejectUnknownKeys();
 	}
 
