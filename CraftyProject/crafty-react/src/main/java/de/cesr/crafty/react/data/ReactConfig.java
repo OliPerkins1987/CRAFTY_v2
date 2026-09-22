@@ -92,6 +92,8 @@ public final class ReactConfig {
 	double stockingStep = 0.05;
 	double stockingMin = 0.05;
 	double stockingMax = 1.0;
+	// The most of the pasture NPP that can be taken off (0-1); the stocking rate sets how much of it is.
+	double stockingHarvest = 0.5;
 	// Crop yield change per year from technology: the yield surface is multiplied by
 	// (1 + yield_tech_change x years since start_year). 0 means no change.
 	double yieldTechChange = 0;
@@ -212,6 +214,11 @@ public final class ReactConfig {
 		return stockingMax;
 	}
 
+	/** The most of the pasture NPP that can be taken off, 0–1 (R's {@code harvest_frac}). */
+	public double stockingHarvest() {
+		return stockingHarvest;
+	}
+
 	/** Crop yield change per year from technology, as a fraction of the LPJ-GUESS yield (0 = none). */
 	public double yieldTechChange() {
 		return yieldTechChange;
@@ -261,6 +268,9 @@ public final class ReactConfig {
 		if (stockingStep <= 0) {
 			problems.add("stocking.step must be above 0");
 		}
+		if (!(0 < stockingHarvest && stockingHarvest <= 1)) {
+			problems.add("stocking.harvest must be above 0 and at most 1: it is a fraction of the pasture NPP");
+		}
 		if (!(0 < stockingMin && stockingMin <= stockingInitial && stockingInitial <= stockingMax)) {
 			problems.add("stocking values must satisfy 0 < min <= initial <= max");
 		}
@@ -304,7 +314,7 @@ public final class ReactConfig {
 				"prospect: alpha " + prospectAlpha + ", beta " + prospectBeta
 						+ ", lambda " + prospectLambda,
 				"stocking: initial " + stockingInitial + ", step " + stockingStep + ", min " + stockingMin + ", max "
-						+ stockingMax,
+						+ stockingMax + ", harvest " + stockingHarvest,
 				"yield_tech_change: " + yieldTechChange);
 	}
 }

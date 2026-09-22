@@ -106,6 +106,7 @@ public final class ReactConfigLoader {
 		c.stockingStep = stocking.number("step", c.stockingStep);
 		c.stockingMin = stocking.number("min", c.stockingMin);
 		c.stockingMax = stocking.number("max", c.stockingMax);
+		c.stockingHarvest = stocking.number("harvest", c.stockingHarvest);
 		stocking.rejectUnknownKeys();
 
 		c.yieldTechChange = root.number("yield_tech_change", c.yieldTechChange);

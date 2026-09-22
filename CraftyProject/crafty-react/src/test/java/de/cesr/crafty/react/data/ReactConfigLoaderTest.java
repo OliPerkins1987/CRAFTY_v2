@@ -43,6 +43,7 @@ class ReactConfigLoaderTest {
 		assertEquals(0.05, config.stockingStep());
 		assertEquals(0.05, config.stockingMin());
 		assertEquals(1.0, config.stockingMax());
+		assertEquals(0.5, config.stockingHarvest());
 		assertEquals(0.0, config.yieldTechChange(), "No technology change unless the file sets one");
 		assertEquals(10, config.yieldFileUnits().toTonnesPerHectare());
 		assertEquals(10, config.irrigationFileUnits().toCubicMetresPerHectare());
@@ -83,6 +84,7 @@ class ReactConfigLoaderTest {
 				"  lambda: 3",
 				"stocking:",
 				"  max: 0.9",
+				"  harvest: 0.4",
 				"yield_tech_change: 0.01");
 
 		ReactConfig config = ReactConfigLoader.load(project);
@@ -96,6 +98,7 @@ class ReactConfigLoaderTest {
 		assertEquals(3.0, config.prospectLambda());
 		assertEquals(0.88, config.prospectAlpha(), "Unset keys in a section keep their defaults");
 		assertEquals(0.9, config.stockingMax());
+		assertEquals(0.4, config.stockingHarvest());
 		assertEquals(project.resolve("worlds/react/cell_key.csv"), config.cellKeyFile(project));
 	}
 
@@ -198,6 +201,7 @@ class ReactConfigLoaderTest {
 				"stocking:",
 				"  initial: 1.5",
 				"  step: 0",
+				"  harvest: 0",
 				"yield_tech_change: -1");
 
 		String message = e.getMessage();
@@ -209,6 +213,7 @@ class ReactConfigLoaderTest {
 		assertTrue(message.contains("stocking.step"), message);
 		assertTrue(message.contains("0 < min <= initial <= max"), message);
 		assertTrue(message.contains("yield_tech_change must be above -1"), message);
+		assertTrue(message.contains("stocking.harvest must be above 0 and at most 1"), message);
 	}
 
 	@Test

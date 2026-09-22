@@ -48,6 +48,8 @@ stocking:                     # pasture stocking rate
   step: 0.05
   min: 0.05
   max: 1.0
+  harvest: 0.5                # the most of the pasture NPP that can be taken off (0-1);
+                              # the stocking rate sets how much of that is
 
 yield_tech_change: 0          # crop yield change per year from technology: yields are multiplied by
                               # (1 + yield_tech_change x years since start_year); 0 = no change
