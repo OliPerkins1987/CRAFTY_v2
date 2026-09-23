@@ -74,7 +74,7 @@ public final class ReactConfig {
 	String irrigationCost = "worlds/react/irrigation/Irrigation_cost.csv";
 	String suitabilities = "worlds/react/suitabilities/{scenario}/{type}";
 	String capitals = "worlds/react/capitals/{scenario}";
-	String irrigationDemand = "worlds/react/irrigation/{scenario}/Irrigation_demand_{year}.csv";
+	String irrigationWaterDemand = "worlds/react/irrigation/{scenario}/Irrigation_demand_{year}.csv";
 	String runoff = "worlds/react/irrigation/{scenario}/Runoff_{year}.csv";
 	YieldUnits yieldFileUnits = YieldUnits.KG_PER_M2;
 	WaterUnits irrigationFileUnits = WaterUnits.MM;
@@ -134,8 +134,8 @@ public final class ReactConfig {
 		return resolve(projectPath, "capitals", capitals, scenario, null, null);
 	}
 
-	public Path irrigationDemandFile(Path projectPath, String scenario, int year) {
-		return resolve(projectPath, "irrigation_demand", irrigationDemand, scenario, year, null);
+	public Path irrigationWaterDemandFile(Path projectPath, String scenario, int year) {
+		return resolve(projectPath, "irrigation_demand", irrigationWaterDemand, scenario, year, null);
 	}
 
 	public Path runoffFile(Path projectPath, String scenario, int year) {
@@ -235,12 +235,12 @@ public final class ReactConfig {
 		checkTemplate(problems, "irrigation_cost", irrigationCost, List.of());
 		checkTemplate(problems, "suitabilities", suitabilities, List.of("scenario", "type"));
 		checkTemplate(problems, "capitals", capitals, List.of("scenario"));
-		checkTemplate(problems, "irrigation_demand", irrigationDemand, List.of("scenario", "year"));
+		checkTemplate(problems, "irrigation_demand", irrigationWaterDemand, List.of("scenario", "year"));
 		checkTemplate(problems, "runoff", runoff, List.of("scenario", "year"));
 		if (!suitabilities.contains("{type}")) {
 			problems.add("inputs.suitabilities must contain {type}, so crops and pasture are read from different folders");
 		}
-		if (!irrigationDemand.contains("{year}")) {
+		if (!irrigationWaterDemand.contains("{year}")) {
 			problems.add("inputs.irrigation_demand must contain {year}");
 		}
 		if (!runoff.contains("{year}")) {
@@ -303,7 +303,7 @@ public final class ReactConfig {
 				"inputs.irrigation_cost: " + irrigationCost,
 				"inputs.suitabilities: " + suitabilities,
 				"inputs.capitals: " + capitals,
-				"inputs.irrigation_demand: " + irrigationDemand,
+				"inputs.irrigation_demand: " + irrigationWaterDemand,
 				"inputs.runoff: " + runoff,
 				"inputs.yield_file_units: " + yieldFileUnits + " (x" + yieldFileUnits.toTonnesPerHectare() + " -> t/ha)",
 				"inputs.irrigation_file_units: " + irrigationFileUnits + " (x"

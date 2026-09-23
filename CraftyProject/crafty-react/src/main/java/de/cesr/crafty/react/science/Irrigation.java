@@ -20,7 +20,7 @@ public final class Irrigation {
 	}
 
 	/** The shape of the demand's response to N: the same fit, and the same clamps, as the yield's alpha. */
-	public static double demandAlpha(double d0, double d0200, double d1000) {
+	public static double waterDemandAlpha(double d0, double d0200, double d1000) {
 		return YieldResponse.alpha(d0, d0200, d1000);
 	}
 
@@ -30,17 +30,17 @@ public final class Irrigation {
 	 * @param nitrogen N applied, kg/ha. Which N is phase 3's choice: the AFT's current N when irrigation
 	 *                 reacts, its {@code Nfert_rate} when it does not.
 	 */
-	public static double demand(double d0, double d1000, double alphaD, double nitrogen) {
+	public static double waterDemand(double d0, double d1000, double alphaD, double nitrogen) {
 		return d0 + (d1000 - d0) * (1 - Math.exp(-alphaD * YieldResponse.clamp01(nitrogen / YieldResponse.N_SCALE)));
 	}
 
 	/**
-	 * Water the AFT would draw to meet the demand, m³/ha: {@code demand / efficiency}.
+	 * Water the AFT would draw to meet the demand, m³/ha: {@code waterDemand / efficiency}.
 	 *
 	 * @param efficiency the AFT's {@code react_I_eff} when irrigation reacts, 1 when it does not
 	 */
-	public static double required(double demand, double efficiency) {
-		return demand / efficiency;
+	public static double required(double waterDemand, double efficiency) {
+		return waterDemand / efficiency;
 	}
 
 	/** Water actually applied, m³/ha: what is required, but no more than the runoff. */

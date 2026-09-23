@@ -112,7 +112,7 @@ class ReactConfigLoaderTest {
 				config.suitabilityFolder(project, "ssp126", LpjgType.PASTURE));
 		assertEquals(project.resolve("worlds/react/capitals/ssp126"), config.capitalsFolder(project, "ssp126"));
 		assertEquals(project.resolve("worlds/react/irrigation/ssp126/Irrigation_demand_2020.csv"),
-				config.irrigationDemandFile(project, "ssp126", 2020));
+				config.irrigationWaterDemandFile(project, "ssp126", 2020));
 		assertEquals(project.resolve("worlds/react/irrigation/ssp126/Runoff_2030.csv"),
 				config.runoffFile(project, "ssp126", 2030));
 		assertEquals(project.resolve("AFTs/react/Reactive_parameters.csv"), config.parametersFile(project));

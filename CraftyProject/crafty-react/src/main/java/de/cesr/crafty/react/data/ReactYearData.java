@@ -33,16 +33,16 @@ public final class ReactYearData {
 	private final int year;
 	private final Map<String, float[][]> cropYields;
 	private final Map<String, float[]> pastureNpp;
-	private final Map<String, float[][]> irrigationDemand;
+	private final Map<String, float[][]> irrigationWaterDemand;
 	private final float[] runoff;
 	private final Map<String, float[]> capitals;
 
 	private ReactYearData(int year, Map<String, float[][]> cropYields, Map<String, float[]> pastureNpp,
-			Map<String, float[][]> irrigationDemand, float[] runoff, Map<String, float[]> capitals) {
+			Map<String, float[][]> irrigationWaterDemand, float[] runoff, Map<String, float[]> capitals) {
 		this.year = year;
 		this.cropYields = cropYields;
 		this.pastureNpp = pastureNpp;
-		this.irrigationDemand = irrigationDemand;
+		this.irrigationWaterDemand = irrigationWaterDemand;
 		this.runoff = runoff;
 		this.capitals = capitals;
 	}
@@ -79,12 +79,12 @@ public final class ReactYearData {
 			}
 		}
 
-		Map<String, float[][]> irrigationDemand = new LinkedHashMap<>();
+		Map<String, float[][]> irrigationWaterDemand = new LinkedHashMap<>();
 		float[] runoff = new float[0];
 		Set<String> irrigatedCrops = lpjgNames(checked.irrigatedCrops());
 		if (!irrigatedCrops.isEmpty()) {
-			irrigationDemand.putAll(readByName(config.irrigationDemandFile(project, context.scenario(), year), grid,
-					irrigatedCrops, ReactStartupCheck.DEMAND_LEVELS, waterFactor));
+			irrigationWaterDemand.putAll(readByName(config.irrigationWaterDemandFile(project, context.scenario(), year),
+					grid, irrigatedCrops, ReactStartupCheck.WATER_DEMAND_LEVELS, waterFactor));
 			runoff = LpjFileReader.read(config.runoffFile(project, context.scenario(), year), grid,
 					List.of(ReactStartupCheck.RUNOFF), waterFactor)[0];
 		}
@@ -102,11 +102,11 @@ public final class ReactYearData {
 
 		LOGGER.info(String.format("CRAFTY-react loaded year %d in %.2f s: crops %s, pasture %s, irrigation demand %s,"
 				+ " runoff %s, capitals %s", year, (System.nanoTime() - start) / 1e9, cropYields.keySet(),
-				pastureNpp.keySet(), irrigationDemand.keySet(), runoff.length > 0 ? "yes" : "not needed",
+				pastureNpp.keySet(), irrigationWaterDemand.keySet(), runoff.length > 0 ? "yes" : "not needed",
 				capitals.keySet()));
 
 		return new ReactYearData(year, Collections.unmodifiableMap(cropYields), Collections.unmodifiableMap(pastureNpp),
-				Collections.unmodifiableMap(irrigationDemand), runoff, Collections.unmodifiableMap(capitals));
+				Collections.unmodifiableMap(irrigationWaterDemand), runoff, Collections.unmodifiableMap(capitals));
 	}
 
 	private static Set<String> lpjgNames(Iterable<AftReactParameters> afts) {
@@ -168,10 +168,11 @@ public final class ReactYearData {
 	/**
 	 * A crop's irrigation demand at one N level, in m³/ha, for every pixel.
 	 *
-	 * @param level one of {@link ReactStartupCheck#DEMAND_LEVELS}: {@code i0}, {@code i0200}, {@code i1000}
+	 * @param level one of {@link ReactStartupCheck#WATER_DEMAND_LEVELS}: {@code i0}, {@code i0200}, {@code i1000}
 	 */
-	public float[] demand(String lpjgName, String level) {
-		return column(irrigationDemand, lpjgName, ReactStartupCheck.DEMAND_LEVELS, level, "irrigation demand");
+	public float[] waterDemand(String lpjgName, String level) {
+		return column(irrigationWaterDemand, lpjgName, ReactStartupCheck.WATER_DEMAND_LEVELS, level,
+				"irrigation demand");
 	}
 
 	/** Runoff, in m³/ha, for every pixel. */
@@ -203,7 +204,7 @@ public final class ReactYearData {
 
 	/** The crops whose irrigation demand was loaded. */
 	public Set<String> irrigatedCrops() {
-		return irrigationDemand.keySet();
+		return irrigationWaterDemand.keySet();
 	}
 
 	/** The capitals loaded. */

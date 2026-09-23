@@ -52,8 +52,8 @@ class ReactYearDataTest {
 		int a = pixelA(ReactToyData.context(dir));
 
 		assertEquals(12.32, year.pasture("Pasture_sum")[a], 1e-4, "1.232 kg/m2 = 12.32 t/ha");
-		assertEquals(139.11, year.demand("CerealsC3", "i0")[a], 1e-2, "13.911 mm = 139.11 m3/ha");
-		assertEquals(606.51, year.demand("CerealsC3", "i1000")[a], 1e-2);
+		assertEquals(139.11, year.waterDemand("CerealsC3", "i0")[a], 1e-2, "13.911 mm = 139.11 m3/ha");
+		assertEquals(606.51, year.waterDemand("CerealsC3", "i1000")[a], 1e-2);
 		assertEquals(7199.0, year.runoff()[a], 1e-1, "719.9 mm = 7199 m3/ha");
 		assertEquals(0.893, year.capital("react_GDP_50")[a], 1e-4, "Capitals are read as written");
 		assertEquals(Set.of("react_GDP_100", "react_GDP_50"), year.capitals());

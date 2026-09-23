@@ -84,7 +84,7 @@ public final class ReactConfigLoader {
 		c.irrigationCost = inputs.text("irrigation_cost", c.irrigationCost);
 		c.suitabilities = inputs.text("suitabilities", c.suitabilities);
 		c.capitals = inputs.text("capitals", c.capitals);
-		c.irrigationDemand = inputs.text("irrigation_demand", c.irrigationDemand);
+		c.irrigationWaterDemand = inputs.text("irrigation_demand", c.irrigationWaterDemand);
 		c.runoff = inputs.text("runoff", c.runoff);
 		c.yieldFileUnits = inputs.choice("yield_file_units", c.yieldFileUnits, ReactConfig.YieldUnits.values());
 		c.irrigationFileUnits = inputs.choice("irrigation_file_units", c.irrigationFileUnits,

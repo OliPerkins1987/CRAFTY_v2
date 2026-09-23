@@ -47,7 +47,7 @@ public final class ReactStartupCheck {
 	public static final List<String> CROP_LEVELS = List.of("0", "0200", "1000", "i0", "i0200", "i1000");
 
 	/** The irrigation demand columns needed for each irrigated crop. */
-	public static final List<String> DEMAND_LEVELS = List.of("i0", "i0200", "i1000");
+	public static final List<String> WATER_DEMAND_LEVELS = List.of("i0", "i0200", "i1000");
 
 	/** The runoff file's value column. */
 	public static final String RUNOFF = "Total";
@@ -299,17 +299,17 @@ public final class ReactStartupCheck {
 		if (irrigated.isEmpty()) {
 			return;
 		}
-		Set<String> demandColumns = new LinkedHashSet<>();
+		Set<String> waterDemandColumns = new LinkedHashSet<>();
 		for (AftReactParameters aft : irrigated) {
-			DEMAND_LEVELS.forEach(level -> demandColumns.add(aft.lpjgName() + level));
+			WATER_DEMAND_LEVELS.forEach(level -> waterDemandColumns.add(aft.lpjgName() + level));
 		}
-		List<Path> demandFiles = new ArrayList<>();
+		List<Path> waterDemandFiles = new ArrayList<>();
 		List<Path> runoffFiles = new ArrayList<>();
 		for (int year = context.firstYear(); year <= context.lastYear(); year++) {
-			collectIfPresent(config.irrigationDemandFile(project, context.scenario(), year), demandFiles);
+			collectIfPresent(config.irrigationWaterDemandFile(project, context.scenario(), year), waterDemandFiles);
 			collectIfPresent(config.runoffFile(project, context.scenario(), year), runoffFiles);
 		}
-		requireColumns(demandFiles, demandColumns);
+		requireColumns(waterDemandFiles, waterDemandColumns);
 		requireColumns(runoffFiles, List.of(RUNOFF));
 	}
 
