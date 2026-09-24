@@ -49,6 +49,7 @@ import de.cesr.crafty.react.data.ReactToyData;
 import de.cesr.crafty.react.data.ReactYearData;
 import de.cesr.crafty.react.decisions.CropDecisions;
 import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.PastureDecisions;
 import de.cesr.crafty.react.decisions.YearPrices;
 import de.cesr.crafty.react.science.CropSurfaces;
 
@@ -374,26 +375,56 @@ class ReactiveUpdaterTest {
 	}
 
 	@Test
+	void thePastureStageIsDecidedOnceAYearSoItsSpinUpHappensOnce() {
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(toyContext()));
+
+		Timestep.setCurrentYear(2020);
+		updater.step(); // year zero, during initialisation
+		double[] yearZero = updater.getPastureDecisions().managements().get("IntP").stocking().clone();
+		updater.step(); // the first scheduled step, for the same year
+		assertEquals(2020, updater.getPastureDecisions().lastYear());
+		assertArrayEquals(yearZero, updater.getPastureDecisions().managements().get("IntP").stocking(), 0,
+				"the same year is not decided again");
+
+		// The same as deciding 2020 once, on its own.
+		ReactInputs fresh = ReactInputs.create(ReactConfig.defaults(), toyContext().build());
+		DecisionUnits units = DecisionUnits.build(fresh.checked().cellKey(), fresh.context().regions());
+		PastureDecisions once = PastureDecisions.create(fresh, units);
+		once.decide(fresh.forYear(2020),
+				YearPrices.forYear(2020, once.servicesNeedingPrices(), units, fresh.context().prices()));
+		assertArrayEquals(once.managements().get("IntP").stocking(), yearZero, 0);
+
+		Timestep.setCurrentYear(2021);
+		updater.step();
+		assertEquals(2021, updater.getPastureDecisions().lastYear());
+		assertEquals(2021, updater.getCropDecisions().lastYear(), "both stages decide each year");
+	}
+
+	@Test
 	void stagesCanBePassedIn() {
 		ReactInputs inputs = toyInputs(toyContext());
 		DecisionUnits units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
 		CropDecisions crops = CropDecisions.create(inputs, units);
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), inputs, units, crops);
+		PastureDecisions pasture = PastureDecisions.create(inputs, units);
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), inputs, units, crops, pasture);
 
 		updater.step();
 
 		assertSame(crops, updater.getCropDecisions());
+		assertSame(pasture, updater.getPastureDecisions());
 		assertEquals(2020, crops.lastYear());
+		assertEquals(2020, pasture.lastYear());
 	}
 
 	@Test
-	void filesStillPassThroughUnchangedWhileTheCropsAreDecided() throws IOException {
+	void filesStillPassThroughUnchangedWhileTheStagesDecide() throws IOException {
 		RunInputFiles.useRunFolder(tempDir.resolve("run"));
 		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(capitals, intensityCosts), toyInputs(toyContext()));
 
 		updater.step();
 
 		assertEquals(2020, updater.getCropDecisions().lastYear());
+		assertEquals(2020, updater.getPastureDecisions().lastYear());
 		for (Path original : List.of(capitals, intensityCosts)) {
 			assertArrayEquals(Files.readAllBytes(original), Files.readAllBytes(RunInputFiles.resolve(original)),
 					"Nothing is written until phase 5");
@@ -415,7 +446,23 @@ class ReactiveUpdaterTest {
 	}
 
 	@Test
-	void withNoCropElementOnOnlyTheDataIsLoaded() {
+	void aMissingPasturePriceNamesTheProblem() {
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(),
+				toyInputs(ReactToyData.context(tempDir).prices((service, region, year) -> {
+					if (service.equals("Pasture")) {
+						throw new ReactInputException("no weight");
+					}
+					return 300;
+				})));
+
+		ReactInputException e = assertThrows(ReactInputException.class, () -> updater.decideYear(2020));
+
+		assertTrue(e.getMessage().contains("Pasture") && e.getMessage().contains("2020")
+				&& e.getMessage().contains("no weight"), e.getMessage());
+	}
+
+	@Test
+	void withOnlyStockingOnPastureIsDecidedAndCropsAreNot() {
 		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(ReactToyData.context(tempDir)
 				.off(ReactElement.FERTILISER, ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY)));
 
@@ -424,5 +471,31 @@ class ReactiveUpdaterTest {
 		assertEquals(2020, updater.getInputs().currentYear().year());
 		assertTrue(updater.getCropDecisions().managements().isEmpty(), "phase 3 plan, Q6");
 		assertEquals(null, updater.getCropDecisions().lastYear());
+		assertEquals(2020, updater.getPastureDecisions().lastYear());
+		assertEquals(List.of("IntP"), List.copyOf(updater.getPastureDecisions().managements().keySet()));
+	}
+
+	@Test
+	void withOnlyFertiliserAndIrrigationOnCropsAreDecidedAndPastureIsNot() {
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(ReactToyData.context(tempDir)
+				.off(ReactElement.OTHER_INTENSITY, ReactElement.STOCKING)));
+
+		updater.step();
+
+		assertEquals(2020, updater.getCropDecisions().lastYear());
+		assertTrue(updater.getPastureDecisions().managements().isEmpty(), "phase 3 plan, Q6");
+		assertEquals(null, updater.getPastureDecisions().lastYear());
+	}
+
+	@Test
+	void withNothingToDecideOnlyTheDataIsLoaded() {
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(),
+				toyInputs(ReactToyData.context(tempDir).off(ReactElement.values())));
+
+		updater.step();
+
+		assertEquals(2020, updater.getInputs().currentYear().year());
+		assertEquals(null, updater.getCropDecisions().lastYear());
+		assertEquals(null, updater.getPastureDecisions().lastYear());
 	}
 }

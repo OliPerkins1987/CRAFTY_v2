@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import de.cesr.crafty.react.data.CellKey;
-import de.cesr.crafty.react.data.ReactConfig;
+import de.cesr.crafty.react.data.ReactConfigLoader;
 import de.cesr.crafty.react.data.ReactInputs;
 import de.cesr.crafty.react.data.ReactToyData;
 import de.cesr.crafty.react.data.ReactYearData;
@@ -30,7 +30,8 @@ import de.cesr.crafty.react.science.GoldenCsv;
  * what each AFT decides in each unit and year to {@code crop_years.csv}.
  *
  * This test writes that world as a toy project, runs {@link CropDecisions} over the same three years with
- * the default settings (5 spin-up steps, then 1 a year), and checks every row, one test per quantity. The
+ * the default settings, apart from the spin-up: 5 steps, as the R script has them (the default is now 10),
+ * then 1 a year. It checks every row, one test per quantity. The
  * world has pixels in two regions with different prices, units that reach Nmax and come back down after a
  * price crash, units that fall below the anchor, and pixels short of water.
  */
@@ -40,6 +41,9 @@ class CropDecisionsGoldenTest {
 	private static final String EXPECTED = "crop_years";
 	private static final int FIRST_YEAR = 2020;
 	private static final int LAST_YEAR = 2022;
+
+	/** The spin-up make_golden_29b.R uses, set in the project's react_config.yaml. */
+	private static final int SPINUP_STEPS = 5;
 
 	/** The AFTs, as make_golden_29b.R has them. Baselines are set in the context below. */
 	private static final String[] ROWS = {
@@ -65,7 +69,7 @@ class CropDecisionsGoldenTest {
 		}
 		context.prices((service, region, year) -> prices.get(region + " " + year));
 
-		ReactInputs inputs = ReactInputs.create(ReactConfig.defaults(), context.build());
+		ReactInputs inputs = ReactInputs.create(ReactConfigLoader.load(dir), context.build());
 		key = inputs.checked().cellKey();
 		units = DecisionUnits.build(key, inputs.context().regions());
 		CropDecisions crops = CropDecisions.create(inputs, units);
@@ -93,6 +97,7 @@ class CropDecisionsGoldenTest {
 		ReactToyData.services(dir);
 		ReactToyData.globalCosts(dir);
 		ReactToyData.parameters(dir, ROWS);
+		ReactToyData.write(dir, ReactConfigLoader.LOCATION.toString(), "spinup_iterations: " + SPINUP_STEPS);
 		ReactToyData.Context context = ReactToyData.context(dir).years(FIRST_YEAR, LAST_YEAR)
 				.withoutAft("IntP").withoutAft("IntFodder").withoutAft("AF").withoutAft("Urban")
 				.aft("IntC3C_irrig", 200, 0.75, true, false)

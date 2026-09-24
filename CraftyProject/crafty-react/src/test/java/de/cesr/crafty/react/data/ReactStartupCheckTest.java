@@ -254,6 +254,18 @@ class ReactStartupCheckTest {
 		run(ReactToyData.context(dir).off(ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY, ReactElement.STOCKING));
 	}
 
+	@Test
+	void withStockingOnThePastureServicesCostIsNeededEvenWithOtherIntensityOff() {
+		// The stocking decision weighs husbandry x the service's cost whatever the other-intensity switch
+		// (phase 4 plan, Q4).
+		ReactToyData.write(dir, "costs/global/global_costs.csv", "Item,Cost", "Nfert,1.08", "Water,0.5", "Stocking,500",
+				"C3cereals,50");
+
+		String message = problems(ReactToyData.context(dir).off(ReactElement.OTHER_INTENSITY));
+
+		assertMentions(message, "no row for Pasture", "IntP's stocking decision weighs its husbandry");
+	}
+
 	// ---- check 9: cells ----
 
 	@Test

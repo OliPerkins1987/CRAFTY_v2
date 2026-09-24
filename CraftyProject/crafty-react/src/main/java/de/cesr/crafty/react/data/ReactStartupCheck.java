@@ -247,6 +247,14 @@ public final class ReactStartupCheck {
 				needed.putIfAbsent(service, "other intensity is reactive and a reactive AFT produces " + service);
 			}
 		}
+		if (context.isReactive(ReactElement.STOCKING)) {
+			// The stocking decision weighs the husbandry cost, husbandry x the service's cost, whether or not
+			// other intensity is reactive (phase 4 plan, Q4).
+			for (AftReactParameters aft : parameters.reactive(LpjgType.PASTURE)) {
+				needed.putIfAbsent(aft.service(), "stocking is reactive, and " + aft.label()
+						+ "'s stocking decision weighs its husbandry at the cost of " + aft.service());
+			}
+		}
 		for (String item : baseCosts.missing(needed.keySet())) {
 			problems.add(baseCosts.file() + " has no row for " + item + ", which is needed because " + needed.get(item));
 		}

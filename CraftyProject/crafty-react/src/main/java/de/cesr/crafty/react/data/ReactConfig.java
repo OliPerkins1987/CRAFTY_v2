@@ -80,7 +80,8 @@ public final class ReactConfig {
 	WaterUnits irrigationFileUnits = WaterUnits.MM;
 
 	// ---- tunable settings (phases 3 and 4 use these) ----
-	int spinupIterations = 5;
+	// Steps taken in the first year decided, for N and stocking alike, before one step a year.
+	int spinupIterations = 10;
 	double nMaxFactor = 1.5;
 	double nAdjustmentScale = 0.15;
 	// The prospect reference point is not a setting here: it is each Prospect AFT's react_N_par

@@ -33,7 +33,7 @@ class ReactConfigLoaderTest {
 		ReactConfig config = ReactConfigLoader.load(project);
 
 		assertEquals(ReactConfig.defaults().toString(), config.toString());
-		assertEquals(5, config.spinupIterations());
+		assertEquals(10, config.spinupIterations(), "For N and stocking alike (phase 4 plan, Q2)");
 		assertEquals(1.5, config.nMaxFactor());
 		assertEquals(0.15, config.nAdjustmentScale());
 		assertEquals(0.88, config.prospectAlpha());
@@ -78,7 +78,7 @@ class ReactConfigLoaderTest {
 				"  capitals: data/caps/{scenario}",
 				"  yield_file_units: t_per_ha",
 				"  irrigation_file_units: m3_per_ha",
-				"spinup_iterations: 10",
+				"spinup_iterations: 7",
 				"n_max_factor: 2",
 				"prospect:",
 				"  lambda: 3",
@@ -93,7 +93,7 @@ class ReactConfigLoaderTest {
 		assertEquals(project.resolve("data/caps/ssp126"), config.capitalsFolder(project, "ssp126"));
 		assertEquals(1, config.yieldFileUnits().toTonnesPerHectare());
 		assertEquals(1, config.irrigationFileUnits().toCubicMetresPerHectare());
-		assertEquals(10, config.spinupIterations());
+		assertEquals(7, config.spinupIterations(), "Not the default of 10, so the file's value is what was read");
 		assertEquals(2.0, config.nMaxFactor(), "A whole number is fine where a number is expected");
 		assertEquals(3.0, config.prospectLambda());
 		assertEquals(0.88, config.prospectAlpha(), "Unset keys in a section keep their defaults");

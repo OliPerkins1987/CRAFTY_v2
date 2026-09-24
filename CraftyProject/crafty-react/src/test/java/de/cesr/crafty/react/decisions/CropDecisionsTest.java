@@ -124,7 +124,9 @@ class CropDecisionsTest {
 
 	@Test
 	void theFirstYearIsSpunUpFromTheAnchor() {
-		// At 300 $/t N climbs part of the way each step, rather than jumping straight to Nmax.
+		// At 300 $/t N climbs part of the way each step, rather than jumping straight to Nmax. Five steps,
+		// set here rather than taken from the default, so N is still short of Nmax.
+		settings("spinup_iterations: 5");
 		Run run = run(ReactToyData.context(dir).prices((service, region, year) -> 300));
 		run.decide(2020);
 
@@ -195,6 +197,7 @@ class CropDecisionsTest {
 
 	@Test
 	void eachRegionIsPricedSeparately() {
+		settings("spinup_iterations: 5"); // the South's steps are worked out by hand below
 		Run run = run(ReactToyData.context(dir)
 				.prices((service, region, year) -> region.equals("North") ? 3000 : 30));
 		run.decide(2020);
