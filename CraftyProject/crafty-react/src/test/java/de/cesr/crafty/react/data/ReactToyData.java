@@ -147,6 +147,8 @@ public final class ReactToyData {
 		private final Set<ReactElement> reactive = EnumSet.allOf(ReactElement.class);
 		private final Map<Integer, Set<ReactElement>> costFiles = new LinkedHashMap<>();
 		private ReactRunContext.PriceSource prices = (service, region, year) -> 100.0;
+		private int firstYear;
+		private int lastYear;
 
 		private Context(Path project) {
 			this.project = project;
@@ -156,9 +158,21 @@ public final class ReactToyData {
 			aft("IntFodder", 200, 0.75, false, false);
 			aft("AF", 0, 1.0, false, false);
 			aft("Urban", 0, 1.0, false, false);
-			for (int year = FIRST_YEAR; year <= LAST_YEAR; year++) {
+			years(FIRST_YEAR, LAST_YEAR);
+		}
+
+		/**
+		 * Sets the run's years ({@link #FIRST_YEAR} to {@link #LAST_YEAR} unless changed), with every core
+		 * cost file found in each. Call it before {@link #noCostFile}.
+		 */
+		public Context years(int first, int last) {
+			firstYear = first;
+			lastYear = last;
+			costFiles.clear();
+			for (int year = first; year <= last; year++) {
 				costFiles.put(year, EnumSet.allOf(ReactElement.class));
 			}
+			return this;
 		}
 
 		/** Adds or replaces an AFT's baselines. */
@@ -222,7 +236,7 @@ public final class ReactToyData {
 		public ReactRunContext build() {
 			Map<Integer, Set<ReactElement>> costFilesCopy = new LinkedHashMap<>();
 			costFiles.forEach((year, elements) -> costFilesCopy.put(year, EnumSet.copyOf(elements)));
-			return new ReactRunContext(project, "ssp126", FIRST_YEAR, LAST_YEAR, project.resolve("csv/Services.csv"),
+			return new ReactRunContext(project, "ssp126", firstYear, lastYear, project.resolve("csv/Services.csv"),
 					new LinkedHashMap<>(afts), new LinkedHashSet<>(services), new LinkedHashMap<>(cells),
 					new LinkedHashSet<>(regions),
 					reactive.isEmpty() ? EnumSet.noneOf(ReactElement.class) : EnumSet.copyOf(reactive), costFilesCopy,

@@ -42,9 +42,15 @@ import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 import de.cesr.crafty.react.data.CoreFacts;
 import de.cesr.crafty.react.data.ReactConfig;
+import de.cesr.crafty.react.data.ReactElement;
 import de.cesr.crafty.react.data.ReactInputException;
 import de.cesr.crafty.react.data.ReactInputs;
 import de.cesr.crafty.react.data.ReactToyData;
+import de.cesr.crafty.react.data.ReactYearData;
+import de.cesr.crafty.react.decisions.CropDecisions;
+import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.YearPrices;
+import de.cesr.crafty.react.science.CropSurfaces;
 
 class ReactiveUpdaterTest {
 
@@ -326,5 +332,97 @@ class ReactiveUpdaterTest {
 		Timestep.setCurrentYear(2021);
 		updater.step();
 		assertEquals(2, lookups.get(), "A new year must be written");
+	}
+
+	// ---- deciding each year (29c) ----
+
+	/** Writes the toy project and checks it, as react does when a run starts. */
+	private ReactInputs toyInputs(ReactToyData.Context context) {
+		ReactToyData.project(tempDir);
+		return ReactInputs.create(ReactConfig.defaults(), context.build());
+	}
+
+	private ReactToyData.Context toyContext() {
+		return ReactToyData.context(tempDir).prices((service, region, year) -> 300);
+	}
+
+	@Test
+	void eachYearIsDecidedOnceSoTheSpinUpHappensOnce() {
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(toyContext()));
+
+		Timestep.setCurrentYear(2020);
+		updater.step(); // year zero, during initialisation
+		double[] yearZero = updater.getCropDecisions().managements().get("IntC3C_irrig").nitrogen().clone();
+		updater.step(); // the first scheduled step, for the same year
+		assertEquals(2020, updater.getCropDecisions().lastYear());
+		assertArrayEquals(yearZero, updater.getCropDecisions().managements().get("IntC3C_irrig").nitrogen(), 0,
+				"the same year is not decided again");
+
+		// The same as deciding 2020 once, on its own.
+		ReactInputs fresh = ReactInputs.create(ReactConfig.defaults(), toyContext().build());
+		DecisionUnits units = DecisionUnits.build(fresh.checked().cellKey(), fresh.context().regions());
+		CropDecisions once = CropDecisions.create(fresh, units);
+		ReactYearData data = fresh.forYear(2020);
+		once.decide(data, CropSurfaces.fit(data),
+				YearPrices.forYear(2020, once.servicesNeedingPrices(), units, fresh.context().prices()));
+		assertArrayEquals(once.managements().get("IntC3C_irrig").nitrogen(), yearZero, 0);
+
+		Timestep.setCurrentYear(2021);
+		updater.step();
+		assertEquals(2021, updater.getCropDecisions().lastYear());
+		assertEquals(2021, updater.getInputs().currentYear().year());
+	}
+
+	@Test
+	void stagesCanBePassedIn() {
+		ReactInputs inputs = toyInputs(toyContext());
+		DecisionUnits units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
+		CropDecisions crops = CropDecisions.create(inputs, units);
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), inputs, units, crops);
+
+		updater.step();
+
+		assertSame(crops, updater.getCropDecisions());
+		assertEquals(2020, crops.lastYear());
+	}
+
+	@Test
+	void filesStillPassThroughUnchangedWhileTheCropsAreDecided() throws IOException {
+		RunInputFiles.useRunFolder(tempDir.resolve("run"));
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(capitals, intensityCosts), toyInputs(toyContext()));
+
+		updater.step();
+
+		assertEquals(2020, updater.getCropDecisions().lastYear());
+		for (Path original : List.of(capitals, intensityCosts)) {
+			assertArrayEquals(Files.readAllBytes(original), Files.readAllBytes(RunInputFiles.resolve(original)),
+					"Nothing is written until phase 5");
+		}
+	}
+
+	@Test
+	void aYearThatCannotBeDecidedNamesTheProblem() {
+		// step() hands this to LOGGER.fatal, which stops the run; decideYear is where it is raised.
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(),
+				toyInputs(ReactToyData.context(tempDir).prices((service, region, year) -> {
+					throw new ReactInputException("no weight");
+				})));
+
+		ReactInputException e = assertThrows(ReactInputException.class, () -> updater.decideYear(2020));
+
+		assertTrue(e.getMessage().contains("C3cereals") && e.getMessage().contains("2020")
+				&& e.getMessage().contains("no weight"), e.getMessage());
+	}
+
+	@Test
+	void withNoCropElementOnOnlyTheDataIsLoaded() {
+		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(ReactToyData.context(tempDir)
+				.off(ReactElement.FERTILISER, ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY)));
+
+		updater.step();
+
+		assertEquals(2020, updater.getInputs().currentYear().year());
+		assertTrue(updater.getCropDecisions().managements().isEmpty(), "phase 3 plan, Q6");
+		assertEquals(null, updater.getCropDecisions().lastYear());
 	}
 }

@@ -20,23 +20,32 @@ import java.util.function.ToDoubleFunction;
  *
  * Each file sits in {@code src/test/resources/golden/}. Lines starting with {@code #} say where the file
  * came from; the first other line is the header; the {@code case} column names the row ("random", or the
- * edge case it was written for); every other column is a number written to 17 significant digits.
+ * edge case it was written for); numbers are written to 17 significant digits. A few files also have text
+ * columns, such as an AFT or a region, read with {@link Row#text}.
+ *
+ * Public so that tests in other packages (the phase 3 decisions) can use it.
  */
-final class GoldenCsv {
+public final class GoldenCsv {
 
 	/** Allowed relative difference between R and Java. */
-	static final double RELATIVE = 1e-9;
+	public static final double RELATIVE = 1e-9;
 
 	/** Allowed absolute difference, for values near 0. */
-	static final double ABSOLUTE = 1e-12;
+	public static final double ABSOLUTE = 1e-12;
 
-	/** One row: its line in the file, its case name and its numbers by column. */
-	record Row(int line, String name, Map<String, Double> values) {
+	/** One row: its line in the file, its case name and its fields by column, as written. */
+	public record Row(int line, String name, Map<String, String> fields) {
 
-		double get(String column) {
-			Double value = values.get(column);
+		/** A number column. */
+		public double get(String column) {
+			return Double.parseDouble(text(column));
+		}
+
+		/** A text column. */
+		public String text(String column) {
+			String value = fields.get(column);
 			if (value == null) {
-				throw new IllegalArgumentException("No column " + column + " in " + values.keySet());
+				throw new IllegalArgumentException("No column " + column + " in " + fields.keySet());
 			}
 			return value;
 		}
@@ -50,7 +59,7 @@ final class GoldenCsv {
 	private GoldenCsv() {
 	}
 
-	static List<Row> read(String name) {
+	public static List<Row> read(String name) {
 		String resource = "/golden/" + name + ".csv";
 		InputStream stream = GoldenCsv.class.getResourceAsStream(resource);
 		if (stream == null) {
@@ -75,13 +84,13 @@ final class GoldenCsv {
 					throw new IllegalStateException(resource + " line " + line + " has " + fields.length
 							+ " fields; the header has " + header.length);
 				}
-				Map<String, Double> values = new HashMap<>();
+				Map<String, String> values = new HashMap<>();
 				String caseName = "";
 				for (int i = 0; i < header.length; i++) {
 					if (header[i].equals("case")) {
 						caseName = fields[i];
 					} else {
-						values.put(header[i], Double.parseDouble(fields[i]));
+						values.put(header[i], fields[i]);
 					}
 				}
 				rows.add(new Row(line, caseName, values));
@@ -100,7 +109,7 @@ final class GoldenCsv {
 	 * {@value #RELATIVE} (absolute {@value #ABSOLUTE} near 0). Every row is checked, and a failure lists
 	 * every row that differs, by line and case name, with R's value and the Java value.
 	 */
-	static void check(String name, String column, ToDoubleFunction<Row> java) {
+	public static void check(String name, String column, ToDoubleFunction<Row> java) {
 		List<Row> rows = read(name);
 		List<String> failures = new ArrayList<>();
 		for (Row row : rows) {

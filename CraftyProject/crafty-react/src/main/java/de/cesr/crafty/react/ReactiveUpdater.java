@@ -7,6 +7,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.IntFunction;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
@@ -22,6 +23,12 @@ import de.cesr.crafty.react.data.ReactConfigLoader;
 import de.cesr.crafty.react.data.ReactInputException;
 import de.cesr.crafty.react.data.ReactInputs;
 import de.cesr.crafty.react.data.ReactRunContext;
+import de.cesr.crafty.react.data.ReactYearData;
+import de.cesr.crafty.react.decisions.CropDecisions;
+import de.cesr.crafty.react.decisions.CropManagement;
+import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.YearPrices;
+import de.cesr.crafty.react.science.CropSurfaces;
 
 /**
  * The yearly CRAFTY-react step, and the one class crafty-core knows about.
@@ -39,9 +46,14 @@ import de.cesr.crafty.react.data.ReactRunContext;
  * All other columns are copied from the input file, so the model reads a
  * complete file. Files react is not responsible for are left alone.
  *
- * Phase 0 is a pass-through: no columns are replaced yet. In run-folder mode the
- * files react is responsible for are copied unchanged to where the model will
- * read them; in overwrite mode they are left as they are.
+ * Each year it loads that year's data and runs react's stages on it, in order:
+ * the cropland decisions ({@link CropDecisions}; pasture follows in phase 4). It
+ * logs one line for the year and one per crops AFT.
+ *
+ * Nothing is written yet: the files are still passed through (phase 5 writes
+ * react's values into them). In run-folder mode the files react is responsible
+ * for are copied unchanged to where the model will read them; in overwrite mode
+ * they are left as they are.
  */
 public class ReactiveUpdater extends AbstractUpdater {
 
@@ -53,7 +65,16 @@ public class ReactiveUpdater extends AbstractUpdater {
 	/** React's inputs: the checked project, and the year being simulated. Null only in phase 0 tests. */
 	private final ReactInputs inputs;
 
-	/** Year zero is written during initialisation; this stops it being written twice. */
+	/** Where react makes its decisions: built once, from the cell key. Null only in phase 0 tests. */
+	private final DecisionUnits units;
+
+	/** The cropland stage, which carries each AFT's N from year to year. Null only in phase 0 tests. */
+	private final CropDecisions crops;
+
+	/**
+	 * Year zero is stepped during initialisation and again as the first scheduled step. This stops it being
+	 * decided and written twice, so the spin-up happens once.
+	 */
 	private Integer lastYearWritten = null;
 
 	/**
@@ -81,9 +102,28 @@ public class ReactiveUpdater extends AbstractUpdater {
 		this(filesReactWrites, null);
 	}
 
+	/** With react's stages built from its inputs. */
 	ReactiveUpdater(IntFunction<List<Path>> filesReactWrites, ReactInputs inputs) {
+		this(filesReactWrites, inputs, decisionUnits(inputs));
+	}
+
+	private ReactiveUpdater(IntFunction<List<Path>> filesReactWrites, ReactInputs inputs, DecisionUnits units) {
+		this(filesReactWrites, inputs, units, inputs == null ? null : CropDecisions.create(inputs, units));
+	}
+
+	/** With react's stages passed in, so that a test can choose them. */
+	ReactiveUpdater(IntFunction<List<Path>> filesReactWrites, ReactInputs inputs, DecisionUnits units,
+			CropDecisions crops) {
 		this.filesReactWrites = filesReactWrites;
 		this.inputs = inputs;
+		this.units = units;
+		this.crops = crops;
+	}
+
+	/** The decision units, built from the checked cell key and the model's regions. */
+	private static DecisionUnits decisionUnits(ReactInputs inputs) {
+		return inputs == null ? null
+				: DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
 	}
 
 	/** Loads react's settings and checks the project, stopping the run if it cannot be used. */
@@ -130,16 +170,50 @@ public class ReactiveUpdater extends AbstractUpdater {
 			return;
 		}
 		if (inputs != null) {
-			// This year's LPJ-GUESS data; the year before is released. Phases 2-4 use it.
-			inputs.forYear(year);
+			try {
+				decideYear(year);
+			} catch (ReactInputException e) {
+				LOGGER.fatal(e.getMessage());
+			}
 		}
 		writeInputFiles(year);
 		lastYearWritten = year;
 	}
 
+	/**
+	 * Loads a year (the year before is released) and runs react's stages on it: the cropland decisions.
+	 * With no crop AFT to decide (no crop element on), only the data is loaded.
+	 *
+	 * @throws ReactInputException if the year cannot be decided, for example when a service has no price
+	 */
+	void decideYear(int year) {
+		ReactYearData data = inputs.forYear(year);
+		if (crops.managements().isEmpty()) {
+			return;
+		}
+		long start = System.nanoTime();
+		int steps = crops.lastYear() == null ? inputs.config().spinupIterations() : 1;
+		CropSurfaces surfaces = CropSurfaces.fit(data);
+		long fitted = System.nanoTime();
+		YearPrices prices = YearPrices.forYear(year, crops.servicesNeedingPrices(), units, inputs.context().prices());
+		Map<String, CropManagement> decided = crops.decide(data, surfaces, prices);
+
+		LOGGER.info(String.format("CRAFTY-react decided year %d in %.2f s (surfaces fitted in %.2f s; %d %s): %d crops"
+				+ " AFT(s) in %d decision units", year, (System.nanoTime() - start) / 1e9, (fitted - start) / 1e9, steps,
+				steps == 1 ? "step" : "spin-up steps", decided.size(), units.size()));
+		for (CropManagement management : decided.values()) {
+			LOGGER.info("CRAFTY-react " + year + " " + management.summary());
+		}
+	}
+
 	/** React's inputs, once the checks have passed. */
 	public ReactInputs getInputs() {
 		return inputs;
+	}
+
+	/** The cropland stage, holding each crops AFT's management for the last year decided. */
+	public CropDecisions getCropDecisions() {
+		return crops;
 	}
 
 	/** Phase 0 pass-through; see the class comment. */

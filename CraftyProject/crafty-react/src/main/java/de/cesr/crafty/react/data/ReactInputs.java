@@ -44,6 +44,11 @@ public final class ReactInputs {
 		return context;
 	}
 
+	/** React's own settings, from {@code react_config.yaml}. */
+	public ReactConfig config() {
+		return config;
+	}
+
 	/**
 	 * One year's data, loaded on first use. The previous year is dropped, so only one year is held.
 	 * With no element reactive, react changes nothing and the year holds no data.
