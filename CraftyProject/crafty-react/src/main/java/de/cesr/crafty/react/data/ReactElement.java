@@ -3,7 +3,8 @@ package de.cesr.crafty.react.data;
 /**
  * The management elements that can be reactive, each switched on or off in core's config.yaml
  * ({@code reactive_fertilizer}, {@code reactive_irrigation}, {@code reactive_other_intensity},
- * {@code reactive_stocking}). Each one has a spatial cost file that react writes when the element is on.
+ * {@code reactive_stocking}). Each one has a cost that react hands to the model when the element is on,
+ * in place of the reactive AFTs' values in core's spatial cost files.
  *
  * Forestry (rotation) is not listed: it is not implemented yet, and forestry services are refused at
  * startup.

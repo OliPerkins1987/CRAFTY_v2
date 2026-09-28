@@ -158,7 +158,7 @@ public class ModelRunner extends AbstractModelRunner {
         getScheduled().add(new Timestep());
 
         if (ConfigLoader.isReactiveAfts()) {
-            addBeforeCapitalUpdater(loadReactiveUpdater());
+            addAfterProductionCostUpdater(loadReactiveUpdater());
         }
     }
 
@@ -191,14 +191,15 @@ public class ModelRunner extends AbstractModelRunner {
     }
 
     /**
-     * Runs the step directly before CapitalUpdater, both every year and in the
-     * year-zero initial state, so it can write each year's capitals and cost files
-     * before they are read. The same instance goes in both lists, which is what lets
-     * the first yearly step skip it along with the other year-zero updaters.
+     * Runs the step directly after ProductionCostUpdater, both every year and in the
+     * year-zero initial state. By then the year's capitals and cost files have been
+     * loaded into the cells, so the step can put its own values in their place
+     * before anything uses them. The same instance goes in both lists, which is what
+     * lets the first yearly step skip it along with the other year-zero updaters.
      */
-    void addBeforeCapitalUpdater(ModelState step) {
-        getScheduled().add(getScheduled().indexOf(capitalUpdater), step);
-        initialStateUpdaters.add(initialStateUpdaters.indexOf(capitalUpdater), step);
+    void addAfterProductionCostUpdater(ModelState step) {
+        getScheduled().add(getScheduled().indexOf(productionCostUpdater) + 1, step);
+        initialStateUpdaters.add(initialStateUpdaters.indexOf(productionCostUpdater) + 1, step);
     }
 
     public void initialzeRun() {

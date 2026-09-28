@@ -54,3 +54,10 @@ stocking:                     # pasture stocking rate
 
 yield_tech_change: 0          # crop yield change per year from technology: yields are multiplied by
                               # (1 + yield_tech_change x years since start_year); 0 = no change
+
+outputs:                      # inspection files in <output folder>/react/; the model never reads them
+  every_year: false           # false: the years core writes its cell maps (map_output_years); true: every year
+  inputs: false               # per pixel: the year's inputs as loaded, in real units
+  coefficients: false         # per pixel: the fitted yield and water-demand coefficients
+  crops: false                # per decision unit: each crops AFT's decisions, yield (= _suit) and costs
+  pasture: false              # per decision unit: each pasture AFT's decisions, production (= _suit) and costs

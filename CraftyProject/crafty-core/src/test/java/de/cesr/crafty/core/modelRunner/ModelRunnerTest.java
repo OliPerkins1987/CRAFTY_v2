@@ -32,6 +32,7 @@ import de.cesr.crafty.core.crafty.RegionalModelRunner;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
+import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
@@ -390,8 +391,9 @@ class ModelRunnerTest {
 	}
 
 	@Test
-	void addBeforeCapitalUpdater_placesTheStepDirectlyBeforeCapitalUpdaterInBothLists() throws Exception {
+	void addAfterProductionCostUpdater_placesTheStepDirectlyAfterTheCostsInBothLists() throws Exception {
 		CapitalUpdater originalCapitalUpdater = ModelRunner.capitalUpdater;
+		ProductionCostUpdater originalCostUpdater = ModelRunner.productionCostUpdater;
 		try {
 			ModelRunner runner = new ModelRunner();
 			List<String> log = new ArrayList<>();
@@ -399,31 +401,36 @@ class ModelRunnerTest {
 			ModelState after = new RecordingState("after", log);
 			ModelState react = new RecordingState("react", log);
 			ModelRunner.capitalUpdater = mock(CapitalUpdater.class);
-			runner.getScheduled().addAll(List.of(before, ModelRunner.capitalUpdater, after));
-			initialStateUpdaters(runner).addAll(List.of(before, ModelRunner.capitalUpdater, after));
+			ModelRunner.productionCostUpdater = mock(ProductionCostUpdater.class);
+			List<ModelState> order = List.of(before, ModelRunner.capitalUpdater, ModelRunner.productionCostUpdater, after);
+			runner.getScheduled().addAll(order);
+			initialStateUpdaters(runner).addAll(order);
 
-			runner.addBeforeCapitalUpdater(react);
+			runner.addAfterProductionCostUpdater(react);
 
-			assertEquals(List.of(before, react, ModelRunner.capitalUpdater, after), runner.getScheduled());
-			assertEquals(List.of(before, react, ModelRunner.capitalUpdater, after), initialStateUpdaters(runner));
+			List<ModelState> expected = List.of(before, ModelRunner.capitalUpdater, ModelRunner.productionCostUpdater,
+					react, after);
+			assertEquals(expected, runner.getScheduled(), "after the year's capitals and costs are loaded");
+			assertEquals(expected, initialStateUpdaters(runner));
 		} finally {
 			ModelRunner.capitalUpdater = originalCapitalUpdater;
+			ModelRunner.productionCostUpdater = originalCostUpdater;
 		}
 	}
 
 	@Test
-	void theStepBeforeCapitalUpdater_runsForYearZeroAndIsSkippedOnceInTheFirstYear() throws Exception {
-		CapitalUpdater originalCapitalUpdater = ModelRunner.capitalUpdater;
+	void theStepAfterTheCosts_runsForYearZeroAndIsSkippedOnceInTheFirstYear() throws Exception {
+		ProductionCostUpdater originalCostUpdater = ModelRunner.productionCostUpdater;
 		try {
 			ModelRunner runner = new ModelRunner();
 			List<String> log = new ArrayList<>();
 			ModelState react = new RecordingState("react", log);
 			ModelState laterStep = new RecordingState("later", log);
-			ModelRunner.capitalUpdater = mock(CapitalUpdater.class);
-			runner.getScheduled().addAll(List.of(ModelRunner.capitalUpdater, laterStep));
-			initialStateUpdaters(runner).add(ModelRunner.capitalUpdater);
+			ModelRunner.productionCostUpdater = mock(ProductionCostUpdater.class);
+			runner.getScheduled().addAll(List.of(ModelRunner.productionCostUpdater, laterStep));
+			initialStateUpdaters(runner).add(ModelRunner.productionCostUpdater);
 
-			runner.addBeforeCapitalUpdater(react);
+			runner.addAfterProductionCostUpdater(react);
 
 			Method prepare = ModelRunner.class.getDeclaredMethod("prepareInitialState");
 			prepare.setAccessible(true);
@@ -440,9 +447,9 @@ class ModelRunnerTest {
 
 			log.clear();
 			runner.step();
-			assertEquals(List.of("react", "later"), log, "Later years run it before CapitalUpdater as usual");
+			assertEquals(List.of("react", "later"), log, "Later years run it after the costs as usual");
 		} finally {
-			ModelRunner.capitalUpdater = originalCapitalUpdater;
+			ModelRunner.productionCostUpdater = originalCostUpdater;
 		}
 	}
 

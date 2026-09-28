@@ -2,6 +2,7 @@ package de.cesr.crafty.react.data;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -9,6 +10,8 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +31,8 @@ import de.cesr.crafty.core.crafty.Service;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.modelRunner.ModelRunner;
+import de.cesr.crafty.core.output.Listener;
+import de.cesr.crafty.core.updaters.CapitalUpdater;
 import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
@@ -148,11 +153,81 @@ class CoreFactsTest {
 	}
 
 	@Test
-	void theCostFilesCoreFoundAreListedPerYear() {
-		ReactRunContext context = CoreFacts.fromCore();
+	void theOutputFolderAndCoresMapYearsAreRead() {
+		// By the time react starts, output_folder_name holds the run's full path and the Listener has worked
+		// out the years core writes its cell maps.
+		List<Integer> originalMapYears = new ArrayList<>(Listener.yearsMapExporting);
+		ConfigLoader.config.output_folder_name = dir.resolve("run output").toString();
+		Listener.yearsMapExporting.clear();
+		Listener.yearsMapExporting.addAll(List.of(2020, 2030));
+		try {
+			ReactRunContext context = CoreFacts.fromCore();
 
-		assertEquals(Set.of(ReactElement.FERTILISER, ReactElement.STOCKING), context.costFilesByYear().get(2020));
-		assertEquals(Set.of(), context.costFilesByYear().get(2021), "A year core found no file for");
+			assertEquals(dir.resolve("run output"), context.outputFolder());
+			assertEquals(Set.of(2020, 2030), context.mapYears());
+		} finally {
+			Listener.yearsMapExporting.clear();
+			Listener.yearsMapExporting.addAll(originalMapYears);
+		}
+	}
+
+	@Test
+	void theCapitalsTheChargedAftsAndCoresInputFilesAreRead() throws Exception {
+		List<String> originalCapitals = CapitalUpdater.getCapitalsList();
+		Map<String, String> originalTypes = new HashMap<>(CapitalUpdater.getCapitalTypes());
+		List<List<String>> chargedLists = List.of(ProductionCostUpdater.getNfertAftLabels(),
+				ProductionCostUpdater.getIrrigatedAftLabels(), ProductionCostUpdater.getIntensityAftLabels(),
+				ProductionCostUpdater.getStockingAftLabels());
+		List<List<String>> originalCharged = new ArrayList<>();
+		chargedLists.forEach(labels -> originalCharged.add(new ArrayList<>(labels)));
+		Field capitalsDirectory = CapitalUpdater.class.getDeclaredField("capitals_directory");
+		capitalsDirectory.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<Integer, Path> capitalsFiles = (Map<Integer, Path>) capitalsDirectory.get(null);
+		Map<Integer, Path> originalCapitalsFiles = new HashMap<>(capitalsFiles);
+		try {
+			CapitalUpdater.setCapitalsList(List.of("react_GDP_50", "IntC3C_irrig_suit", "IntP_suit"));
+			CapitalUpdater.getCapitalTypes().clear();
+			CapitalUpdater.getCapitalTypes().put("react_GDP_50", "Capital");
+			CapitalUpdater.getCapitalTypes().put("IntC3C_irrig_suit", "Suitability");
+			// IntP_suit has no type, which core counts as a suitability.
+
+			// Four different lists, so that each is known to come from the right one of core's.
+			chargedLists.forEach(List::clear);
+			ProductionCostUpdater.getNfertAftLabels().addAll(List.of("IntC3C_irrig", "ExtC3C"));
+			ProductionCostUpdater.getIrrigatedAftLabels().add("IntC3C_irrig");
+			ProductionCostUpdater.getIntensityAftLabels().addAll(List.of("IntC3C_irrig", "ExtC3C", "IntP"));
+			ProductionCostUpdater.getStockingAftLabels().add("IntP");
+
+			capitalsFiles.clear();
+			capitalsFiles.put(2020, dir.resolve("capitals_2020.csv"));
+			assertFalse(CoreFacts.fromCore().separateProductionCompetitiveness(), "core's default");
+			ConfigLoader.config.separate_production_competitiveness = true;
+
+			ReactRunContext context = CoreFacts.fromCore();
+
+			assertEquals(Map.of("react_GDP_50", false, "IntC3C_irrig_suit", true, "IntP_suit", true), context.capitals());
+			assertEquals(Map.of(ReactElement.FERTILISER, List.of("IntC3C_irrig", "ExtC3C"), ReactElement.IRRIGATION,
+					List.of("IntC3C_irrig"), ReactElement.OTHER_INTENSITY, List.of("IntC3C_irrig", "ExtC3C", "IntP"),
+					ReactElement.STOCKING, List.of("IntP")), context.chargedAfts());
+			assertEquals(Map.of(ReactElement.FERTILISER, dir.resolve("Nfert_costs_2020.csv"), ReactElement.STOCKING,
+					dir.resolve("stocking_costs_2020.csv")), context.costFiles().get(2020));
+			assertEquals(Map.of(), context.costFiles().get(2021), "no cost file that year");
+			assertEquals(Map.of(2020, dir.resolve("capitals_2020.csv")), context.modelCapitalsFiles(),
+					"no capitals file for 2021");
+			assertTrue(context.separateProductionCompetitiveness());
+			assertSame(CellsLoader.hashCell, CoreFacts.cells(), "the model's own cells, where react hands over");
+		} finally {
+			capitalsFiles.clear();
+			capitalsFiles.putAll(originalCapitalsFiles);
+			CapitalUpdater.setCapitalsList(originalCapitals);
+			CapitalUpdater.getCapitalTypes().clear();
+			CapitalUpdater.getCapitalTypes().putAll(originalTypes);
+			for (int i = 0; i < chargedLists.size(); i++) {
+				chargedLists.get(i).clear();
+				chargedLists.get(i).addAll(originalCharged.get(i));
+			}
+		}
 	}
 
 	@Test

@@ -99,6 +99,14 @@ public final class ReactConfig {
 	// (1 + yield_tech_change x years since start_year). 0 means no change.
 	double yieldTechChange = 0;
 
+	// ---- inspection files (the outputs section): what react read, fitted and decided ----
+	// Written to <output folder>/react/ in the years core writes its cell maps, or every year.
+	boolean outputEveryYear = false;
+	boolean outputInputs = false;
+	boolean outputCoefficients = false;
+	boolean outputCrops = false;
+	boolean outputPasture = false;
+
 	/** A config holding every default. */
 	public static ReactConfig defaults() {
 		return new ReactConfig();
@@ -225,6 +233,33 @@ public final class ReactConfig {
 		return yieldTechChange;
 	}
 
+	// ---- inspection files ----
+
+	/** Inspection files every year; otherwise only in the years core writes its cell maps. */
+	public boolean outputEveryYear() {
+		return outputEveryYear;
+	}
+
+	/** Per pixel: the year's inputs as loaded, in real units. */
+	public boolean outputInputs() {
+		return outputInputs;
+	}
+
+	/** Per pixel: the fitted yield and water-demand coefficients. */
+	public boolean outputCoefficients() {
+		return outputCoefficients;
+	}
+
+	/** Per decision unit: each crops AFT's decisions, yield (its _suit) and costs. */
+	public boolean outputCrops() {
+		return outputCrops;
+	}
+
+	/** Per decision unit: each pasture AFT's decisions, production (its _suit) and costs. */
+	public boolean outputPasture() {
+		return outputPasture;
+	}
+
 	// ---- checks ----
 
 	/** Everything wrong with the settings, as messages; empty if they can be used. */
@@ -316,6 +351,8 @@ public final class ReactConfig {
 						+ ", lambda " + prospectLambda,
 				"stocking: initial " + stockingInitial + ", step " + stockingStep + ", min " + stockingMin + ", max "
 						+ stockingMax + ", harvest " + stockingHarvest,
-				"yield_tech_change: " + yieldTechChange);
+				"yield_tech_change: " + yieldTechChange,
+				"outputs: every_year " + outputEveryYear + ", inputs " + outputInputs + ", coefficients "
+						+ outputCoefficients + ", crops " + outputCrops + ", pasture " + outputPasture);
 	}
 }

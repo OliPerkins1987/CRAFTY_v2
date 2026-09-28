@@ -1,6 +1,7 @@
 package de.cesr.crafty.react.data;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -22,12 +23,27 @@ import java.util.Set;
  * @param cellRegions     every CRAFTY cell, as {@code "x,y"}, with the region it belongs to in core
  * @param regions         the regions core knows
  * @param reactive        the elements switched on in config.yaml
- * @param costFilesByYear for each year, the elements whose spatial cost file core found
  * @param prices          a service's price in a region and year (see {@link PriceSource})
+ * @param outputFolder    the run's output folder, where react writes its inspection files
+ * @param mapYears        the years core writes its cell maps ({@code map_output_years}), which are the years
+ *                        react writes its inspection files unless they are asked for every year
+ * @param capitals        every capital core knows ({@code Capitals.csv}), and whether it is a suitability
+ *                        (react's yields go to {@code <AFT>_suit} capitals)
+ * @param chargedAfts     for each element's cost, the AFTs core charges it to (core's lists: N to AFTs with
+ *                        {@code Nfert_rate > 0}, irrigation to irrigated AFTs, intensity to every AFT,
+ *                        stocking to AFTs producing Pasture)
+ * @param costFiles       for each year, the spatial cost file core found for each element's cost
+ * @param modelCapitalsFiles for each year, the capitals file core found (not react's own capitals files)
+ * @param separateProductionCompetitiveness core's {@code separate_production_competitiveness}: when on, an
+ *                        AFT's production counts only the capitals typed Suitability, and its
+ *                        competitiveness counts them all; when off, a capital's type makes no difference
  */
 public record ReactRunContext(Path projectPath, String scenario, int firstYear, int lastYear, Path servicesFile,
 		Map<String, AftBaseline> afts, Set<String> services, Map<String, String> cellRegions, Set<String> regions,
-		Set<ReactElement> reactive, Map<Integer, Set<ReactElement>> costFilesByYear, PriceSource prices) {
+		Set<ReactElement> reactive, PriceSource prices, Path outputFolder, Set<Integer> mapYears,
+		Map<String, Boolean> capitals, Map<ReactElement, List<String>> chargedAfts,
+		Map<Integer, Map<ReactElement, Path>> costFiles, Map<Integer, Path> modelCapitalsFiles,
+		boolean separateProductionCompetitiveness) {
 
 	/**
 	 * An AFT's baselines, from core's {@code AFTsMetaData.csv}: what it does when nothing is reactive.

@@ -111,6 +111,14 @@ public final class ReactConfigLoader {
 
 		c.yieldTechChange = root.number("yield_tech_change", c.yieldTechChange);
 
+		Section outputs = root.section("outputs");
+		c.outputEveryYear = outputs.flag("every_year", c.outputEveryYear);
+		c.outputInputs = outputs.flag("inputs", c.outputInputs);
+		c.outputCoefficients = outputs.flag("coefficients", c.outputCoefficients);
+		c.outputCrops = outputs.flag("crops", c.outputCrops);
+		c.outputPasture = outputs.flag("pasture", c.outputPasture);
+		outputs.rejectUnknownKeys();
+
 		root.rejectUnknownKeys();
 	}
 
@@ -178,6 +186,18 @@ public final class ReactConfigLoader {
 				return current;
 			}
 			return n;
+		}
+
+		boolean flag(String key, boolean current) {
+			Object value = lookup(key);
+			if (value == null) {
+				return current;
+			}
+			if (!(value instanceof Boolean flag)) {
+				problems.add(prefix + key + " must be true or false");
+				return current;
+			}
+			return flag;
 		}
 
 		<E extends Enum<E>> E choice(String key, E current, E[] options) {

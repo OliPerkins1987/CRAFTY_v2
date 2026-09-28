@@ -179,9 +179,8 @@ public class ConfigLoader {
 	/**
 	 * CRAFTY-react has a master switch (reactive_afts) and one switch per reactive
 	 * element. The run stops if an element is switched on without the master switch,
-	 * or if react is on without spatial production costs, which it writes. When the
-	 * master switch is on, the elements in use and how react's files are handed to
-	 * the model are logged. reactive_overwrite_inputs on its own only warns.
+	 * or if react is on without spatial production costs, into which it puts its
+	 * costs. When the master switch is on, the elements in use are logged.
 	 */
 	static void validateReactiveConfig() {
 		if (config == null) return;
@@ -190,19 +189,11 @@ public class ConfigLoader {
 			LOGGER.fatal(error);
 			return;
 		}
-		String warning = reactiveOverwriteWarning(config);
-		if (warning != null) {
-			LOGGER.warn(warning);
-		}
 		if (config.reactive_afts) {
 			List<String> elements = enabledReactiveElements(config);
 			LOGGER.warn(elements.isEmpty()
 					? "CRAFTY-react is on (reactive_afts: true) but no reactive elements are switched on"
 					: "CRAFTY-react is on; reactive elements in use: " + elements);
-			LOGGER.warn(config.reactive_overwrite_inputs
-					? "CRAFTY-react will rewrite the reactive columns of the original capitals and cost files in place"
-					: "CRAFTY-react will write complete copies of each year's capitals and cost files to the run's "
-							+ "output folder; the original files are not modified");
 		}
 	}
 
@@ -219,21 +210,9 @@ public class ConfigLoader {
 					+ "Set reactive_afts: true, or switch these elements off.";
 		}
 		if (c.reactive_afts && !(c.use_production_costs && c.spatial_production_costs)) {
-			return "reactive_afts is true, but CRAFTY-react writes spatial cost files, which the model only reads "
-					+ "when use_production_costs and spatial_production_costs are both true. Switch both on.";
-		}
-		return null;
-	}
-
-	/**
-	 * reactive_overwrite_inputs does nothing while CRAFTY-react is off. That is
-	 * allowed, but worth saying.
-	 *
-	 * @return the warning to log, or null if there is nothing to warn about
-	 */
-	static String reactiveOverwriteWarning(Config c) {
-		if (!c.reactive_afts && c.reactive_overwrite_inputs) {
-			return "reactive_overwrite_inputs is true but has no effect while reactive_afts is false";
+			return "reactive_afts is true, but CRAFTY-react puts its costs into the cells' spatial costs, which the "
+					+ "model only uses when use_production_costs and spatial_production_costs are both true. Switch both "
+					+ "on.";
 		}
 		return null;
 	}
@@ -307,26 +286,6 @@ public class ConfigLoader {
 
 	public static boolean isReactiveForestry() {
 		return isReactiveAfts() && config.reactive_forestry;
-	}
-
-	/** CRAFTY-react is on and rewrites the original capitals and cost files in place. */
-	public static boolean isReactiveOverwriteInputs() {
-		return isReactiveAfts() && config.reactive_overwrite_inputs;
-	}
-
-	/** CRAFTY-react is on and writes its copies of the capitals and cost files to the run's output folder. */
-	public static boolean isReactiveRunFolderMode() {
-		return isReactiveAfts() && !config.reactive_overwrite_inputs;
-	}
-
-	/**
-	 * CRAFTY-react writes the capitals file only when at least one management input
-	 * that changes yields is reactive. Otherwise the suitabilities are the default
-	 * values in the original capitals file, which is read unchanged. Forestry
-	 * rotation joins these inputs when forestry is implemented.
-	 */
-	public static boolean isReactiveCapitals() {
-		return isReactiveFertilizer() || isReactiveIrrigation() || isReactiveOtherIntensity() || isReactiveStocking();
 	}
 
 	private static Config loadConfig() {

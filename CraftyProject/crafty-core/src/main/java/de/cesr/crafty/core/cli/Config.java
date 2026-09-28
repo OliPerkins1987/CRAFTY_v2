@@ -75,11 +75,6 @@ public class Config {
     public boolean reactive_other_intensity = false;
     public boolean reactive_stocking = false;
     public boolean reactive_forestry = false;
-    // How CRAFTY-react hands each year's capitals and cost files to the model:
-    // false - react writes complete copies into reactive_inputs/ in the run's output folder and the
-    //         model reads those; the original input files are never modified.
-    // true  - react rewrites only the reactive columns of the original input files, in place.
-    public boolean reactive_overwrite_inputs = false;
 
     // Regionalisation
     public boolean regionalisation = false;
@@ -214,7 +209,6 @@ public class Config {
                 + "|-> reactive_other_intensity=" + reactive_other_intensity + "\n"
                 + "|-> reactive_stocking=" + reactive_stocking + "\n"
                 + "|-> reactive_forestry=" + reactive_forestry + "\n"
-                + "|-> reactive_overwrite_inputs=" + reactive_overwrite_inputs + "\n"
                 + "] \n\n";
     }
 

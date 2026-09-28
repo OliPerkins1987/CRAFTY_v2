@@ -47,6 +47,33 @@ class ReactConfigLoaderTest {
 		assertEquals(0.0, config.yieldTechChange(), "No technology change unless the file sets one");
 		assertEquals(10, config.yieldFileUnits().toTonnesPerHectare());
 		assertEquals(10, config.irrigationFileUnits().toCubicMetresPerHectare());
+		assertEquals(false, config.outputEveryYear() || config.outputInputs() || config.outputCoefficients()
+				|| config.outputCrops() || config.outputPasture(), "No inspection file unless asked for");
+	}
+
+	@Test
+	void theOutputSwitchesAreReadFromTheOutputsSection() {
+		writeConfig(
+				"outputs:",
+				"  every_year: true",
+				"  crops: true",
+				"  pasture: true");
+
+		ReactConfig config = ReactConfigLoader.load(project);
+
+		assertTrue(config.outputEveryYear() && config.outputCrops() && config.outputPasture());
+		assertEquals(false, config.outputInputs() || config.outputCoefficients(), "Unset switches stay off");
+	}
+
+	@Test
+	void anOutputSwitchMustBeTrueOrFalseAndUnknownOnesAreReported() {
+		ReactInputException e = problemsWith(
+				"outputs:",
+				"  inputs: yes please",
+				"  maps: true");
+
+		assertTrue(e.getMessage().contains("outputs.inputs must be true or false"), e.getMessage());
+		assertTrue(e.getMessage().contains("unknown setting outputs.maps"), e.getMessage());
 	}
 
 	@Test

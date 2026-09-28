@@ -100,6 +100,11 @@ public final class PastureManagement {
 		return worked(intensityCost, "husbandry costs are worked out only when other intensity is reactive");
 	}
 
+	/** Whether husbandry costs were worked out: other intensity is reactive. */
+	public boolean hasIntensityCost() {
+		return intensityCost != null;
+	}
+
 	private double[] worked(double[] values, String when) {
 		if (values == null) {
 			throw new IllegalStateException(aft.label() + ": " + when);

@@ -14,7 +14,6 @@ import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.dataLoader.CsvKind;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
-import de.cesr.crafty.core.dataLoader.RunInputFiles;
 import de.cesr.crafty.core.utils.file.PathTools;
 
 /**
@@ -99,10 +98,7 @@ public class CapitalUpdater extends AbstractUpdater {
     @Override
     public void step() {
 
-        // The file found at startup, or react's version of it when CRAFTY-react writes the
-        // capitals file in run-folder mode.
-        Path path = RunInputFiles.resolveForReading(capitals_directory.get(Timestep.getCurrentYear()),
-                ConfigLoader.isReactiveCapitals());
+        Path path = capitals_directory.get(Timestep.getCurrentYear());
         LOGGER.info("Cells.updateCapitals" + path);
         CsvProcessors.processCSV(path, CsvKind.CAPITALS);
 
@@ -149,10 +145,9 @@ public class CapitalUpdater extends AbstractUpdater {
     }
 
     /**
-     * The capitals input file found at startup for a year. When CRAFTY-react writes
-     * the capitals file, it copies the non-reactive columns from this file, then
-     * writes the result over it (overwrite mode) or to {@link RunInputFiles#resolve}
-     * of it (run-folder mode).
+     * The capitals input file found at startup for a year, or null. The GUI shows it,
+     * and CRAFTY-react reads its header to warn about capitals that neither the file
+     * nor react gives a value.
      */
     public static Path getCapitalPath(int year) {
         return capitals_directory.getOrDefault(year, null);

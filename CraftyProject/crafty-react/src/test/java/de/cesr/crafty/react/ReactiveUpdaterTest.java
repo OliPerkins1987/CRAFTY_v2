@@ -18,7 +18,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,7 +34,6 @@ import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.cli.ConfigLoader;
-import de.cesr.crafty.core.dataLoader.RunInputFiles;
 import de.cesr.crafty.core.modelRunner.ModelRunner;
 import de.cesr.crafty.core.modelRunner.ModelState;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
@@ -42,6 +41,7 @@ import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 import de.cesr.crafty.react.data.CoreFacts;
 import de.cesr.crafty.react.data.ReactConfig;
+import de.cesr.crafty.react.data.ReactConfigLoader;
 import de.cesr.crafty.react.data.ReactElement;
 import de.cesr.crafty.react.data.ReactInputException;
 import de.cesr.crafty.react.data.ReactInputs;
@@ -51,6 +51,7 @@ import de.cesr.crafty.react.decisions.CropDecisions;
 import de.cesr.crafty.react.decisions.DecisionUnits;
 import de.cesr.crafty.react.decisions.PastureDecisions;
 import de.cesr.crafty.react.decisions.YearPrices;
+import de.cesr.crafty.react.output.ReactOutputs;
 import de.cesr.crafty.react.science.CropSurfaces;
 
 class ReactiveUpdaterTest {
@@ -58,28 +59,23 @@ class ReactiveUpdaterTest {
 	@TempDir
 	Path tempDir;
 
-	private Path capitals;
-	private Path intensityCosts;
 	private Config originalConfig;
 	private ProductionCostUpdater originalCostUpdater;
+	private List<String> originalCapitals;
 
 	@BeforeEach
-	void setUp() throws IOException {
+	void setUp() {
 		originalConfig = ConfigLoader.config;
 		originalCostUpdater = ModelRunner.productionCostUpdater;
-		capitals = tempDir.resolve("in").resolve("capitals_2020.csv");
-		intensityCosts = tempDir.resolve("in").resolve("Intensity_costs_2020.csv");
-		Files.createDirectories(capitals.getParent());
-		Files.writeString(capitals, "X,Y,capi1\n0,0,1.5\n");
-		Files.writeString(intensityCosts, "X,Y,AFT1\n0,0,42.0\n");
+		originalCapitals = CapitalUpdater.getCapitalsList();
 		Timestep.setCurrentYear(2020);
 	}
 
 	@AfterEach
 	void restoreStatics() {
-		RunInputFiles.clearRunFolder();
 		ConfigLoader.config = originalConfig;
 		ModelRunner.productionCostUpdater = originalCostUpdater;
+		CapitalUpdater.setCapitalsList(originalCapitals);
 		AFTsLoader.getAftHash().clear();
 		CellsLoader.hashCell.clear();
 		CellsLoader.regions.clear();
@@ -88,7 +84,7 @@ class ReactiveUpdaterTest {
 	/**
 	 * Sets up core's state to match the toy project, so that the constructor's startup checks pass.
 	 * The constructor reads core through CoreFacts: AFT metadata, cells and their regions, services,
-	 * the years and the spatial cost files.
+	 * capitals, the years and the spatial cost files.
 	 */
 	private void setUpCoreForToyProject() throws Exception {
 		ReactToyData.project(tempDir);
@@ -119,6 +115,8 @@ class ReactiveUpdaterTest {
 		setStaticField(ProjectLoader.class, "scenario", "ssp126");
 		setStaticField(ProjectLoader.class, "serviceMetadata", tempDir.resolve("csv/Services.csv"));
 		setStaticField(ServiceSet.class, "servicesList", List.of("C3cereals", "Pasture", "Hardwood", "Carbon"));
+		// No capital types are loaded, so core counts each of these as a suitability.
+		CapitalUpdater.setCapitalsList(List.of("IntC3C_irrig_suit", "ExtC3C_suit", "IntP_suit"));
 
 		Map<String, Path> costPaths = new LinkedHashMap<>();
 		costPaths.put(ProductionCostUpdater.NFERT_COSTS, tempDir.resolve("Nfert_costs.csv"));
@@ -169,32 +167,17 @@ class ReactiveUpdaterTest {
 	}
 
 	@Test
-	void inRunFolderMode_creatingItPointsTheModelAtTheRunFolder() throws Exception {
+	void creatingItChecksTheProjectAndKeepsWhatWasLoaded() throws Exception {
 		ConfigLoader.config = new Config();
 		ConfigLoader.config.reactive_afts = true;
-		ConfigLoader.config.reactive_overwrite_inputs = false;
-		ConfigLoader.config.output_folder_name = tempDir.resolve("output").toString();
 		setUpCoreForToyProject();
 
 		ReactiveUpdater updater = new ReactiveUpdater();
 
-		assertEquals(tempDir.resolve("output").resolve(RunInputFiles.RUN_FOLDER_NAME).toAbsolutePath().normalize(),
-				RunInputFiles.getRunFolder());
-		assertNotNull(updater.getInputs(), "Creating it also checks the project and keeps what was loaded");
+		assertNotNull(updater.getInputs());
 		assertEquals(3, updater.getInputs().checked().parameters().reactive().size());
-	}
-
-	@Test
-	void inOverwriteMode_creatingItLeavesTheModelReadingTheOriginals() throws Exception {
-		ConfigLoader.config = new Config();
-		ConfigLoader.config.reactive_afts = true;
-		ConfigLoader.config.reactive_overwrite_inputs = true;
-		ConfigLoader.config.output_folder_name = tempDir.resolve("output").toString();
-		setUpCoreForToyProject();
-
-		new ReactiveUpdater();
-
-		assertFalse(RunInputFiles.isUsingRunFolder());
+		assertEquals(List.of("IntC3C_irrig", "ExtC3C"), List.copyOf(updater.getCropDecisions().managements().keySet()));
+		assertEquals(List.of("IntP"), List.copyOf(updater.getPastureDecisions().managements().keySet()));
 	}
 
 	@Test
@@ -211,81 +194,6 @@ class ReactiveUpdaterTest {
 		assertTrue(e.getMessage().contains("9,9"), e.getMessage());
 	}
 
-	// ---- Which files react writes ----
-
-	@SuppressWarnings("unchecked")
-	private static Map<Integer, Path> capitalsFilesByYear() throws Exception {
-		Field field = CapitalUpdater.class.getDeclaredField("capitals_directory");
-		field.setAccessible(true);
-		return (Map<Integer, Path>) field.get(null);
-	}
-
-	@Test
-	void reactWritesTheCapitalsAndOnlyTheReactiveCostTypes() throws Exception {
-		Path nfertCosts = tempDir.resolve("in").resolve("Nfert_costs_2020.csv");
-		Path stockingCosts = tempDir.resolve("in").resolve("stocking_costs_2020.csv");
-		Map<String, Path> costFiles = new LinkedHashMap<>();
-		costFiles.put(ProductionCostUpdater.NFERT_COSTS, nfertCosts);
-		costFiles.put(ProductionCostUpdater.INTENSITY_COSTS, intensityCosts);
-		costFiles.put(ProductionCostUpdater.STOCKING_COSTS, stockingCosts);
-		ProductionCostUpdater costUpdater = mock(ProductionCostUpdater.class);
-		when(costUpdater.getSpatialCostPaths(2020)).thenReturn(costFiles);
-
-		ProductionCostUpdater originalCostUpdater = ModelRunner.productionCostUpdater;
-		Map<Integer, Path> capitalsByYear = capitalsFilesByYear();
-		Path previousCapitals = capitalsByYear.put(2020, capitals);
-		try {
-			ModelRunner.productionCostUpdater = costUpdater;
-			ConfigLoader.config = new Config();
-			ConfigLoader.config.reactive_afts = true;
-
-			assertEquals(List.of(), ReactiveUpdater.filesReactWrites(2020),
-					"No reactive element: react writes nothing, not even capitals");
-
-			ConfigLoader.config.reactive_other_intensity = true;
-			assertEquals(List.of(capitals, intensityCosts), ReactiveUpdater.filesReactWrites(2020));
-
-			ConfigLoader.config.reactive_fertilizer = true;
-			assertEquals(List.of(capitals, nfertCosts, intensityCosts), ReactiveUpdater.filesReactWrites(2020),
-					"Each cost file follows its own element switch");
-		} finally {
-			ModelRunner.productionCostUpdater = originalCostUpdater;
-			if (previousCapitals == null) {
-				capitalsByYear.remove(2020);
-			} else {
-				capitalsByYear.put(2020, previousCapitals);
-			}
-		}
-	}
-
-	// ---- The phase 0 pass-through ----
-
-	@Test
-	void runFolderMode_writesAnUnchangedCopyOfEachFileWhereTheModelWillReadIt() throws IOException {
-		RunInputFiles.useRunFolder(tempDir.resolve("run"));
-
-		new ReactiveUpdater(year -> List.of(capitals, intensityCosts)).step();
-
-		for (Path original : List.of(capitals, intensityCosts)) {
-			Path runVersion = RunInputFiles.resolve(original);
-			assertTrue(Files.exists(runVersion), "Missing " + runVersion);
-			assertArrayEquals(Files.readAllBytes(original), Files.readAllBytes(runVersion),
-					"Phase 0 is a pass-through: the run folder's version must match the original");
-		}
-	}
-
-	@Test
-	void overwriteMode_leavesTheOriginalsAsTheyAre() throws IOException {
-		byte[] capitalsBefore = Files.readAllBytes(capitals);
-		byte[] costsBefore = Files.readAllBytes(intensityCosts);
-
-		new ReactiveUpdater(year -> List.of(capitals, intensityCosts)).step();
-
-		assertArrayEquals(capitalsBefore, Files.readAllBytes(capitals));
-		assertArrayEquals(costsBefore, Files.readAllBytes(intensityCosts));
-		assertFalse(Files.exists(tempDir.resolve("run")), "Overwrite mode must not create a run folder");
-	}
-
 	// ---- loading each year (27c) ----
 
 	@Test
@@ -293,7 +201,7 @@ class ReactiveUpdaterTest {
 		// The toy project is small, so this exercises the real loader rather than a stand-in.
 		ReactToyData.project(tempDir);
 		ReactInputs inputs = ReactInputs.create(ReactConfig.defaults(), ReactToyData.context(tempDir).build());
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), inputs);
+		ReactiveUpdater updater = new ReactiveUpdater(inputs);
 
 		Timestep.setCurrentYear(2020);
 		updater.step();
@@ -304,35 +212,6 @@ class ReactiveUpdaterTest {
 		updater.step();
 		assertEquals(2021, inputs.currentYear().year(), "The next year replaces the one before");
 		assertSame(inputs, updater.getInputs());
-	}
-
-	@Test
-	void withoutInputsTheStepStillPassesFilesThrough() {
-		// Phase 0 behaviour: the pass-through does not depend on the loaded data.
-		RunInputFiles.useRunFolder(tempDir.resolve("run"));
-
-		new ReactiveUpdater(year -> List.of(capitals)).step();
-
-		assertTrue(Files.exists(RunInputFiles.resolve(capitals)));
-	}
-
-	@Test
-	void eachYearIsWrittenOnlyOnce() {
-		// Year zero runs during initialisation, and must not be written again if stepped again.
-		RunInputFiles.useRunFolder(tempDir.resolve("run"));
-		AtomicInteger lookups = new AtomicInteger();
-		ReactiveUpdater updater = new ReactiveUpdater(year -> {
-			lookups.incrementAndGet();
-			return List.of(capitals);
-		});
-
-		updater.step();
-		updater.step();
-		assertEquals(1, lookups.get(), "A second step in the same year must do nothing");
-
-		Timestep.setCurrentYear(2021);
-		updater.step();
-		assertEquals(2, lookups.get(), "A new year must be written");
 	}
 
 	// ---- deciding each year (29c) ----
@@ -349,7 +228,7 @@ class ReactiveUpdaterTest {
 
 	@Test
 	void eachYearIsDecidedOnceSoTheSpinUpHappensOnce() {
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(toyContext()));
+		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(toyContext()));
 
 		Timestep.setCurrentYear(2020);
 		updater.step(); // year zero, during initialisation
@@ -376,7 +255,7 @@ class ReactiveUpdaterTest {
 
 	@Test
 	void thePastureStageIsDecidedOnceAYearSoItsSpinUpHappensOnce() {
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(toyContext()));
+		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(toyContext()));
 
 		Timestep.setCurrentYear(2020);
 		updater.step(); // year zero, during initialisation
@@ -406,7 +285,7 @@ class ReactiveUpdaterTest {
 		DecisionUnits units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
 		CropDecisions crops = CropDecisions.create(inputs, units);
 		PastureDecisions pasture = PastureDecisions.create(inputs, units);
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), inputs, units, crops, pasture);
+		ReactiveUpdater updater = new ReactiveUpdater(inputs, units, crops, pasture, Map.of());
 
 		updater.step();
 
@@ -417,24 +296,52 @@ class ReactiveUpdaterTest {
 	}
 
 	@Test
-	void filesStillPassThroughUnchangedWhileTheStagesDecide() throws IOException {
-		RunInputFiles.useRunFolder(tempDir.resolve("run"));
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(capitals, intensityCosts), toyInputs(toyContext()));
+	void reactWritesNoFilesWhileTheStagesDecide() throws IOException {
+		// The file handover was retired in phase 5: react hands its values to the model in memory.
+		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(toyContext()));
+		Map<Path, String> before = filesUnder(tempDir);
 
 		updater.step();
+		Timestep.setCurrentYear(2021);
+		updater.step();
 
-		assertEquals(2020, updater.getCropDecisions().lastYear());
-		assertEquals(2020, updater.getPastureDecisions().lastYear());
-		for (Path original : List.of(capitals, intensityCosts)) {
-			assertArrayEquals(Files.readAllBytes(original), Files.readAllBytes(RunInputFiles.resolve(original)),
-					"Nothing is written until phase 5");
+		assertEquals(2021, updater.getCropDecisions().lastYear());
+		assertEquals(2021, updater.getPastureDecisions().lastYear());
+		assertEquals(before, filesUnder(tempDir), "no file is written, changed or removed");
+	}
+
+	@Test
+	void theStepWritesTheInspectionFilesInTheYearsAsked() {
+		ReactToyData.project(tempDir);
+		ReactToyData.write(tempDir, ReactConfigLoader.LOCATION.toString(), "outputs:", "  crops: true");
+		Path output = tempDir.resolve("run output");
+		ReactiveUpdater updater = new ReactiveUpdater(ReactInputs.create(ReactConfigLoader.load(tempDir),
+				toyContext().outputFolder(output).mapYears(2021).build()));
+
+		updater.step();
+		Timestep.setCurrentYear(2021);
+		updater.step();
+
+		Path react = output.resolve(ReactOutputs.FOLDER);
+		assertTrue(Files.exists(react.resolve("ssp126-React-Crops-Yield-2021.csv")), "2021 is a map year");
+		assertFalse(Files.exists(react.resolve("ssp126-React-Crops-Yield-2020.csv")), "2020 is not");
+	}
+
+	/** Every file under a folder, with its size and time of last change. */
+	private static Map<Path, String> filesUnder(Path folder) throws IOException {
+		Map<Path, String> files = new LinkedHashMap<>();
+		try (Stream<Path> paths = Files.walk(folder)) {
+			for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
+				files.put(path, Files.size(path) + " bytes, changed " + Files.getLastModifiedTime(path));
+			}
 		}
+		return files;
 	}
 
 	@Test
 	void aYearThatCannotBeDecidedNamesTheProblem() {
 		// step() hands this to LOGGER.fatal, which stops the run; decideYear is where it is raised.
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(),
+		ReactiveUpdater updater = new ReactiveUpdater(
 				toyInputs(ReactToyData.context(tempDir).prices((service, region, year) -> {
 					throw new ReactInputException("no weight");
 				})));
@@ -447,7 +354,7 @@ class ReactiveUpdaterTest {
 
 	@Test
 	void aMissingPasturePriceNamesTheProblem() {
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(),
+		ReactiveUpdater updater = new ReactiveUpdater(
 				toyInputs(ReactToyData.context(tempDir).prices((service, region, year) -> {
 					if (service.equals("Pasture")) {
 						throw new ReactInputException("no weight");
@@ -463,7 +370,7 @@ class ReactiveUpdaterTest {
 
 	@Test
 	void withOnlyStockingOnPastureIsDecidedAndCropsAreNot() {
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(ReactToyData.context(tempDir)
+		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(ReactToyData.context(tempDir)
 				.off(ReactElement.FERTILISER, ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY)));
 
 		updater.step();
@@ -477,7 +384,7 @@ class ReactiveUpdaterTest {
 
 	@Test
 	void withOnlyFertiliserAndIrrigationOnCropsAreDecidedAndPastureIsNot() {
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(), toyInputs(ReactToyData.context(tempDir)
+		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(ReactToyData.context(tempDir)
 				.off(ReactElement.OTHER_INTENSITY, ReactElement.STOCKING)));
 
 		updater.step();
@@ -489,7 +396,7 @@ class ReactiveUpdaterTest {
 
 	@Test
 	void withNothingToDecideOnlyTheDataIsLoaded() {
-		ReactiveUpdater updater = new ReactiveUpdater(year -> List.of(),
+		ReactiveUpdater updater = new ReactiveUpdater(
 				toyInputs(ReactToyData.context(tempDir).off(ReactElement.values())));
 
 		updater.step();
@@ -497,5 +404,70 @@ class ReactiveUpdaterTest {
 		assertEquals(2020, updater.getInputs().currentYear().year());
 		assertEquals(null, updater.getCropDecisions().lastYear());
 		assertEquals(null, updater.getPastureDecisions().lastYear());
+	}
+
+	// ---- handing over to the model (31c) ----
+
+	/** The toy project's cells, as core holds them. */
+	private static Map<String, Cell> toyCells() {
+		Map<String, Cell> cells = new LinkedHashMap<>();
+		cells.put("1,1", cell(1, 1, "North"));
+		cells.put("1,2", cell(1, 2, "South"));
+		cells.put("2,1", cell(2, 1, "North"));
+		return cells;
+	}
+
+	@Test
+	void eachStepHandsTheYearToTheCells() {
+		ReactInputs inputs = toyInputs(toyContext());
+		Map<String, Cell> cells = toyCells();
+		ReactiveUpdater updater = new ReactiveUpdater(inputs, cells);
+		int south = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions()).unitOf("1,2");
+
+		updater.step();
+
+		assertEquals(updater.getCropDecisions().managements().get("IntC3C_irrig").yield()[south],
+				cells.get("1,2").getCapitals().get("IntC3C_irrig_suit"));
+		assertEquals(updater.getPastureDecisions().managements().get("IntP").stockingCost()[south],
+				cells.get("1,2").getStockingCosts().get("IntP"));
+	}
+
+	@Test
+	void aRepeatedYearIsHandedOverAgainButNotDecidedAgain() {
+		ReactInputs inputs = toyInputs(toyContext());
+		Map<String, Cell> cells = toyCells();
+		ReactiveUpdater updater = new ReactiveUpdater(inputs, cells);
+		int unit = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions()).unitOf("1,1");
+		Map<String, Double> capitals = cells.get("1,1").getCapitals();
+
+		updater.step(); // year zero, during initialisation
+		double yearZero = capitals.get("IntC3C_irrig_suit");
+		double[] nitrogen = updater.getCropDecisions().managements().get("IntC3C_irrig").nitrogen().clone();
+		capitals.put("IntC3C_irrig_suit", 0.0); // as when core loads the year's capitals
+		updater.step(); // the same year again
+
+		assertEquals(yearZero, capitals.get("IntC3C_irrig_suit"), "handed over again");
+		assertArrayEquals(nitrogen, updater.getCropDecisions().managements().get("IntC3C_irrig").nitrogen(), 0,
+				"not decided again");
+
+		Timestep.setCurrentYear(2021);
+		updater.step();
+
+		assertEquals(updater.getCropDecisions().managements().get("IntC3C_irrig").yield()[unit],
+				capitals.get("IntC3C_irrig_suit"), "the next year's value replaces it");
+	}
+
+	@Test
+	void withNothingToDecideNothingIsHandedOver() {
+		Map<String, Cell> cells = toyCells();
+		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(ReactToyData.context(tempDir).off(ReactElement.values())),
+				cells);
+
+		updater.step();
+
+		for (Cell cell : cells.values()) {
+			assertTrue(cell.getCapitals().isEmpty() && cell.getNfertCosts().isEmpty() && cell.getIrrigationCosts().isEmpty()
+					&& cell.getIntensityCosts().isEmpty() && cell.getStockingCosts().isEmpty());
+		}
 	}
 }

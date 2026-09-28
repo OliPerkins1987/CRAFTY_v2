@@ -1,19 +1,24 @@
 package de.cesr.crafty.react.data;
 
 import java.nio.file.Path;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
+import de.cesr.crafty.core.crafty.Cell;
 import de.cesr.crafty.core.crafty.Service;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.modelRunner.ModelRunner;
+import de.cesr.crafty.core.output.Listener;
+import de.cesr.crafty.core.updaters.CapitalUpdater;
 import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
@@ -23,7 +28,8 @@ import de.cesr.crafty.core.updaters.Timestep;
  *
  * It is called when react's step is created, which crafty-core does at the end of
  * {@code ModelRunner.start()}. By then the services, the AFT metadata, the cells and the spatial cost
- * files have all been loaded, and the scenario and years are set.
+ * files have all been loaded, the scenario and years are set, the output folder holds its full path, and
+ * the Listener has worked out the years core writes its cell maps.
  */
 public final class CoreFacts {
 
@@ -50,11 +56,61 @@ public final class CoreFacts {
 		Map<String, String> cellRegions = new LinkedHashMap<>();
 		CellsLoader.hashCell.forEach((cellId, cell) -> cellRegions.put(cellId, cell.getCurrentRegion()));
 
+		Map<String, Boolean> capitals = new LinkedHashMap<>();
+		CapitalUpdater.getCapitalsList().forEach(capital -> capitals.put(capital, CapitalUpdater.isSuitability(capital)));
+
 		return new ReactRunContext(Path.of(ConfigLoader.config.project_path), ProjectLoader.getScenario(),
 				Timestep.getStartYear(), Timestep.getEndtYear(), ProjectLoader.getServiceMetadata(), afts,
 				new LinkedHashSet<>(ServiceSet.getServicesList()), cellRegions,
-				new LinkedHashSet<>(CellsLoader.regions.keySet()), reactiveElements(), costFilesByYear(),
-				CoreFacts::price);
+				new LinkedHashSet<>(CellsLoader.regions.keySet()), reactiveElements(), CoreFacts::price,
+				Path.of(ConfigLoader.config.output_folder_name), new LinkedHashSet<>(Listener.yearsMapExporting),
+				capitals, chargedAfts(), costFiles(), modelCapitalsFiles(),
+				ConfigLoader.config.separate_production_competitiveness);
+	}
+
+	/** The model's cells, by id ({@code "x,y"}): where react hands its values over. */
+	public static Map<String, Cell> cells() {
+		return CellsLoader.hashCell;
+	}
+
+	/** For each element's cost, the AFTs core charges it to, from core's own lists. */
+	static Map<ReactElement, List<String>> chargedAfts() {
+		Map<ReactElement, List<String>> charged = new EnumMap<>(ReactElement.class);
+		charged.put(ReactElement.FERTILISER, List.copyOf(ProductionCostUpdater.getNfertAftLabels()));
+		charged.put(ReactElement.IRRIGATION, List.copyOf(ProductionCostUpdater.getIrrigatedAftLabels()));
+		charged.put(ReactElement.OTHER_INTENSITY, List.copyOf(ProductionCostUpdater.getIntensityAftLabels()));
+		charged.put(ReactElement.STOCKING, List.copyOf(ProductionCostUpdater.getStockingAftLabels()));
+		return charged;
+	}
+
+	/** For each year, the spatial cost file core found for each element's cost. */
+	static Map<Integer, Map<ReactElement, Path>> costFiles() {
+		Map<Integer, Map<ReactElement, Path>> byYear = new LinkedHashMap<>();
+		for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
+			Map<ReactElement, Path> files = new EnumMap<>(ReactElement.class);
+			if (ModelRunner.productionCostUpdater != null) {
+				ModelRunner.productionCostUpdater.getSpatialCostPaths(year).forEach((costType, path) -> {
+					ReactElement element = COST_TYPES.get(costType);
+					if (element != null) {
+						files.put(element, path);
+					}
+				});
+			}
+			byYear.put(year, files);
+		}
+		return byYear;
+	}
+
+	/** For each year, the capitals file core found. A year with none is left out. */
+	static Map<Integer, Path> modelCapitalsFiles() {
+		Map<Integer, Path> byYear = new LinkedHashMap<>();
+		for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
+			Path path = CapitalUpdater.getCapitalPath(year);
+			if (path != null) {
+				byYear.put(year, path);
+			}
+		}
+		return byYear;
 	}
 
 	/** Which elements are switched on in core's config.yaml. */
@@ -73,27 +129,6 @@ public final class CoreFacts {
 			elements.add(ReactElement.STOCKING);
 		}
 		return elements;
-	}
-
-	/**
-	 * Which elements' spatial cost files core found, for each year of the run. React writes its costs
-	 * into those files, so a missing one means the costs would never reach the model.
-	 */
-	static Map<Integer, Set<ReactElement>> costFilesByYear() {
-		Map<Integer, Set<ReactElement>> found = new LinkedHashMap<>();
-		for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
-			Set<ReactElement> elements = EnumSet.noneOf(ReactElement.class);
-			if (ModelRunner.productionCostUpdater != null) {
-				ModelRunner.productionCostUpdater.getSpatialCostPaths(year).forEach((costType, path) -> {
-					ReactElement element = COST_TYPES.get(costType);
-					if (element != null && path != null) {
-						elements.add(element);
-					}
-				});
-			}
-			found.put(year, elements);
-		}
-		return found;
 	}
 
 	/**

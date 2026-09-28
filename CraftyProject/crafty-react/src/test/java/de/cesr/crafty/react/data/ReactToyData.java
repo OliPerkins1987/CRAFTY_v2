@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -135,7 +136,7 @@ public final class ReactToyData {
 
 	/**
 	 * Builds a {@link ReactRunContext} for the toy project: the AFTs of {@link #STANDARD_ROWS} with
-	 * sensible baselines, every element reactive, and every core cost file found for every year.
+	 * sensible baselines, an {@code <AFT>_suit} suitability capital for each, and every element reactive.
 	 */
 	public static final class Context {
 		private final Path project;
@@ -145,13 +146,21 @@ public final class ReactToyData {
 				Map.of("1,1", "North", "1,2", "South", "2,1", "North"));
 		private final Set<String> regions = new LinkedHashSet<>(List.of("North", "South"));
 		private final Set<ReactElement> reactive = EnumSet.allOf(ReactElement.class);
-		private final Map<Integer, Set<ReactElement>> costFiles = new LinkedHashMap<>();
 		private ReactRunContext.PriceSource prices = (service, region, year) -> 100.0;
+		private Path outputFolder;
+		private Set<Integer> mapYears = Set.of();
+		private final Map<String, Boolean> capitals = new LinkedHashMap<>();
+		private final Set<String> withoutCapitals = new LinkedHashSet<>();
+		private final Map<ReactElement, List<String>> chargedAfts = new EnumMap<>(ReactElement.class);
+		private final Map<Integer, Map<ReactElement, Path>> costFiles = new LinkedHashMap<>();
+		private final Map<Integer, Path> modelCapitalsFiles = new LinkedHashMap<>();
+		private boolean separateProductionCompetitiveness = false;
 		private int firstYear;
 		private int lastYear;
 
 		private Context(Path project) {
 			this.project = project;
+			this.outputFolder = project.resolve("output");
 			aft("IntC3C_irrig", 200, 0.75, true, false);
 			aft("ExtC3C", 100, 0.4, false, false);
 			aft("IntP", 0, 1.5, false, true);
@@ -161,17 +170,10 @@ public final class ReactToyData {
 			years(FIRST_YEAR, LAST_YEAR);
 		}
 
-		/**
-		 * Sets the run's years ({@link #FIRST_YEAR} to {@link #LAST_YEAR} unless changed), with every core
-		 * cost file found in each. Call it before {@link #noCostFile}.
-		 */
+		/** Sets the run's years ({@link #FIRST_YEAR} to {@link #LAST_YEAR} unless changed). */
 		public Context years(int first, int last) {
 			firstYear = first;
 			lastYear = last;
-			costFiles.clear();
-			for (int year = first; year <= last; year++) {
-				costFiles.put(year, EnumSet.allOf(ReactElement.class));
-			}
 			return this;
 		}
 
@@ -227,20 +229,68 @@ public final class ReactToyData {
 			return this;
 		}
 
-		/** Pretends core found no cost file for an element in one year. */
-		public Context noCostFile(int year, ReactElement element) {
-			costFiles.get(year).remove(element);
+		/** The run's output folder: {@code output} in the project folder unless changed. */
+		public Context outputFolder(Path folder) {
+			this.outputFolder = folder;
+			return this;
+		}
+
+		/** The years core writes its cell maps; none unless set. */
+		public Context mapYears(Integer... years) {
+			this.mapYears = Set.of(years);
+			return this;
+		}
+
+		/**
+		 * Adds or replaces one of the model's capitals: {@code true} if typed Suitability. Every AFT has an
+		 * {@code <AFT>_suit} suitability unless changed.
+		 */
+		public Context capital(String name, boolean suitability) {
+			capitals.put(name, suitability);
+			withoutCapitals.remove(name);
+			return this;
+		}
+
+		public Context withoutCapital(String name) {
+			withoutCapitals.add(name);
+			return this;
+		}
+
+		/** The AFTs the model charges an element's cost to; none unless set. */
+		public Context charged(ReactElement element, String... labels) {
+			chargedAfts.put(element, List.of(labels));
+			return this;
+		}
+
+		/** The model's cost file for an element in a year; none unless set. */
+		public Context costFile(int year, ReactElement element, Path file) {
+			costFiles.computeIfAbsent(year, y -> new EnumMap<>(ReactElement.class)).put(element, file);
+			return this;
+		}
+
+		/** The model's capitals file in a year; none unless set. */
+		public Context capitalsFile(int year, Path file) {
+			modelCapitalsFiles.put(year, file);
+			return this;
+		}
+
+		/** Core's {@code separate_production_competitiveness}; off unless set. */
+		public Context separateProductionCompetitiveness(boolean on) {
+			separateProductionCompetitiveness = on;
 			return this;
 		}
 
 		public ReactRunContext build() {
-			Map<Integer, Set<ReactElement>> costFilesCopy = new LinkedHashMap<>();
-			costFiles.forEach((year, elements) -> costFilesCopy.put(year, EnumSet.copyOf(elements)));
+			Map<String, Boolean> allCapitals = new LinkedHashMap<>();
+			afts.keySet().forEach(label -> allCapitals.put(label + ReactStartupCheck.SUIT, true));
+			allCapitals.putAll(capitals);
+			withoutCapitals.forEach(allCapitals::remove);
 			return new ReactRunContext(project, "ssp126", firstYear, lastYear, project.resolve("csv/Services.csv"),
 					new LinkedHashMap<>(afts), new LinkedHashSet<>(services), new LinkedHashMap<>(cells),
 					new LinkedHashSet<>(regions),
-					reactive.isEmpty() ? EnumSet.noneOf(ReactElement.class) : EnumSet.copyOf(reactive), costFilesCopy,
-					prices);
+					reactive.isEmpty() ? EnumSet.noneOf(ReactElement.class) : EnumSet.copyOf(reactive), prices,
+					outputFolder, mapYears, allCapitals, new EnumMap<>(chargedAfts), new LinkedHashMap<>(costFiles),
+					new LinkedHashMap<>(modelCapitalsFiles), separateProductionCompetitiveness);
 		}
 	}
 }

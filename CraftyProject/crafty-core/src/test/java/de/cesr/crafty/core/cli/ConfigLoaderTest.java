@@ -531,10 +531,8 @@ class ConfigLoaderTest {
         assertFalse(c.reactive_other_intensity);
         assertFalse(c.reactive_stocking);
         assertFalse(c.reactive_forestry);
-        assertFalse(c.reactive_overwrite_inputs);
         assertTrue(ConfigLoader.enabledReactiveElements(c).isEmpty());
         assertNull(ConfigLoader.reactiveConfigError(c), "The default configuration must be valid");
-        assertNull(ConfigLoader.reactiveOverwriteWarning(c), "The default configuration must not warn");
     }
 
     @Test
@@ -551,7 +549,6 @@ class ConfigLoaderTest {
                 reactive_other_intensity: true
                 reactive_stocking: true
                 reactive_forestry: true
-                reactive_overwrite_inputs: true
                 """);
         ConfigLoader.configPath = configFile.toString();
 
@@ -563,7 +560,23 @@ class ConfigLoaderTest {
         assertTrue(cfg.reactive_other_intensity);
         assertTrue(cfg.reactive_stocking);
         assertTrue(cfg.reactive_forestry);
-        assertTrue(cfg.reactive_overwrite_inputs);
+    }
+
+    @Test
+    void theRetiredOverwriteSettingIsNowAnUnknownKey() throws Exception {
+        // CRAFTY-react hands its values to the model in memory (phase 5), so the setting that chose how its
+        // files were handed over was removed. A configuration that still sets it stops, naming it.
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("retired-config.yaml");
+        Files.writeString(configFile, "reactive_afts: true\nreactive_overwrite_inputs: false\n");
+
+        Throwable failure = loadConfigExpectingFailure(configFile);
+
+        assertInstanceOf(IllegalArgumentException.class, failure);
+        assertTrue(failure.getMessage().contains("reactive_overwrite_inputs"), failure.getMessage());
     }
 
     @Test
@@ -598,7 +611,7 @@ class ConfigLoaderTest {
 
     @Test
     void reactWithoutSpatialProductionCostsShouldStopTheRun() throws Exception {
-        // React writes spatial cost files; without both switches the model would never read them.
+        // React puts its costs into the cells' spatial costs; without both switches the model would not use them.
         for (Config c : List.of(configWithSwitchesOn("reactive_afts"),
                 configWithSwitchesOn("reactive_afts", "use_production_costs"))) {
             String error = ConfigLoader.reactiveConfigError(c);
@@ -606,69 +619,6 @@ class ConfigLoaderTest {
             assertNotNull(error, "React without spatial production costs must be rejected");
             assertTrue(error.contains("use_production_costs") && error.contains("spatial_production_costs"),
                     "The message must name both switches. Got: " + error);
-        }
-    }
-
-    @Test
-    void overwriteWithoutReactShouldWarnButNotStopTheRun() throws Exception {
-        Config strayOverwrite = configWithSwitchesOn("reactive_overwrite_inputs");
-
-        assertNull(ConfigLoader.reactiveConfigError(strayOverwrite), "Overwrite without react must not stop the run");
-        String warning = ConfigLoader.reactiveOverwriteWarning(strayOverwrite);
-        assertNotNull(warning);
-        assertTrue(warning.contains("reactive_overwrite_inputs") && warning.contains("reactive_afts"),
-                "The warning must name both switches. Got: " + warning);
-
-        Config inUse = configWithSwitchesOn("reactive_afts", "use_production_costs", "spatial_production_costs",
-                "reactive_overwrite_inputs");
-        assertNull(ConfigLoader.reactiveConfigError(inUse));
-        assertNull(ConfigLoader.reactiveOverwriteWarning(inUse), "Overwrite with react on is not a stray switch");
-    }
-
-    @Test
-    void fileModeAccessorsShouldFollowBothSwitches() throws Exception {
-        originalConfigPath = ConfigLoader.configPath;
-        originalConfig = ConfigLoader.config;
-
-        ConfigLoader.config = null;
-        assertFalse(ConfigLoader.isReactiveOverwriteInputs());
-        assertFalse(ConfigLoader.isReactiveRunFolderMode());
-
-        // React off: neither mode applies, whatever the overwrite switch says.
-        ConfigLoader.config = configWithSwitchesOn("reactive_overwrite_inputs");
-        assertFalse(ConfigLoader.isReactiveOverwriteInputs());
-        assertFalse(ConfigLoader.isReactiveRunFolderMode());
-
-        ConfigLoader.config = configWithSwitchesOn("reactive_afts");
-        assertFalse(ConfigLoader.isReactiveOverwriteInputs());
-        assertTrue(ConfigLoader.isReactiveRunFolderMode(), "Run-folder mode is the default when react is on");
-
-        ConfigLoader.config = configWithSwitchesOn("reactive_afts", "reactive_overwrite_inputs");
-        assertTrue(ConfigLoader.isReactiveOverwriteInputs());
-        assertFalse(ConfigLoader.isReactiveRunFolderMode());
-    }
-
-    @Test
-    void reactWritesCapitalsOnlyWhenAnIntensityInputIsReactive() throws Exception {
-        originalConfigPath = ConfigLoader.configPath;
-        originalConfig = ConfigLoader.config;
-
-        ConfigLoader.config = null;
-        assertFalse(ConfigLoader.isReactiveCapitals());
-
-        ConfigLoader.config = configWithSwitchesOn("reactive_afts");
-        assertFalse(ConfigLoader.isReactiveCapitals(), "No reactive input: suitabilities stay at their defaults");
-
-        ConfigLoader.config = configWithSwitchesOn("reactive_afts", "reactive_overwrite_inputs");
-        assertFalse(ConfigLoader.isReactiveCapitals(), "A react setting that is not an intensity input");
-
-        for (String element : List.of("reactive_fertilizer", "reactive_irrigation", "reactive_other_intensity",
-                "reactive_stocking")) {
-            ConfigLoader.config = configWithSwitchesOn("reactive_afts", element);
-            assertTrue(ConfigLoader.isReactiveCapitals(), element + " changes yields, so react writes capitals");
-
-            ConfigLoader.config = configWithSwitchesOn(element);
-            assertFalse(ConfigLoader.isReactiveCapitals(), element + " without reactive_afts does nothing");
         }
     }
 

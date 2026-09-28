@@ -24,7 +24,6 @@ import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.Cell;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
-import de.cesr.crafty.core.dataLoader.RunInputFiles;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.utils.file.CsvTools;
 
@@ -122,7 +121,9 @@ class CapitalUpdaterTest {
 	}
 
 	@Test
-	void step_inRunFolderMode_readsReactsVersionOnlyWhenAnIntensityInputIsReactive() throws Exception {
+	void step_readsTheFileFoundAtStartupWhateverTheReactSwitches() throws Exception {
+		// CRAFTY-react no longer hands its values over through files: it puts them into the cells after this
+		// step has loaded the year's file (phase 5). So the file read is always the one found at startup.
 		int year = 2003;
 		CellsLoader.hashCell.clear();
 		Cell cell = new Cell(0, 0);
@@ -145,28 +146,16 @@ class CapitalUpdaterTest {
 		Timestep.setCurrentYear(year);
 		try {
 			updater.step();
-			assertEquals(1.0, cell.getCapitals().get("capi1"), "Without a run folder the original is read");
+			assertEquals(1.0, cell.getCapitals().get("capi1"), "React off: the original is read");
 
-			RunInputFiles.useRunFolder(tempDir.resolve("run"));
-			Path runVersion = RunInputFiles.resolve(original);
-			Files.createDirectories(runVersion.getParent());
-			Files.writeString(runVersion, "X,Y,capi1,capi2,capi3\n0,0,2.0,2.0,2.0\n");
-
-			// React on, but no input that changes yields: react does not write the capitals file.
 			ConfigLoader.config.reactive_afts = true;
-			ConfigLoader.config.reactive_fertilizer = false;
-			updater.step();
-			assertEquals(1.0, cell.getCapitals().get("capi1"),
-					"With no reactive intensity input the original capitals file is read");
-
 			ConfigLoader.config.reactive_fertilizer = true;
+			cell.getCapitals().put("capi1", 0.0);
 			updater.step();
-			assertEquals(2.0, cell.getCapitals().get("capi1"),
-					"With a reactive intensity input react's version is read");
+			assertEquals(1.0, cell.getCapitals().get("capi1"), "React on: still the original");
 		} finally {
 			ConfigLoader.config.reactive_afts = reactiveAfts;
 			ConfigLoader.config.reactive_fertilizer = reactiveFertilizer;
-			RunInputFiles.clearRunFolder();
 			if (previous == null) {
 				filesByYear.remove(year);
 			} else {

@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import de.cesr.crafty.core.ToyData;
-import de.cesr.crafty.core.cli.Config;
 import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.Aft;
@@ -23,7 +22,6 @@ import de.cesr.crafty.core.crafty.Cell;
 import de.cesr.crafty.core.dataLoader.CsvKind;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
-import de.cesr.crafty.core.dataLoader.RunInputFiles;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.afts.AftCategorised;
 import de.cesr.crafty.core.dataLoader.costs.GlobalCostData;
@@ -751,7 +749,9 @@ class ProductionCostUpdaterTest {
 	}
 
 	@Test
-	void spatialCosts_inRunFolderMode_readReactsVersionOnlyForReactiveCostTypes() throws IOException {
+	void spatialCosts_readTheFileFoundAtStartupWhateverTheReactSwitches() throws IOException {
+		// CRAFTY-react no longer hands its costs over through files: it puts them into the cells after this
+		// step has loaded the year's files (phase 5). So the file read is always the one found at startup.
 		ProductionCostUpdater updater = intensityOnlySpatialUpdater(11.0);
 		int year = Timestep.getStartYear();
 		Timestep.setCurrentYear(year);
@@ -762,59 +762,16 @@ class ProductionCostUpdaterTest {
 		boolean reactiveOtherIntensity = ConfigLoader.config.reactive_other_intensity;
 		try {
 			updater.step();
-			assertEquals(11.0, c00.getIntensityCosts().get("AFT1"), 0.001, "Without a run folder the original is read");
+			assertEquals(11.0, c00.getIntensityCosts().get("AFT1"), 0.001, "React off: the original is read");
 
-			RunInputFiles.useRunFolder(tempDir.resolve("run"));
-			Path runVersion = RunInputFiles.resolve(
-					updater.getSpatialCostPaths(year).get(ProductionCostUpdater.INTENSITY_COSTS));
-			writeCsv(runVersion.getParent(), runVersion.getFileName().toString(),
-					"X,Y,AFT1,AFT2,AFT3",
-					"0,0,99.0,0,0");
-
-			// React on, but other intensity not reactive: react does not write the intensity costs.
 			ConfigLoader.config.reactive_afts = true;
-			ConfigLoader.config.reactive_other_intensity = false;
-			updater.step();
-			assertEquals(11.0, c00.getIntensityCosts().get("AFT1"), 0.001,
-					"A cost type react does not write is read from the original");
-
 			ConfigLoader.config.reactive_other_intensity = true;
+			c00.getIntensityCosts().put("AFT1", 0.0);
 			updater.step();
-			assertEquals(99.0, c00.getIntensityCosts().get("AFT1"), 0.001,
-					"A cost type react writes is read from react's version");
+			assertEquals(11.0, c00.getIntensityCosts().get("AFT1"), 0.001, "React on: still the original");
 		} finally {
 			ConfigLoader.config.reactive_afts = reactiveAfts;
 			ConfigLoader.config.reactive_other_intensity = reactiveOtherIntensity;
-			RunInputFiles.clearRunFolder();
-		}
-	}
-
-	@Test
-	void isReactiveCostType_followsTheMatchingElementSwitch() {
-		Config original = ConfigLoader.config;
-		try {
-			ConfigLoader.config = new Config();
-			ConfigLoader.config.reactive_afts = true;
-			ConfigLoader.config.reactive_fertilizer = true;
-			ConfigLoader.config.reactive_stocking = true;
-
-			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.NFERT_COSTS));
-			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.IRRIGATION_COSTS));
-			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.INTENSITY_COSTS));
-			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.STOCKING_COSTS));
-			assertFalse(ProductionCostUpdater.isReactiveCostType("unknown"));
-
-			ConfigLoader.config.reactive_irrigation = true;
-			ConfigLoader.config.reactive_other_intensity = true;
-			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.IRRIGATION_COSTS));
-			assertTrue(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.INTENSITY_COSTS));
-
-			// React off: no cost type is react's, whatever the element switches say.
-			ConfigLoader.config.reactive_afts = false;
-			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.NFERT_COSTS));
-			assertFalse(ProductionCostUpdater.isReactiveCostType(ProductionCostUpdater.STOCKING_COSTS));
-		} finally {
-			ConfigLoader.config = original;
 		}
 	}
 
@@ -829,14 +786,5 @@ class ProductionCostUpdaterTest {
 				"Only cost types with a file for the year are listed");
 		assertTrue(paths.get(ProductionCostUpdater.INTENSITY_COSTS).endsWith("Intensity_costs_" + year + ".csv"),
 				"Got: " + paths);
-
-		// The same with a run folder in use: react needs the input files' locations to
-		// know where to write its versions.
-		RunInputFiles.useRunFolder(tempDir.resolve("run"));
-		try {
-			assertEquals(paths, updater.getSpatialCostPaths(year));
-		} finally {
-			RunInputFiles.clearRunFolder();
-		}
 	}
 }

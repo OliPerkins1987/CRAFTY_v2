@@ -273,34 +273,211 @@ class ReactStartupCheckTest {
 		assertMentions(problems(ReactToyData.context(dir).cell("9,9")), "no LPJ-GUESS pixel for 1 CRAFTY cell(s)", "9,9");
 	}
 
-	// ---- check 11: core will apply what react writes ----
+	// ---- check 13: the _suit capitals react hands over ----
 
 	@Test
-	void aMissingCoreCostFileForAReactiveElementIsReported() {
-		String message = problems(ReactToyData.context(dir).noCostFile(2021, ReactElement.STOCKING));
+	void aMissingSuitCapitalStopsTheRun() {
+		String message = problems(ReactToyData.context(dir).withoutCapital("IntP_suit").withoutCapital("ExtC3C_suit"));
 
-		assertMentions(message, "no spatial stocking_costs file for year(s) [2021]");
+		assertMentions(message, "no capital(s) [ExtC3C_suit, IntP_suit]", "Capitals.csv");
 	}
 
 	@Test
-	void aMissingCoreCostFileForASwitchedOffElementIsFine() {
-		run(ReactToyData.context(dir).noCostFile(2021, ReactElement.STOCKING).off(ReactElement.STOCKING));
+	void aSuitCapitalTypedCapitalIsFineWhenProductionAndCompetitivenessAreNotSeparate() {
+		// With separate_production_competitiveness off (core's default), a capital's type makes no difference.
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).capital("IntC3C_irrig_suit", false));
+
+		assertEquals(List.of(), result.warnings());
 	}
 
 	@Test
-	void aReactivePastureAftMustBeChargedStockingByTheModel() {
-		String message = problems(ReactToyData.context(dir).aft("IntP", 0, 1.5, false, false));
+	void aSuitCapitalTypedCapitalIsWarnedAboutWhenProductionIsSeparate() {
+		// Production then counts only Suitability capitals, so react's yield would drive competitiveness only.
+		// A warning, not a stop: it may be intended. IntFodder isn't reactive, so its _suit isn't mentioned.
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).separateProductionCompetitiveness(true)
+				.capital("IntC3C_irrig_suit", false).capital("IntFodder_suit", false));
 
-		assertMentions(message, "IntP", "does not produce Pasture");
+		assertEquals(List.of("CRAFTY-react: capital(s) [IntC3C_irrig_suit] are typed Capital in Capitals.csv and"
+				+ " separate_production_competitiveness is on, so react's yield or production counts towards those"
+				+ " AFTs' competitiveness but not their production. Type them Suitability if it should count towards"
+				+ " both"), result.warnings());
+	}
+
+	@Test
+	void onlyTheSuitCapitalsReactHandsOverAreChecked() {
+		// Only stocking on: crops suitabilities are not handed over (phase 3 plan, Q6), and IntFodder is not
+		// reactive, so none of these is needed.
+		run(ReactToyData.context(dir).off(ReactElement.FERTILISER, ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY)
+				.withoutCapital("IntC3C_irrig_suit").withoutCapital("ExtC3C_suit").withoutCapital("IntFodder_suit"));
+		// With every element off, nothing is handed over.
+		run(ReactToyData.context(dir).off(ReactElement.values()).withoutCapital("IntP_suit")
+				.withoutCapital("IntC3C_irrig_suit"));
+
+		assertMentions(problems(ReactToyData.context(dir).off(ReactElement.FERTILISER, ReactElement.IRRIGATION,
+				ReactElement.OTHER_INTENSITY).withoutCapital("IntP_suit")), "IntP_suit");
+	}
+
+	// ---- warning: costs the model charges that nothing gives ----
+
+	/** A cost file for both toy years. */
+	private ReactToyData.Context withCostFile(ReactToyData.Context context, ReactElement element, String... lines) {
+		Path file = ReactToyData.write(dir, "costs/spatial/" + element.costFile() + ".csv", lines);
+		return context.costFile(2020, element, file).costFile(2021, element, file);
+	}
+
+	@Test
+	void aBlankCostFileWarnsForTheChargedAftsReactDoesNotCover() {
+		ReactToyData.Context context = ReactToyData.context(dir).charged(ReactElement.OTHER_INTENSITY, "IntC3C_irrig",
+				"ExtC3C", "IntP", "IntFodder", "AF");
+
+		List<String> warnings = run(withCostFile(context, ReactElement.OTHER_INTENSITY, "X,Y")).warnings();
+
+		assertEquals(List.of("CRAFTY-react: Intensity_costs has no column (or no rows) for IntFodder, AF in 2020-2021,"
+				+ " and react does not hand over their other intensity costs, so the model charges them 0"), warnings);
+	}
+
+	@Test
+	void aFileCoversTheAftsItHasColumnsForMatchedAsCoreMatchesThem() {
+		ReactToyData.Context context = ReactToyData.context(dir).charged(ReactElement.OTHER_INTENSITY, "IntFodder", "AF");
+
+		List<String> warnings = run(withCostFile(context, ReactElement.OTHER_INTENSITY, "\"X\",\"Y\", \"intfodder\" ",
+				"1,1,5")).warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "for AF in 2020-2021");
+		assertTrue(!warnings.get(0).contains("IntFodder"), warnings.get(0));
+	}
+
+	@Test
+	void aFileWithNoRowsCoversNothing() {
+		ReactToyData.Context context = ReactToyData.context(dir).charged(ReactElement.OTHER_INTENSITY, "IntFodder", "AF");
+
+		List<String> warnings = run(withCostFile(context, ReactElement.OTHER_INTENSITY, "X,Y,IntFodder,AF", "")).warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "for IntFodder, AF in 2020-2021");
+	}
+
+	@Test
+	void whenReactHandsOverEveryChargedAftABlankFileGivesNoWarning() {
+		ReactToyData.Context context = ReactToyData.context(dir).charged(ReactElement.FERTILISER, "IntC3C_irrig", "ExtC3C")
+				.charged(ReactElement.IRRIGATION, "IntC3C_irrig").charged(ReactElement.STOCKING, "IntP");
+		context = withCostFile(context, ReactElement.FERTILISER, "X,Y");
+		context = withCostFile(context, ReactElement.IRRIGATION, "X,Y");
+		context = withCostFile(context, ReactElement.STOCKING, "X,Y");
+
+		assertEquals(List.of(), run(context).warnings());
+	}
+
+	@Test
+	void anElementSwitchedOffIsNotHandedOver() {
+		ReactToyData.Context context = ReactToyData.context(dir).off(ReactElement.FERTILISER)
+				.charged(ReactElement.FERTILISER, "IntC3C_irrig", "ExtC3C");
+
+		List<String> warnings = run(withCostFile(context, ReactElement.FERTILISER, "X,Y")).warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "Nfert_costs", "for IntC3C_irrig, ExtC3C in 2020-2021", "their fertiliser costs");
+	}
+
+	@Test
+	void theSharedIrrigationColumnCoversEveryIrrigatedAft() {
+		ReactToyData.Context context = ReactToyData.context(dir).off(ReactElement.IRRIGATION)
+				.charged(ReactElement.IRRIGATION, "IntC3C_irrig", "IntFodder");
+
+		assertEquals(List.of(), run(withCostFile(context, ReactElement.IRRIGATION, "X,Y,irrigation_cost", "1,1,0.3"))
+				.warnings());
+		assertEquals(1, run(withCostFile(context, ReactElement.IRRIGATION, "X,Y", "1,1")).warnings().size());
+	}
+
+	@Test
+	void theWarningGroupsAftsByTheYearsTheyAreMissing() {
+		Path withAf = ReactToyData.write(dir, "costs/spatial/Intensity_costs_2020.csv", "X,Y,AF", "1,1,5");
+		Path blank = ReactToyData.write(dir, "costs/spatial/Intensity_costs_2021.csv", "X,Y");
+
+		List<String> warnings = run(ReactToyData.context(dir).charged(ReactElement.OTHER_INTENSITY, "IntFodder", "AF")
+				.costFile(2020, ReactElement.OTHER_INTENSITY, withAf).costFile(2021, ReactElement.OTHER_INTENSITY, blank))
+				.warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "for IntFodder in 2020-2021; AF in 2021,");
+	}
+
+	// ---- warning: capitals the model has that nothing gives ----
+
+	/** A capitals file of the model's, for both toy years. */
+	private ReactToyData.Context withCapitalsFile(ReactToyData.Context context, String... lines) {
+		Path file = ReactToyData.write(dir, "worlds/capitals/ssp126/capitals_all_years.csv", lines);
+		return context.capitalsFile(2020, file).capitalsFile(2021, file);
+	}
+
+	@Test
+	void aCapitalsFileMissingAColumnWarnsForTheCapitalsReactDoesNotHandOver() {
+		// The reactive AFTs' _suit columns can be left out: react hands them over. Columns match as in core.
+		List<String> warnings = run(withCapitalsFile(ReactToyData.context(dir), "\"X\",\"Y\", intfodder_suit ,\"AF_SUIT\"",
+				"1,1,0.5,0.5")).warnings();
+
+		assertEquals(List.of("CRAFTY-react: the model's capitals file has no column (or no rows) for Urban_suit in"
+				+ " 2020-2021, and react does not hand them over, so the model gives them 0"), warnings);
+	}
+
+	@Test
+	void aCapitalsFileWithEveryColumnReactDoesNotHandOverGivesNoWarning() {
+		assertEquals(List.of(), run(withCapitalsFile(ReactToyData.context(dir), "X,Y,IntFodder_suit,AF_suit,Urban_suit",
+				"1,1,1,1,1")).warnings());
+	}
+
+	@Test
+	void aCapitalsFileWithNoRowsCoversNothing() {
+		List<String> warnings = run(withCapitalsFile(ReactToyData.context(dir), "X,Y,IntFodder_suit,AF_suit,Urban_suit"))
+				.warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "for IntFodder_suit, AF_suit, Urban_suit in 2020-2021,");
+	}
+
+	@Test
+	void aSuitReactDoesNotHandOverMustComeFromTheFile() {
+		// Only stocking on: react hands over IntP's _suit, but not the crops AFTs' (phase 3 plan, Q6).
+		ReactToyData.Context context = ReactToyData.context(dir).off(ReactElement.FERTILISER, ReactElement.IRRIGATION,
+				ReactElement.OTHER_INTENSITY);
+
+		List<String> warnings = run(withCapitalsFile(context, "X,Y,IntFodder_suit,AF_suit,Urban_suit", "1,1,1,1,1"))
+				.warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "for IntC3C_irrig_suit, ExtC3C_suit in 2020-2021,");
+		assertTrue(!warnings.get(0).contains("IntP_suit"), warnings.get(0));
+	}
+
+	@Test
+	void everyCapitalIsCheckedAndAYearWithNoFileIsSkipped() {
+		// Core stops the run itself when a year has no capitals file.
+		Path file = ReactToyData.write(dir, "worlds/capitals/ssp126/capitals_2020.csv",
+				"X,Y,IntFodder_suit,AF_suit,Urban_suit", "1,1,1,1,1");
+
+		List<String> warnings = run(ReactToyData.context(dir).capital("react_GDP_50", false).capitalsFile(2020, file))
+				.warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "for react_GDP_50 in 2020,");
+	}
+
+	@Test
+	void yearsAreWrittenAsRanges() {
+		assertEquals("2020-2022, 2025, 2030-2031", ReactStartupCheck.yearRanges(List.of(2020, 2021, 2022, 2025, 2030, 2031)));
+		assertEquals("2020", ReactStartupCheck.yearRanges(List.of(2020)));
 	}
 
 	// ---- reporting ----
 
 	@Test
 	void everyProblemIsReportedInOneMessage() {
-		String message = problems(ReactToyData.context(dir).cell("9,9").noCostFile(2020, ReactElement.FERTILISER)
-				.aft("NewAFT", 0, 1, false, false));
+		ReactToyData.write(dir, "costs/global/global_costs.csv", "Item,Cost", "Nfert,1.08", "Stocking,500", "C3cereals,50",
+				"Pasture,50");
 
-		assertMentions(message, "3 problem(s)", "9,9", "Nfert_costs", "NewAFT");
+		String message = problems(ReactToyData.context(dir).cell("9,9").aft("NewAFT", 0, 1, false, false));
+
+		assertMentions(message, "3 problem(s)", "9,9", "no row for Water", "NewAFT");
 	}
 }

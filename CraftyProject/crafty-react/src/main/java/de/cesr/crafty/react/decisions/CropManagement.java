@@ -106,6 +106,21 @@ public final class CropManagement {
 		return worked(intensityCost, "other-intensity costs are worked out only when other intensity is reactive");
 	}
 
+	/** Whether N costs were worked out: fertiliser is reactive. */
+	public boolean hasNitrogenCost() {
+		return nitrogenCost != null;
+	}
+
+	/** Whether water costs were worked out: the AFT irrigates and irrigation is reactive. */
+	public boolean hasIrrigationCost() {
+		return irrigationCost != null;
+	}
+
+	/** Whether other-intensity costs were worked out: other intensity is reactive. */
+	public boolean hasIntensityCost() {
+		return intensityCost != null;
+	}
+
 	private double[] worked(double[] cost, String when) {
 		if (cost == null) {
 			throw new IllegalStateException(aft.label() + ": " + when);
