@@ -128,6 +128,9 @@ public final class CoreFacts {
 		if (ConfigLoader.isReactiveStocking()) {
 			elements.add(ReactElement.STOCKING);
 		}
+		if (ConfigLoader.isReactiveForestry()) {
+			elements.add(ReactElement.FORESTRY);
+		}
 		return elements;
 	}
 

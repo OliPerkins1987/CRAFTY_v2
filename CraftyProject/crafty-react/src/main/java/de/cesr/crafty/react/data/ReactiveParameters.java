@@ -15,14 +15,15 @@ import java.util.Set;
  *
  * <pre>
  * Label,react_isReactive,react_service,react_N_type,react_N_capital,react_N_par,react_I_eff,
- *      react_O_capital,react_O_par,react_S_par,react_R_par
+ *      react_O_capital,react_O_par,react_S_par,react_R_type,react_R_capital,react_R_par
  * </pre>
  *
  * The sheet holds only what makes an AFT move away from its baseline. The baselines come from core's
  * {@code AFTsMetaData.csv} through {@link ReactRunContext}: N from {@code Nfert_rate}, other intensity
- * from {@code Other_intensity}, and whether the AFT irrigates from {@code Irrigated}.
+ * from {@code Other_intensity}, and whether the AFT irrigates from {@code Irrigated}. For a forestry AFT,
+ * {@code Other_intensity} holds its initial rotation in years.
  *
- * Columns other than {@code Label} and the ten {@code react_} columns (for example {@code Type}) are
+ * Columns other than {@code Label} and the twelve {@code react_} columns (for example {@code Type}) are
  * ignored. An unknown {@code react_} column is a problem, so that a mistyped column name is caught.
  *
  * Rows with {@code react_isReactive = 0} are not read further. For reactive rows, a value is only
@@ -44,11 +45,13 @@ public final class ReactiveParameters {
 	public static final String O_CAPITAL = "react_O_capital";
 	public static final String O_PAR = "react_O_par";
 	public static final String S_PAR = "react_S_par";
+	public static final String R_TYPE = "react_R_type";
+	public static final String R_CAPITAL = "react_R_capital";
 	public static final String R_PAR = "react_R_par";
 
 	/** Every react_ column the sheet must have. */
 	public static final List<String> REACT_COLUMNS = List.of(IS_REACTIVE, SERVICE, N_TYPE, N_CAPITAL, N_PAR, I_EFF,
-			O_CAPITAL, O_PAR, S_PAR, R_PAR);
+			O_CAPITAL, O_PAR, S_PAR, R_TYPE, R_CAPITAL, R_PAR);
 
 	private final Path file;
 	private final List<String> labels;
@@ -140,10 +143,6 @@ public final class ReactiveParameters {
 					+ ", so react has no LPJ-GUESS input for it");
 			return null;
 		}
-		if (type == LpjgType.FORESTRY) {
-			r.problem("service " + service + " is forestry, which is not implemented yet; set " + IS_REACTIVE + " = 0");
-			return null;
-		}
 		ReactRunContext.AftBaseline baseline = context.afts().get(label);
 		if (baseline == null) {
 			// Reported by the AFT-list check in ReactStartupCheck.
@@ -164,17 +163,70 @@ public final class ReactiveParameters {
 		String oCapital = r.textOrNull(O_CAPITAL);
 		Double oPar = r.number(O_PAR);
 		Double sPar = r.number(S_PAR);
+		String rTypeText = r.text(R_TYPE);
+		RotationMode rMode = null;
+		if (!rTypeText.isEmpty()) {
+			rMode = RotationMode.fromLabel(rTypeText);
+			if (rMode == null) {
+				r.problem(R_TYPE + " must be Prospect or Capital, not \"" + rTypeText + "\"");
+			}
+		}
+		String rCapital = r.textOrNull(R_CAPITAL);
 		Double rPar = r.number(R_PAR);
 
 		boolean fertiliser = context.isReactive(ReactElement.FERTILISER);
 		boolean irrigation = context.isReactive(ReactElement.IRRIGATION);
 		boolean otherIntensity = context.isReactive(ReactElement.OTHER_INTENSITY);
+		boolean forestry = context.isReactive(ReactElement.FORESTRY);
 
 		if (baseline.nfertRate() < 0) {
 			r.problem("Nfert_rate in AFTsMetaData.csv is negative (" + baseline.nfertRate() + ")");
 		}
 
-		if (type == LpjgType.PASTURE) {
+		if (type != LpjgType.FORESTRY) {
+			for (String column : List.of(R_TYPE, R_CAPITAL, R_PAR)) {
+				if (!r.text(column).isEmpty()) {
+					r.problem(column + " does not apply to a " + type.label() + " AFT; leave it blank");
+				}
+			}
+			rMode = null;
+		}
+
+		if (type == LpjgType.FORESTRY) {
+			for (String column : List.of(N_TYPE, N_CAPITAL, N_PAR, I_EFF, O_CAPITAL, O_PAR, S_PAR)) {
+				if (!r.text(column).isEmpty()) {
+					r.problem(column + " does not apply to a forestry AFT; leave it blank");
+				}
+			}
+			nMode = null;
+
+			// The rotation, as the crops AFTs' fertiliser: react_R_type, react_R_capital and react_R_par
+			// stand where react_N_type, react_N_capital and react_N_par do, and forestry's switch where
+			// fertiliser's does. A Capital AFT's react_R_par may be 0 or negative.
+			if (rMode == RotationMode.PROSPECT && rCapital != null) {
+				r.problem(R_CAPITAL + " does not apply to a Prospect AFT; leave it blank");
+			}
+			if (forestry) {
+				if (rTypeText.isEmpty()) {
+					r.require(R_TYPE, "a forestry AFT when forestry is reactive");
+				}
+				if (rMode == RotationMode.CAPITAL) {
+					r.require(R_CAPITAL, "a Capital AFT when forestry is reactive");
+					r.require(R_PAR, "a Capital AFT when forestry is reactive");
+				}
+			}
+			if (rMode == RotationMode.PROSPECT) {
+				if (rPar == null) {
+					rPar = 0.0;
+				} else if (rPar < 0) {
+					r.problem(R_PAR + " (the status-quo threshold for a Prospect AFT) must be 0 or more, not " + rPar);
+				}
+			}
+			if (!(baseline.otherIntensity() > 0)) {
+				r.problem("Other_intensity in AFTsMetaData.csv is a forestry AFT's initial rotation length in years"
+						+ " (e.g. 50), and must be above 0, not " + baseline.otherIntensity());
+			}
+		} else if (type == LpjgType.PASTURE) {
 			for (String column : List.of(N_TYPE, N_CAPITAL, N_PAR, I_EFF)) {
 				if (!r.text(column).isEmpty()) {
 					r.problem(column + " does not apply to a pasture AFT; leave it blank");
@@ -259,7 +311,7 @@ public final class ReactiveParameters {
 		}
 
 		return new AftReactParameters(label, service, type, services.lpjgName(service), nMode, nCapital, nPar, iEff,
-				oCapital, oPar, sPar, rPar, baseline);
+				oCapital, oPar, sPar, rMode, rCapital, rPar, baseline);
 	}
 
 	public Path file() {

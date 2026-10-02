@@ -9,17 +9,18 @@ import java.util.Set;
  * baselines from core's {@code AFTsMetaData.csv}.
  *
  * The rule is: baselines live in core, and the react sheet holds only what makes an AFT move away from
- * them. So N starts at {@code Nfert_rate}, crops other intensity starts at {@code Other_intensity}, and
+ * them. So N starts at {@code Nfert_rate}, crops other intensity starts at {@code Other_intensity}, a
+ * forestry AFT's rotation starts at {@code Other_intensity} (which holds years for a forestry AFT), and
  * whether the AFT irrigates is core's {@code Irrigated}.
  *
  * A {@code null} value means the cell was blank and nothing stands in for it. Where a blank has a
- * meaning, the default is already filled in: a Prospect AFT's {@code nPar} and a pasture AFT's
- * {@code sPar} are 0 when blank.
+ * meaning, the default is already filled in: a Prospect AFT's {@code nPar} and {@code rPar}, and a pasture
+ * AFT's {@code sPar}, are 0 when blank.
  *
  * @param label      the AFT
  * @param service    {@code react_service}
- * @param type       the service's {@code LPJG_type}: {@code CROPS} or {@code PASTURE}
- * @param lpjgName   the service's name in LPJ-GUESS column headers
+ * @param type       the service's {@code LPJG_type}: {@code CROPS}, {@code PASTURE} or {@code FORESTRY}
+ * @param lpjgName   the service's name in LPJ-GUESS column headers (not used for forestry)
  * @param nMode      {@code react_N_type}; null for pasture, or when blank
  * @param nCapital   {@code react_N_capital}: the capital a Capital AFT's N follows
  * @param nPar       {@code react_N_par}: for Prospect, the inertia threshold per kg N (≥ 0); for
@@ -29,20 +30,34 @@ import java.util.Set;
  * @param oPar       {@code react_O_par}: the {@code Eff_func} threshold (crops) or husbandry multiplier
  *                   (pasture)
  * @param sPar       {@code react_S_par}: stocking improvement threshold (pasture)
- * @param rPar       {@code react_R_par}: kept for forestry, not used yet
+ * @param rMode      {@code react_R_type}; null for crops and pasture, or when blank
+ * @param rCapital   {@code react_R_capital}: the capital a Capital AFT's rotation follows
+ * @param rPar       {@code react_R_par}: for Prospect, the status-quo threshold (≥ 0); for Capital, the
+ *                   sensitivity, any number (× 1000 = years taken off the rotation per unit of capital)
  * @param baseline   the AFT's baselines from core
  */
 public record AftReactParameters(String label, String service, LpjgType type, String lpjgName, NitrogenMode nMode,
-		String nCapital, Double nPar, Double iEff, String oCapital, Double oPar, Double sPar, Double rPar,
-		ReactRunContext.AftBaseline baseline) {
+		String nCapital, Double nPar, Double iEff, String oCapital, Double oPar, Double sPar, RotationMode rMode,
+		String rCapital, Double rPar, ReactRunContext.AftBaseline baseline) {
 
 	/** The N baseline, kg N/ha: core's {@code Nfert_rate}. */
 	public double nitrogenBaseline() {
 		return baseline.nfertRate();
 	}
 
-	/** The other-intensity baseline: core's {@code Other_intensity}. */
+	/**
+	 * The other-intensity baseline: core's {@code Other_intensity}. For a forestry AFT this is its initial
+	 * rotation in years; see {@link #initialRotation()}.
+	 */
 	public double otherIntensityBaseline() {
+		return baseline.otherIntensity();
+	}
+
+	/**
+	 * A forestry AFT's initial rotation, in years: core's {@code Other_intensity}, which holds years for a
+	 * forestry AFT. Core only reads {@code Other_intensity} for its global costs, which react does not use.
+	 */
+	public double initialRotation() {
 		return baseline.otherIntensity();
 	}
 
@@ -59,9 +74,18 @@ public record AftReactParameters(String label, String service, LpjgType type, St
 		return type == LpjgType.PASTURE;
 	}
 
+	public boolean isForestry() {
+		return type == LpjgType.FORESTRY;
+	}
+
 	/** Whether N follows a capital rather than price. */
 	public boolean usesCapitalForN() {
 		return nMode == NitrogenMode.CAPITAL;
+	}
+
+	/** Whether the rotation follows a capital rather than price. */
+	public boolean usesCapitalForRotation() {
+		return rMode == RotationMode.CAPITAL;
 	}
 
 	/**
@@ -80,6 +104,9 @@ public record AftReactParameters(String label, String service, LpjgType type, St
 		}
 		if (reactive.contains(ReactElement.OTHER_INTENSITY) && oCapital != null) {
 			capitals.add(oCapital);
+		}
+		if (reactive.contains(ReactElement.FORESTRY) && usesCapitalForRotation() && rCapital != null) {
+			capitals.add(rCapital);
 		}
 		return capitals;
 	}

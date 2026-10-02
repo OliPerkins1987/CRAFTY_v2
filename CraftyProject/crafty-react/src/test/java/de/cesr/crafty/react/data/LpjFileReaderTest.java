@@ -1,5 +1,6 @@
 package de.cesr.crafty.react.data;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -120,6 +121,45 @@ class LpjFileReaderTest {
 				() -> LpjFileReader.read(file, grid, List.of("Total"), 1));
 
 		assertTrue(e.getMessage().contains("line 2") && e.getMessage().contains("latitude -91.25"), e.getMessage());
+	}
+
+	// ---- x and y (32b) ----
+
+	@Test
+	void xAndYReadExactlyAsLonAndLat() {
+		Path lonLat = ReactToyData.write(dir, "lonlat.csv", "Lon,Lat,harvest_age_50",
+				ReactToyData.PIXEL_A + ",0.11", ReactToyData.PIXEL_B + ",0");
+		Path xy = ReactToyData.write(dir, "xy.csv", "\"x\",\"y\",\"harvest_age_50\"",
+				ReactToyData.PIXEL_A + ",0.11", ReactToyData.PIXEL_B + ",0");
+
+		float[] fromLonLat = LpjFileReader.read(lonLat, grid, List.of("harvest_age_50"), 10)[0];
+		float[] fromXy = LpjFileReader.read(xy, grid, List.of("harvest_age_50"), 10)[0];
+
+		assertArrayEquals(fromLonLat, fromXy);
+		assertEquals(1.1f, fromXy[pixelA], 1e-5);
+	}
+
+	@Test
+	void withBothPairsLonAndLatAreUsed() {
+		// x and y hold other numbers here; only Lon and Lat place the rows.
+		Path file = ReactToyData.write(dir, "both.csv", "Lon,Lat,x,y,Total",
+				ReactToyData.PIXEL_A + ",0,0,1", ReactToyData.PIXEL_B + ",0,0,2");
+
+		float[] values = LpjFileReader.read(file, grid, List.of("Total"), 1)[0];
+
+		assertEquals(1f, values[pixelA]);
+		assertEquals(2f, values[pixelB]);
+	}
+
+	@Test
+	void aFileWithNeitherPairOfCoordinatesIsNamed() {
+		Path file = ReactToyData.write(dir, "neither.csv", "Long,Lati,Total", ReactToyData.PIXEL_A + ",1");
+
+		ReactInputException e = assertThrows(ReactInputException.class,
+				() -> LpjFileReader.read(file, grid, List.of("Total"), 1));
+
+		assertTrue(e.getMessage().contains("neither.csv is missing column(s) [Lon, Lat] (or x and y instead of Lon and Lat)"),
+				e.getMessage());
 	}
 
 	@Test

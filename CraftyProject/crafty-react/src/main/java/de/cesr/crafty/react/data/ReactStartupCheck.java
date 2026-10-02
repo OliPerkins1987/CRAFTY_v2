@@ -33,10 +33,12 @@ import de.cesr.crafty.core.cli.CustomLogger;
  * <li>the parameters sheet and core list the same AFTs (masks included, but not the model's own
  * {@value #ABANDONED});</li>
  * <li>each reactive AFT's service is in Services.csv and in the model (in {@link ReactiveParameters});</li>
- * <li>its LPJG_type is crops or pasture (in {@link ReactiveParameters});</li>
- * <li>the LPJ-GUESS columns react needs are in every year's file (headers only);</li>
+ * <li>its LPJG_type is crops, pasture or forestry (in {@link ReactiveParameters});</li>
+ * <li>the LPJ-GUESS columns react needs are in every year's file, with {@code Lon} and {@code Lat} or
+ * {@code x} and {@code y} (headers only);</li>
  * <li>each capital react reads is a column in every year's capitals file;</li>
- * <li>values are in range (in {@link ReactiveParameters});</li>
+ * <li>values are in range (in {@link ReactiveParameters}), and, with forestry on, each forestry AFT's
+ * initial rotation is on the rotation grid;</li>
  * <li>global_costs.csv has the base costs the switched-on elements need;</li>
  * <li>every model cell has a pixel in the cell key;</li>
  * <li>(check 10, every pixel present in each LPJ-GUESS file, runs as each year loads, in 27c);</li>
@@ -45,14 +47,16 @@ import de.cesr.crafty.core.cli.CustomLogger;
  * <li>the cell key's regions are the model's;</li>
  * <li>each {@code <AFT>_suit} capital react hands a value to is one of the model's capitals (phase 5).</li>
  * </ol>
- * Files for an element are only required when the element is switched on and some reactive AFT uses
- * it.
+ * A land use's files are only required, and only loaded, when it is in use: one of its elements is on
+ * and it has a reactive AFT. Crops (fertiliser, irrigation, other intensity): the yields, and for irrigated
+ * AFTs the irrigation demand, runoff and irrigation cost index. Pasture (other intensity, stocking): the
+ * NPP. Forestry (forestry): the forestry yields. Capitals are read per element.
  *
  * Some checks only warn: a {@code <AFT>_suit} react hands over that is typed Capital, when the model
  * separates production from competitiveness (with check 13); that every AFT the model charges a cost gets
- * it from somewhere, either react's handover or a column in the model's own cost file; and the same for
- * every capital the model has, and its own capitals files (phase 5 plan, §3.4). The warnings are logged,
- * and kept in the {@link Result}.
+ * it from somewhere, either react's handover or a column in the model's own cost file; the same for
+ * every capital the model has, and its own capitals files (phase 5 plan, §3.4); and reactive forestry AFTs
+ * with forestry switched off. The warnings are logged, and kept in the {@link Result}.
  */
 public final class ReactStartupCheck {
 
@@ -66,6 +70,9 @@ public final class ReactStartupCheck {
 
 	/** The runoff file's value column. */
 	public static final String RUNOFF = "Total";
+
+	/** The start of a forestry file's column for a rotation: {@code harvest_age_<H>}, H in years. */
+	public static final String HARVEST_AGE = "harvest_age_";
 
 	/**
 	 * The AFT the model adds itself, for land nobody manages: {@code AFTsLoader} puts it in the AFT list
@@ -85,15 +92,19 @@ public final class ReactStartupCheck {
 	private static final Set<ReactElement> PASTURE_ELEMENTS = EnumSet.of(ReactElement.OTHER_INTENSITY,
 			ReactElement.STOCKING);
 
+	/** The same for the forestry AFTs. */
+	private static final Set<ReactElement> FORESTRY_ELEMENTS = EnumSet.of(ReactElement.FORESTRY);
+
 	/** The irrigation cost files' one column for every irrigated AFT, which core reads instead of the AFTs' own. */
 	static final String SHARED_IRRIGATION_COLUMN = "IRRIGATION_COST";
 
 	/**
 	 * Everything the checks loaded, for the per-year loading (27c) to use.
 	 *
-	 * @param irrigationCost   null unless irrigation is reactive and some reactive AFT irrigates
-	 * @param suitabilityFiles for each type in use, the file for each year
+	 * @param irrigationCost   null unless crops are in use and some reactive crops AFT irrigates
+	 * @param suitabilityFiles for each land use in use, the file for each year
 	 * @param capitalsFiles    the capitals file for each year; empty if no capital is read
+	 * @param irrigatedCrops   the reactive crops AFTs that irrigate, when crops are in use; otherwise empty
 	 * @param warnings         the startup warnings (see the class comment), as logged
 	 */
 	public record Result(ReactiveParameters parameters, ReactServiceKey services, ReactBaseCosts baseCosts,
@@ -145,14 +156,16 @@ public final class ReactStartupCheck {
 		IrrigationCostGrid irrigationCost = null;
 		Map<LpjgType, Map<Integer, Path>> suitabilityFiles = new EnumMap<>(LpjgType.class);
 		Map<Integer, Path> capitalsFiles = new LinkedHashMap<>();
-		List<AftReactParameters> irrigatedCrops = parameters == null ? List.of() : irrigatedCrops(parameters);
+		List<AftReactParameters> irrigatedCrops = parameters == null || !inUse(parameters, LpjgType.CROPS) ? List.of()
+				: irrigatedCrops(parameters);
 		if (parameters != null && context.anyReactive()) {
 			if (cellKey != null && !irrigatedCrops.isEmpty()) {
 				irrigationCost = attempt(() -> IrrigationCostGrid.load(config.irrigationCostFile(project), cellKey.grid()));
 			}
 			checkSuitabilities(parameters, suitabilityFiles);
 			checkCapitals(parameters, capitalsFiles);
-			checkIrrigationFiles(parameters);
+			checkIrrigationFiles(irrigatedCrops);
+			checkInitialRotations(parameters);
 			checkSuitCapitals(parameters);
 		}
 
@@ -165,6 +178,7 @@ public final class ReactStartupCheck {
 					+ " have run; no year data is loaded");
 		}
 		warnIfIrrigationIsLeftBehind(irrigatedCrops);
+		forestryMessages(parameters);
 		warnings.addAll(costFileWarnings(parameters));
 		warnings.addAll(capitalsFileWarnings(parameters));
 		warnings.forEach(LOGGER::warn);
@@ -217,6 +231,24 @@ public final class ReactStartupCheck {
 				+ " at the baseline N (Nfert_rate), so water applied stays at min(runoff, demand at baseline N) while"
 				+ " N changes, and the model charges the irrigation costs in its own spatial files, which do not"
 				+ " follow that year's runoff. Switch reactive_irrigation on for irrigation to respond");
+	}
+
+	/**
+	 * When the forestry switch and the sheet's forestry AFTs don't go together, say so: reactive forestry
+	 * AFTs with forestry off keep the model's own values (a warning); forestry on with no reactive forestry
+	 * AFT changes nothing (an info line).
+	 */
+	private void forestryMessages(ReactiveParameters parameters) {
+		List<String> forestryAfts = parameters.reactive(LpjgType.FORESTRY).stream().map(AftReactParameters::label)
+				.toList();
+		boolean forestry = context.isReactive(ReactElement.FORESTRY);
+		if (!forestry && !forestryAfts.isEmpty()) {
+			warnings.add("CRAFTY-react: " + forestryAfts + " are reactive forestry AFTs, but reactive_forestry is off,"
+					+ " so they keep the model's own suitabilities and intensity costs");
+		} else if (forestry && forestryAfts.isEmpty()) {
+			LOGGER.info("CRAFTY-react: reactive_forestry is on, but no AFT in " + parameters.file()
+					+ " is a reactive forestry AFT, so it changes nothing");
+		}
 	}
 
 	// ---- check 12: regions ----
@@ -279,8 +311,12 @@ public final class ReactStartupCheck {
 			needed.put(ReactBaseCosts.STOCKING, "stocking is reactive");
 		}
 		if (context.isReactive(ReactElement.OTHER_INTENSITY)) {
-			for (String service : parameters.servicesInUse()) {
-				needed.putIfAbsent(service, "other intensity is reactive and a reactive AFT produces " + service);
+			// Other intensity changes crops and pasture AFTs only: a forestry AFT's intensity is its rotation.
+			for (AftReactParameters aft : parameters.reactive()) {
+				if (!aft.isForestry()) {
+					needed.putIfAbsent(aft.service(), "other intensity is reactive and a reactive AFT produces "
+							+ aft.service());
+				}
 			}
 		}
 		if (context.isReactive(ReactElement.STOCKING)) {
@@ -289,6 +325,12 @@ public final class ReactStartupCheck {
 			for (AftReactParameters aft : parameters.reactive(LpjgType.PASTURE)) {
 				needed.putIfAbsent(aft.service(), "stocking is reactive, and " + aft.label()
 						+ "'s stocking decision weighs its husbandry at the cost of " + aft.service());
+			}
+		}
+		if (context.isReactive(ReactElement.FORESTRY)) {
+			for (AftReactParameters aft : parameters.reactive(LpjgType.FORESTRY)) {
+				needed.putIfAbsent(aft.service(), "forestry is reactive, and " + aft.label()
+						+ "'s rotation cost is the cost of one harvest of " + aft.service());
 			}
 		}
 		for (String item : baseCosts.missing(needed.keySet())) {
@@ -340,10 +382,10 @@ public final class ReactStartupCheck {
 	 */
 	private List<AftReactParameters> suitsHandedOver(ReactiveParameters parameters) {
 		List<AftReactParameters> handedOver = new ArrayList<>();
-		if (CROP_ELEMENTS.stream().anyMatch(context::isReactive)) {
+		if (landUseOn(LpjgType.CROPS)) {
 			handedOver.addAll(parameters.reactive(LpjgType.CROPS));
 		}
-		if (PASTURE_ELEMENTS.stream().anyMatch(context::isReactive)) {
+		if (landUseOn(LpjgType.PASTURE)) {
 			handedOver.addAll(parameters.reactive(LpjgType.PASTURE));
 		}
 		return handedOver;
@@ -367,6 +409,10 @@ public final class ReactStartupCheck {
 	private List<String> costFileWarnings(ReactiveParameters parameters) {
 		List<String> warnings = new ArrayList<>();
 		for (ReactElement element : ReactElement.values()) {
+			if (element == ReactElement.FORESTRY) {
+				// Forestry's cost is the intensity cost, whose file and AFTs the other-intensity entry covers.
+				continue;
+			}
 			List<String> charged = context.chargedAfts().getOrDefault(element, List.of());
 			Set<String> handedOver = costsHandedOver(parameters, element);
 			Map<String, List<Integer>> yearsUncovered = new LinkedHashMap<>();
@@ -505,16 +551,19 @@ public final class ReactStartupCheck {
 	// ---- checks 1 and 5: suitability year folders and their columns ----
 
 	private void checkSuitabilities(ReactiveParameters parameters, Map<LpjgType, Map<Integer, Path>> found) {
-		for (LpjgType type : List.of(LpjgType.CROPS, LpjgType.PASTURE)) {
-			List<AftReactParameters> afts = parameters.reactive(type);
-			if (afts.isEmpty()) {
+		for (LpjgType type : LpjgType.values()) {
+			if (!inUse(parameters, type)) {
 				continue;
 			}
 			Set<String> columns = new LinkedHashSet<>();
-			for (AftReactParameters aft : afts) {
+			if (type == LpjgType.FORESTRY) {
+				// One table for all wood: every forestry AFT reads the same columns.
+				config.forestryRotations().forEach(rotation -> columns.add(forestryColumn(rotation)));
+			}
+			for (AftReactParameters aft : parameters.reactive(type)) {
 				if (type == LpjgType.CROPS) {
 					CROP_LEVELS.forEach(level -> columns.add(aft.lpjgName() + level));
-				} else {
+				} else if (type == LpjgType.PASTURE) {
 					columns.add(aft.lpjgName());
 				}
 			}
@@ -544,8 +593,8 @@ public final class ReactStartupCheck {
 
 	// ---- checks 1 and 5: irrigation demand and runoff ----
 
-	private void checkIrrigationFiles(ReactiveParameters parameters) {
-		List<AftReactParameters> irrigated = irrigatedCrops(parameters);
+	/** For the irrigated crops AFTs, when crops are in use (see {@link #run()}). */
+	private void checkIrrigationFiles(List<AftReactParameters> irrigated) {
 		if (irrigated.isEmpty()) {
 			return;
 		}
@@ -571,32 +620,80 @@ public final class ReactStartupCheck {
 		}
 	}
 
+	// ---- check 7: forestry's initial rotations, on the grid ----
+
+	/**
+	 * With forestry on, each reactive forestry AFT's initial rotation (its {@code Other_intensity}, in years)
+	 * must be one of {@code forestry.rotations}: its rotation starts there and moves along the grid. With
+	 * forestry off react doesn't use it, so it isn't checked.
+	 */
+	private void checkInitialRotations(ReactiveParameters parameters) {
+		if (!context.isReactive(ReactElement.FORESTRY)) {
+			return;
+		}
+		List<Integer> rotations = config.forestryRotations();
+		for (AftReactParameters aft : parameters.reactive(LpjgType.FORESTRY)) {
+			double rotation = aft.initialRotation();
+			if (rotations.stream().noneMatch(r -> r == rotation)) {
+				problems.add("AFTsMetaData.csv: Other_intensity of " + aft.label() + " is its initial rotation in years,"
+						+ " and must be one of forestry.rotations " + rotations + ", not " + rotation
+						+ (rotation == 1.0 ? " (core reads a blank Other_intensity as 1.0)" : ""));
+			}
+		}
+	}
+
 	// ---- helpers ----
+
+	/** A forestry file's column for a rotation of so many years: {@code harvest_age_<H>}. */
+	public static String forestryColumn(int rotation) {
+		return HARVEST_AGE + rotation;
+	}
+
+	/** Whether one of a land use's elements is switched on. */
+	private boolean landUseOn(LpjgType type) {
+		Set<ReactElement> elements = switch (type) {
+			case CROPS -> CROP_ELEMENTS;
+			case PASTURE -> PASTURE_ELEMENTS;
+			case FORESTRY -> FORESTRY_ELEMENTS;
+		};
+		return elements.stream().anyMatch(context::isReactive);
+	}
+
+	/** Whether a land use is in use: one of its elements is switched on, and it has a reactive AFT. */
+	private boolean inUse(ReactiveParameters parameters, LpjgType type) {
+		return landUseOn(type) && !parameters.reactive(type).isEmpty();
+	}
 
 	/**
 	 * The reactive crops AFTs that irrigate, whether or not irrigation is reactive. The switch decides
 	 * whether react changes the water applied, not whether the AFT irrigates: with irrigation switched
 	 * off, water applied is still min(runoff, demand), which sets the irrigation level in the yield
-	 * surface. So the demand, runoff and irrigation cost files are needed either way.
+	 * surface. So the demand, runoff and irrigation cost files are needed either way, as long as crops are
+	 * in use.
 	 */
 	private List<AftReactParameters> irrigatedCrops(ReactiveParameters parameters) {
 		return parameters.reactive(LpjgType.CROPS).stream().filter(AftReactParameters::isIrrigated).toList();
 	}
 
-	/** Adds a problem for each file whose header lacks any of the columns (or Lon/Lat). */
+	/**
+	 * Adds a problem for each file whose header lacks any of the columns, or both pairs of coordinates
+	 * ({@code Lon} and {@code Lat}, or {@code x} and {@code y}, as {@link LpjFileReader} reads them).
+	 */
 	private void requireColumns(Collection<Path> files, Collection<String> columns) {
-		List<String> wanted = new ArrayList<>();
-		wanted.add(LpjFileReader.LON);
-		wanted.add(LpjFileReader.LAT);
-		wanted.addAll(columns);
 		for (Path file : files) {
 			List<String> header = attempt(() -> ReactCsv.readHeader(file));
 			if (header == null) {
 				continue;
 			}
-			List<String> missing = wanted.stream().filter(c -> !header.contains(c)).toList();
+			boolean noCoordinates = LpjFileReader.coordinateColumns(header) == null;
+			List<String> missing = new ArrayList<>();
+			if (noCoordinates) {
+				missing.add(LpjFileReader.LON);
+				missing.add(LpjFileReader.LAT);
+			}
+			columns.stream().filter(c -> !header.contains(c)).forEach(missing::add);
 			if (!missing.isEmpty()) {
-				problems.add(file + " is missing column(s) " + missing);
+				problems.add(file + " is missing column(s) " + missing + (noCoordinates ? LpjFileReader.OR_X_AND_Y : ""));
 			}
 		}
 	}

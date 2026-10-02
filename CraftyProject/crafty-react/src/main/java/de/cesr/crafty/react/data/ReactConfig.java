@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
  */
 public final class ReactConfig {
 
-	/** Units of the crop yield and pasture NPP files, and the factor that converts them to t/ha. */
+	/** Units of the crop yield, pasture NPP and forestry yield files, and the factor that converts them to t/ha. */
 	public enum YieldUnits {
 		KG_PER_M2("kg_per_m2", 10), T_PER_HA("t_per_ha", 1);
 
@@ -67,6 +67,9 @@ public final class ReactConfig {
 
 	private static final Pattern PLACEHOLDER = Pattern.compile("\\{([^}]*)\\}");
 
+	/** The forestry rotation grid unless the file sets one, in years. */
+	static final List<Integer> DEFAULT_ROTATIONS = List.of(10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+
 	// ---- inputs (the loader sets these) ----
 	String parameters = "AFTs/react/Reactive_parameters.csv";
 	String baseCosts = "costs/global/global_costs.csv";
@@ -98,6 +101,9 @@ public final class ReactConfig {
 	// Crop yield change per year from technology: the yield surface is multiplied by
 	// (1 + yield_tech_change x years since start_year). 0 means no change.
 	double yieldTechChange = 0;
+	// The forestry rotation grid, in years: each is a harvest_age_<H> column of the forestry files, and a
+	// rotation moves one place along it at a time.
+	List<Integer> forestryRotations = DEFAULT_ROTATIONS;
 
 	// ---- inspection files (the outputs section): what react read, fitted and decided ----
 	// Written to <output folder>/react/ in the years core writes its cell maps, or every year.
@@ -233,6 +239,14 @@ public final class ReactConfig {
 		return yieldTechChange;
 	}
 
+	/**
+	 * The forestry rotation grid, in years, shortest first ({@code forestry.rotations}). The forestry files
+	 * have a {@code harvest_age_<H>} column for each.
+	 */
+	public List<Integer> forestryRotations() {
+		return forestryRotations;
+	}
+
 	// ---- inspection files ----
 
 	/** Inspection files every year; otherwise only in the years core writes its cell maps. */
@@ -274,7 +288,8 @@ public final class ReactConfig {
 		checkTemplate(problems, "irrigation_demand", irrigationWaterDemand, List.of("scenario", "year"));
 		checkTemplate(problems, "runoff", runoff, List.of("scenario", "year"));
 		if (!suitabilities.contains("{type}")) {
-			problems.add("inputs.suitabilities must contain {type}, so crops and pasture are read from different folders");
+			problems.add("inputs.suitabilities must contain {type}, so crops, pasture and forestry are read from different"
+					+ " folders");
 		}
 		if (!irrigationWaterDemand.contains("{year}")) {
 			problems.add("inputs.irrigation_demand must contain {year}");
@@ -312,6 +327,15 @@ public final class ReactConfig {
 		}
 		if (yieldTechChange <= -1) {
 			problems.add("yield_tech_change must be above -1, so a year's technology change cannot take yields to 0");
+		}
+		if (forestryRotations.size() < 2) {
+			problems.add("forestry.rotations must hold at least two rotations");
+		}
+		for (int i = 0; i < forestryRotations.size(); i++) {
+			if (forestryRotations.get(i) <= 0 || (i > 0 && forestryRotations.get(i) <= forestryRotations.get(i - 1))) {
+				problems.add("forestry.rotations must be above 0 and increasing, with no repeats: " + forestryRotations);
+				break;
+			}
 		}
 		return problems;
 	}
@@ -352,6 +376,7 @@ public final class ReactConfig {
 				"stocking: initial " + stockingInitial + ", step " + stockingStep + ", min " + stockingMin + ", max "
 						+ stockingMax + ", harvest " + stockingHarvest,
 				"yield_tech_change: " + yieldTechChange,
+				"forestry: rotations " + forestryRotations,
 				"outputs: every_year " + outputEveryYear + ", inputs " + outputInputs + ", coefficients "
 						+ outputCoefficients + ", crops " + outputCrops + ", pasture " + outputPasture);
 	}

@@ -193,7 +193,167 @@ class ReactStartupCheckTest {
 				"ExtC3C,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,", "IntP,AFT,1,Pasture,,,,,react_GDP_50,1,0,",
 				"IntFodder,AFT,0,,,,,,,,,", "AF,AFT,1,Hardwood,,,,,,,,0.1", "Urban,Mask,0,,,,,,,,,");
 
-		assertMentions(problems(ReactToyData.context(dir)), "(AF)", "forestry");
+		assertMentions(problems(ReactToyData.context(dir).on(ReactElement.FORESTRY)), "(AF)",
+				"react_R_type is required for a forestry AFT when forestry is reactive");
+	}
+
+	// ---- forestry (32a): the sheet's forestry AFTs and the switch ----
+
+	@Test
+	void forestryAftsWithForestryOnPass() {
+		ReactToyData.forestry(dir);
+
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).withForestry());
+
+		assertEquals(List.of("IntC3C_irrig", "ExtC3C", "IntP", "IntBF", "ExtBF"),
+				result.parameters().reactive().stream().map(AftReactParameters::label).toList());
+		assertEquals(Set.of(LpjgType.CROPS, LpjgType.PASTURE, LpjgType.FORESTRY), result.suitabilityFiles().keySet());
+		assertEquals(dir.resolve("worlds/react/suitabilities/ssp126/forestry/Suit_Forestry_2021.csv"),
+				result.suitabilityFiles().get(LpjgType.FORESTRY).get(2021));
+		assertEquals(List.of(), result.warnings());
+	}
+
+	@Test
+	void aCapitalForestryAftsCapitalMustBeInEveryYearOnlyWithForestryOn() {
+		ReactToyData.forestry(dir);
+		ReactToyData.write(dir, "worlds/react/capitals/ssp126/EU_capitals_ssp126_2021.csv",
+				"Lon,Lat,react_GDP_50,react_GDP_100", ReactToyData.PIXEL_A + ",1,1", ReactToyData.PIXEL_B + ",1,1");
+
+		assertMentions(problems(ReactToyData.context(dir).withForestry()),
+				"EU_capitals_ssp126_2021.csv is missing column(s) [react_pop]");
+		run(ReactToyData.context(dir).withForestry().off(ReactElement.FORESTRY));
+	}
+
+	@Test
+	void reactiveForestryAftsWithForestryOffAreWarnedAbout() {
+		// Only the sheet: no forestry files and no Hardwood row in global_costs.csv. With forestry off neither
+		// is needed, and other intensity (on) asks only for the crops and pasture AFTs' services.
+		ReactToyData.parameters(dir, ReactToyData.standardAndForestryRows());
+
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).withForestry().off(ReactElement.FORESTRY));
+
+		assertEquals(List.of("CRAFTY-react: [IntBF, ExtBF] are reactive forestry AFTs, but reactive_forestry is off,"
+				+ " so they keep the model's own suitabilities and intensity costs"), result.warnings());
+		assertEquals(Set.of(LpjgType.CROPS, LpjgType.PASTURE), result.suitabilityFiles().keySet());
+	}
+
+	@Test
+	void forestryOnWithNoReactiveForestryAftIsNoProblemAndNoWarning() {
+		// AF names Hardwood but isn't reactive. One info line says forestry changes nothing.
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).on(ReactElement.FORESTRY));
+
+		assertEquals(3, result.parameters().reactive().size());
+		assertEquals(List.of(), result.warnings());
+	}
+
+	// ---- forestry (32b): its files, the initial rotation and the cost of a harvest ----
+
+	private static final String FORESTRY_FOLDER = "worlds/react/suitabilities/ssp126/forestry/";
+
+	/** A forestry file's header, with these coordinate columns and every default rotation's column. */
+	private static String forestryHeader(String coordinates) {
+		StringBuilder header = new StringBuilder(coordinates);
+		ReactConfig.DEFAULT_ROTATIONS.forEach(rotation -> header.append(',').append(ReactStartupCheck.forestryColumn(rotation)));
+		return header.toString();
+	}
+
+	@Test
+	void aMissingForestryYearOrColumnIsReported() throws IOException {
+		// A missing year stops the folder's check before its columns are read, as for crops and pasture.
+		ReactToyData.forestry(dir);
+		Files.delete(dir.resolve(FORESTRY_FOLDER + "Suit_Forestry_2021.csv"));
+		assertMentions(problems(ReactToyData.context(dir).withForestry()), "No .csv file for 2021", "forestry");
+
+		ReactToyData.forestry(dir);
+		ReactToyData.write(dir, FORESTRY_FOLDER + "Suit_Forestry_2020.csv", "\"x\",\"y\",\"harvest_age_10\"",
+				ReactToyData.PIXEL_A + ",1", ReactToyData.PIXEL_B + ",1");
+		assertMentions(problems(ReactToyData.context(dir).withForestry()),
+				"Suit_Forestry_2020.csv is missing column(s) [harvest_age_20, harvest_age_30,");
+	}
+
+	@Test
+	void aForestryFileWithNeitherPairOfCoordinatesIsReported() {
+		ReactToyData.forestry(dir);
+		ReactToyData.write(dir, FORESTRY_FOLDER + "Suit_Forestry_2020.csv", forestryHeader("long,lat"),
+				ReactToyData.PIXEL_A + ",1,1,1,1,1,1,1,1,1,1");
+
+		assertMentions(problems(ReactToyData.context(dir).withForestry()),
+				"Suit_Forestry_2020.csv is missing column(s) [Lon, Lat] (or x and y instead of Lon and Lat)");
+	}
+
+	@Test
+	void anInitialRotationOffTheGridIsReportedOnlyWithForestryOn() {
+		ReactToyData.forestry(dir);
+
+		String message = problems(ReactToyData.context(dir).withForestry().aft("IntBF", 0, 0.03, false, false)
+				.aft("ExtBF", 0, 1.0, false, false));
+
+		assertMentions(message, "AFTsMetaData.csv: Other_intensity of IntBF is its initial rotation in years, and must be"
+				+ " one of forestry.rotations [10, 20, 30, 40, 50, 60, 70, 80, 90, 100], not 0.03");
+		assertMentions(message, "Other_intensity of ExtBF", "not 1.0 (core reads a blank Other_intensity as 1.0)");
+		run(ReactToyData.context(dir).withForestry().aft("IntBF", 0, 0.03, false, false).off(ReactElement.FORESTRY));
+	}
+
+	@Test
+	void theInitialRotationMustBeOnTheGridInUse() {
+		ReactToyData.forestry(dir);
+		ReactToyData.write(dir, "AFTs/react/react_config.yaml", "forestry:", "  rotations: [10, 50]");
+
+		ReactInputException e = assertThrows(ReactInputException.class,
+				() -> ReactStartupCheck.run(ReactConfigLoader.load(dir), ReactToyData.context(dir).withForestry().build()));
+
+		assertMentions(e.getMessage(), "Other_intensity of ExtBF", "forestry.rotations [10, 50], not 100.0");
+		assertTrue(!e.getMessage().contains("of IntBF"), e.getMessage());
+	}
+
+	@Test
+	void withForestryOnTheCostOfAHarvestIsNeeded() {
+		ReactToyData.forestry(dir);
+		ReactToyData.globalCosts(dir); // the standard file, with no Hardwood row
+
+		assertMentions(problems(ReactToyData.context(dir).withForestry()), "no row for Hardwood",
+				"forestry is reactive, and IntBF's rotation cost is the cost of one harvest of Hardwood");
+	}
+
+	// ---- each land use's files only when it is in use (32b) ----
+
+	@Test
+	void aForestryOnlyRunNeedsNoCropPastureOrIrrigationFiles() throws IOException {
+		ReactToyData.forestry(dir);
+		deleteFolder("worlds/react/suitabilities/ssp126/crops");
+		deleteFolder("worlds/react/suitabilities/ssp126/pasture");
+		deleteFolder("worlds/react/irrigation");
+
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).withForestry().off(ReactElement.FERTILISER,
+				ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY, ReactElement.STOCKING));
+
+		assertEquals(Set.of(LpjgType.FORESTRY), result.suitabilityFiles().keySet());
+		assertNull(result.irrigationCost());
+		assertTrue(result.irrigatedCrops().isEmpty());
+	}
+
+	@Test
+	void withOnlyStockingOnNoCropOrIrrigationFileIsNeeded() throws IOException {
+		deleteFolder("worlds/react/suitabilities/ssp126/crops");
+		deleteFolder("worlds/react/irrigation");
+
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).off(ReactElement.FERTILISER,
+				ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY));
+
+		assertEquals(Set.of(LpjgType.PASTURE), result.suitabilityFiles().keySet());
+		assertNull(result.irrigationCost());
+		assertTrue(result.irrigatedCrops().isEmpty());
+	}
+
+	@Test
+	void withOnlyCropElementsOnNoPastureFileIsNeeded() throws IOException {
+		deleteFolder("worlds/react/suitabilities/ssp126/pasture");
+
+		ReactStartupCheck.Result result = run(ReactToyData.context(dir).off(ReactElement.OTHER_INTENSITY,
+				ReactElement.STOCKING));
+
+		assertEquals(Set.of(LpjgType.CROPS), result.suitabilityFiles().keySet());
+		assertNotNull(result.irrigationCost());
 	}
 
 	// ---- check 5: LPJ-GUESS columns in every year ----

@@ -376,6 +376,7 @@ class ReactiveUpdaterTest {
 		updater.step();
 
 		assertEquals(2020, updater.getInputs().currentYear().year());
+		assertTrue(updater.getInputs().currentYear().crops().isEmpty(), "32b: no crop element on, so no crop data");
 		assertTrue(updater.getCropDecisions().managements().isEmpty(), "phase 3 plan, Q6");
 		assertEquals(null, updater.getCropDecisions().lastYear());
 		assertEquals(2020, updater.getPastureDecisions().lastYear());

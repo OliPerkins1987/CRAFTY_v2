@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,6 +48,7 @@ class ReactConfigLoaderTest {
 		assertEquals(0.0, config.yieldTechChange(), "No technology change unless the file sets one");
 		assertEquals(10, config.yieldFileUnits().toTonnesPerHectare());
 		assertEquals(10, config.irrigationFileUnits().toCubicMetresPerHectare());
+		assertEquals(List.of(10, 20, 30, 40, 50, 60, 70, 80, 90, 100), config.forestryRotations());
 		assertEquals(false, config.outputEveryYear() || config.outputInputs() || config.outputCoefficients()
 				|| config.outputCrops() || config.outputPasture(), "No inspection file unless asked for");
 	}
@@ -241,6 +243,36 @@ class ReactConfigLoaderTest {
 		assertTrue(message.contains("0 < min <= initial <= max"), message);
 		assertTrue(message.contains("yield_tech_change must be above -1"), message);
 		assertTrue(message.contains("stocking.harvest must be above 0 and at most 1"), message);
+	}
+
+	// ---- forestry (32b) ----
+
+	@Test
+	void theForestryRotationsAreReadAsAList() {
+		writeConfig("forestry:", "  rotations: [20, 40, 80]");
+
+		ReactConfig config = ReactConfigLoader.load(project);
+
+		assertEquals(List.of(20, 40, 80), config.forestryRotations(), "an uneven grid is allowed");
+		assertTrue(config.toString().contains("forestry: rotations [20, 40, 80]"), config.toString());
+	}
+
+	@Test
+	void badForestryRotationsAreReported() {
+		String notAList = "forestry.rotations must be a list of whole numbers, e.g. [10, 20, 30]";
+		String notIncreasing = "forestry.rotations must be above 0 and increasing, with no repeats";
+		assertMessage(notAList, "forestry:", "  rotations: 50");
+		assertMessage(notAList, "forestry:", "  rotations: [10, 20.5]");
+		assertMessage("forestry.rotations must hold at least two rotations", "forestry:", "  rotations: [10]");
+		assertMessage(notIncreasing + ": [0, 10]", "forestry:", "  rotations: [0, 10]");
+		assertMessage(notIncreasing + ": [10, 30, 20]", "forestry:", "  rotations: [10, 30, 20]");
+		assertMessage(notIncreasing + ": [10, 10]", "forestry:", "  rotations: [10, 10]");
+		assertMessage("unknown setting forestry.step", "forestry:", "  step: 10");
+	}
+
+	private void assertMessage(String expected, String... lines) {
+		String message = problemsWith(lines).getMessage();
+		assertTrue(message.contains(expected), message);
 	}
 
 	@Test

@@ -115,7 +115,7 @@ class ReactiveParametersTest {
 	@Test
 	void anUnknownReactColumnIsReported() {
 		ReactToyData.write(dir, "AFTs/react/Reactive_parameters.csv",
-				ReactToyData.PARAMETERS_HEADER + ",react_N_anchr", "IntFodder,AFT,0,,,,,,,,,,");
+				ReactToyData.PARAMETERS_HEADER + ",react_N_anchr", "IntFodder,AFT,0" + ",".repeat(12));
 		problems = new ArrayList<>();
 
 		ReactiveParameters.read(dir.resolve("AFTs/react/Reactive_parameters.csv"), services, context().build(), problems);
@@ -131,6 +131,18 @@ class ReactiveParametersTest {
 				() -> ReactiveParameters.read(sheet, services, context().build(), new ArrayList<>()));
 
 		assertTrue(e.getMessage().contains("react_service"), e.getMessage());
+	}
+
+	@Test
+	void aSheetWithoutTheForestryColumnsStopsReadingNamingThem() {
+		// The sheet as it was before forestry: react_R_par was already there.
+		Path sheet = ReactToyData.write(dir, "AFTs/react/Reactive_parameters.csv", "Label,react_isReactive,react_service,"
+				+ "react_N_type,react_N_capital,react_N_par,react_I_eff,react_O_capital,react_O_par,react_S_par,react_R_par");
+
+		ReactInputException e = assertThrows(ReactInputException.class,
+				() -> ReactiveParameters.read(sheet, services, context().build(), new ArrayList<>()));
+
+		assertTrue(e.getMessage().contains("[react_R_type, react_R_capital]"), e.getMessage());
 	}
 
 	@Test
@@ -167,18 +179,16 @@ class ReactiveParametersTest {
 	// ---- services ----
 
 	@Test
-	void theServiceMustBeKnownTypedAndNotForestry() {
+	void theServiceMustBeKnownAndTyped() {
 		readRows(context().aft("A", 1, 0.5, false, false).aft("B", 1, 0.5, false, false)
-				.aft("C", 1, 0.5, false, false).aft("D", 1, 0.5, false, false),
+				.aft("C", 1, 0.5, false, false),
 				"A,AFT,1,,Prospect,,,,,,,",
 				"B,AFT,1,C4crops,Prospect,,,,,,,",
-				"C,AFT,1,Carbon,,,,,,,,",
-				"D,AFT,1,Hardwood,,,,,,,,");
+				"C,AFT,1,Carbon,,,,,,,,");
 
 		assertProblem("(A)", "react_service is blank");
 		assertProblem("(B)", "C4crops is not in");
 		assertProblem("(C)", "Carbon has no LPJG_type");
-		assertProblem("(D)", "forestry", "set react_isReactive = 0");
 	}
 
 	@Test
@@ -375,6 +385,141 @@ class ReactiveParametersTest {
 		readRows(context().aft("IntP", 0, 0, false, true), "IntP,AFT,1,Pasture,,,,,react_GDP_50,1,0,");
 
 		assertProblem("(IntP)", "Other_intensity", "must be above 0");
+	}
+
+	// ---- forestry ----
+	// Rows are written with all 14 fields; the last three are react_R_par, react_R_type, react_R_capital.
+
+	/** The standard context, plus the two toy forestry AFTs, with forestry on. */
+	private ReactToyData.Context forestryContext() {
+		return context().withForestry();
+	}
+
+	@Test
+	void forestryRowsAreReadWithTheInitialRotationFromCore() {
+		ReactiveParameters parameters = read(forestryContext(), ReactToyData.FORESTRY_ROWS);
+
+		assertNoProblems();
+		AftReactParameters prospect = parameters.get("IntBF");
+		assertEquals(LpjgType.FORESTRY, prospect.type());
+		assertTrue(prospect.isForestry());
+		assertEquals(RotationMode.PROSPECT, prospect.rMode());
+		assertFalse(prospect.usesCapitalForRotation());
+		assertNull(prospect.rCapital());
+		assertEquals(0.1, prospect.rPar());
+		assertEquals(50, prospect.initialRotation(), "Other_intensity holds a forestry AFT's initial rotation, in years");
+		assertNull(prospect.nMode());
+
+		AftReactParameters capital = parameters.get("ExtBF");
+		assertTrue(capital.usesCapitalForRotation());
+		assertEquals("react_pop", capital.rCapital());
+		assertEquals(0.05, capital.rPar());
+		assertEquals(100, capital.initialRotation());
+
+		assertEquals(Set.of("C3cereals", "Pasture", "Hardwood"), parameters.servicesInUse());
+	}
+
+	@Test
+	void rTypeIgnoresCaseAndAnUnknownOneIsReported() {
+		ReactiveParameters parameters = readRows(forestryContext(), "IntBF,AFT,1,Hardwood,,,,,,,,,prospect,",
+				"ExtBF,AFT,1,Hardwood,,,,,,,,0.05,CAPITAL,react_pop");
+
+		assertNoProblems();
+		assertEquals(RotationMode.PROSPECT, parameters.get("IntBF").rMode());
+		assertEquals(RotationMode.CAPITAL, parameters.get("ExtBF").rMode());
+
+		readRows(forestryContext(), "IntBF,AFT,1,Hardwood,,,,,,,,,Prospekt,");
+		assertProblem("(IntBF)", "react_R_type must be Prospect or Capital, not \"Prospekt\"");
+	}
+
+	@Test
+	void rTypeIsRequiredOnlyWhenForestryIsReactive() {
+		readRows(forestryContext(), "IntBF,AFT,1,Hardwood,,,,,,,,,,");
+		assertProblem("(IntBF)", "react_R_type is required for a forestry AFT when forestry is reactive");
+
+		ReactiveParameters parameters = readRows(forestryContext().off(ReactElement.FORESTRY),
+				"IntBF,AFT,1,Hardwood,,,,,,,,,,");
+		assertNoProblems();
+		assertTrue(parameters.isReactive("IntBF"));
+		assertNull(parameters.get("IntBF").rMode());
+	}
+
+	@Test
+	void aCapitalAftNeedsItsCapitalAndParWhenForestryIsReactive() {
+		readRows(forestryContext(), "ExtBF,AFT,1,Hardwood,,,,,,,,,Capital,");
+		assertProblem("(ExtBF)", "react_R_capital is required for a Capital AFT when forestry is reactive");
+		assertProblem("(ExtBF)", "react_R_par is required for a Capital AFT when forestry is reactive");
+
+		readRows(forestryContext().off(ReactElement.FORESTRY), "ExtBF,AFT,1,Hardwood,,,,,,,,,Capital,");
+		assertNoProblems();
+	}
+
+	@Test
+	void aCapitalAftsParMayBeZeroOrNegative() {
+		ReactiveParameters parameters = readRows(forestryContext(), "IntBF,AFT,1,Hardwood,,,,,,,,0,Capital,react_pop",
+				"ExtBF,AFT,1,Hardwood,,,,,,,,-0.02,Capital,react_pop");
+
+		assertNoProblems();
+		assertEquals(0.0, parameters.get("IntBF").rPar(), "0 keeps the initial rotation");
+		assertEquals(-0.02, parameters.get("ExtBF").rPar(), "a negative sensitivity lengthens the rotation");
+	}
+
+	@Test
+	void rCapitalOnAProspectAftIsAlwaysASlip() {
+		readRows(forestryContext().off(ReactElement.FORESTRY), "IntBF,AFT,1,Hardwood,,,,,,,,,Prospect,react_pop");
+
+		assertProblem("(IntBF)", "react_R_capital does not apply to a Prospect AFT");
+	}
+
+	@Test
+	void aProspectAftsThresholdIsZeroWhenBlankAndMayNotBeNegative() {
+		ReactiveParameters parameters = readRows(forestryContext(), "IntBF,AFT,1,Hardwood,,,,,,,,,Prospect,");
+		assertNoProblems();
+		assertEquals(0.0, parameters.get("IntBF").rPar());
+
+		readRows(forestryContext(), "IntBF,AFT,1,Hardwood,,,,,,,,-0.1,Prospect,");
+		assertProblem("(IntBF)", "react_R_par (the status-quo threshold for a Prospect AFT) must be 0 or more, not -0.1");
+	}
+
+	@Test
+	void cropAndPastureColumnsDoNotApplyToForestry() {
+		readRows(forestryContext(),
+				"IntBF,AFT,1,Hardwood,Prospect,react_GDP_50,1,0.9,react_GDP_50,0.2,0.1,,Prospect,");
+
+		for (String column : List.of("react_N_type", "react_N_capital", "react_N_par", "react_I_eff", "react_O_capital",
+				"react_O_par", "react_S_par")) {
+			assertProblem("(IntBF)", column + " does not apply to a forestry AFT; leave it blank");
+		}
+	}
+
+	@Test
+	void forestryColumnsDoNotApplyToCropsOrPasture() {
+		readRows(forestryContext(), "X,AFT,1,C3cereals,Prospect,,,,,,,0.1,Prospect,react_pop",
+				"IntP,AFT,1,Pasture,,,,,react_GDP_50,1,0,0.1,Capital,react_pop");
+
+		for (String column : List.of("react_R_type", "react_R_capital", "react_R_par")) {
+			assertProblem("(X)", column + " does not apply to a crops AFT; leave it blank");
+			assertProblem("(IntP)", column + " does not apply to a pasture AFT; leave it blank");
+		}
+	}
+
+	@Test
+	void aForestryAftsInitialRotationMustBeAboveZero() {
+		readRows(forestryContext().aft("IntBF", 0, 0, false, false), "IntBF,AFT,1,Hardwood,,,,,,,,,Prospect,");
+
+		assertProblem("(IntBF)", "Other_intensity", "initial rotation length in years", "must be above 0, not 0.0");
+	}
+
+	@Test
+	void theRotationCapitalIsReadOnlyWithForestryOnAndOnlyForACapitalAft() {
+		ReactiveParameters parameters = read(forestryContext(), ReactToyData.FORESTRY_ROWS);
+
+		assertEquals(List.of("react_GDP_100", "react_GDP_50", "react_pop"),
+				List.copyOf(parameters.capitalsNamed(EnumSet.allOf(ReactElement.class))));
+		assertEquals(List.of("react_pop"), List.copyOf(parameters.capitalsNamed(EnumSet.of(ReactElement.FORESTRY))),
+				"Only the Capital AFT's; the Prospect AFT reads none");
+		assertEquals(List.of("react_GDP_100", "react_GDP_50"),
+				List.copyOf(parameters.capitalsNamed(EnumSet.complementOf(EnumSet.of(ReactElement.FORESTRY)))));
 	}
 
 	// ---- reporting ----

@@ -29,14 +29,21 @@ public final class ReactToyData {
 	public static final int FIRST_YEAR = 2020;
 	public static final int LAST_YEAR = 2021;
 
-	/** The parameters sheet header, in the 27b layout (Type is kept, and ignored). */
+	/**
+	 * The parameters sheet header, in the 27b layout (Type is kept, and ignored), with the forestry columns
+	 * {@code react_R_type} and {@code react_R_capital} last. The reader doesn't mind the order; putting them
+	 * last lets {@link #parameters} pad rows written before they existed.
+	 */
 	public static final String PARAMETERS_HEADER = "Label,Type,react_isReactive,react_service,react_N_type,react_N_capital,"
-			+ "react_N_par,react_I_eff,react_O_capital,react_O_par,react_S_par,react_R_par";
+			+ "react_N_par,react_I_eff,react_O_capital,react_O_par,react_S_par,react_R_par,react_R_type,react_R_capital";
+
+	/** How many fields a row had before the forestry columns: {@link #parameters} adds two blank ones to it. */
+	private static final int FIELDS_BEFORE_FORESTRY = 12;
 
 	/**
 	 * One AFT of each kind: an irrigated Prospect crop, an extensive Capital crop whose other intensity
 	 * doesn't react, a pasture AFT, a non-reactive crop, a non-reactive forest AFT that still names its
-	 * service, and a mask.
+	 * service, and a mask. Written without the forestry columns, which {@link #parameters} adds blank.
 	 */
 	public static final String[] STANDARD_ROWS = {
 			"IntC3C_irrig,AFT,1,C3cereals,Prospect,,0,0.9,react_GDP_100,0.2,,",
@@ -45,6 +52,19 @@ public final class ReactToyData {
 			"IntFodder,AFT,0,,,,,,,,,",
 			"AF,AFT,0,Hardwood,,,,,,,,0.1",
 			"Urban,Mask,0,,,,,,,,," };
+
+	/**
+	 * Two reactive forestry AFTs, written in full: a Prospect AFT with a threshold of 0.1, and a Capital AFT
+	 * following {@code react_pop} with a sensitivity of 0.05. Forestry is opt-in: use them with
+	 * {@link Context#withForestry()}, which adds their baselines and switches forestry on.
+	 */
+	public static final String[] FORESTRY_ROWS = {
+			"IntBF,AFT,1,Hardwood,,,,,,,,0.1,Prospect,",
+			"ExtBF,AFT,1,Hardwood,,,,,,,,0.05,Capital,react_pop" };
+
+	/** The initial rotations of the {@link #FORESTRY_ROWS} AFTs, in years: their {@code Other_intensity}. */
+	public static final double INT_BF_ROTATION = 50;
+	public static final double EXT_BF_ROTATION = 100;
 
 	private ReactToyData() {
 	}
@@ -84,24 +104,78 @@ public final class ReactToyData {
 				"Carbon,,,Quantity of carbon sequestered (above & below ground)");
 	}
 
+	/** The lines of {@link #globalCosts}. */
+	private static final String[] GLOBAL_COSTS = {
+			"Item,Cost,Notes",
+			"Nfert,1.08,PLUM value in 2017US$ kg-1",
+			"Water,0.5,Default PLUM value in 2017 US$",
+			"Stocking,500,",
+			"C3cereals,50,",
+			"Pasture,50,",
+			"Carbon,0," };
+
+	/** The cost of one harvest of Hardwood, $/ha: R's {@code h_cost}. Only {@link #forestry} writes it. */
+	public static final double HARDWOOD_HARVEST_COST = 1750;
+
+	/**
+	 * The toy forestry files' values, in kg C/m²/yr, for pixel A, one per rotation of
+	 * {@link ReactConfig#DEFAULT_ROTATIONS}: a yield that rises and falls with the rotation. Pixel B has no
+	 * forest, so all its values are 0.
+	 */
+	public static final double[] FORESTRY_PIXEL_A = { 0.02, 0.05, 0.08, 0.1, 0.11, 0.115, 0.115, 0.11, 0.105, 0.1 };
+
 	/** global_costs.csv as in the sandbox, cut down. */
 	public static Path globalCosts(Path dir) {
-		return write(dir, "costs/global/global_costs.csv",
-				"Item,Cost,Notes",
-				"Nfert,1.08,PLUM value in 2017US$ kg-1",
-				"Water,0.5,Default PLUM value in 2017 US$",
-				"Stocking,500,",
-				"C3cereals,50,",
-				"Pasture,50,",
-				"Carbon,0,");
+		return write(dir, "costs/global/global_costs.csv", GLOBAL_COSTS);
 	}
 
-	/** The parameters sheet, with {@link #PARAMETERS_HEADER} and the given rows. */
+	/**
+	 * Adds forestry to a {@link #project}: the sheet with {@link #standardAndForestryRows()}, a Hardwood row
+	 * in global_costs.csv, and a forestry file for each toy year, laid out as the sandbox's are (a quoted
+	 * header, {@code x} and {@code y}, and {@code harvest_age_<H>} for the default rotations). Pair it with
+	 * {@link Context#withForestry()}.
+	 */
+	public static void forestry(Path dir) {
+		parameters(dir, standardAndForestryRows());
+		write(dir, "costs/global/global_costs.csv", concat(GLOBAL_COSTS, "Hardwood," + HARDWOOD_HARVEST_COST + ","));
+		StringBuilder header = new StringBuilder("\"x\",\"y\"");
+		StringBuilder rowA = new StringBuilder(PIXEL_A);
+		StringBuilder rowB = new StringBuilder(PIXEL_B);
+		for (int i = 0; i < ReactConfig.DEFAULT_ROTATIONS.size(); i++) {
+			header.append(",\"").append(ReactStartupCheck.forestryColumn(ReactConfig.DEFAULT_ROTATIONS.get(i))).append('"');
+			rowA.append(',').append(FORESTRY_PIXEL_A[i]);
+			rowB.append(",0");
+		}
+		for (int year = FIRST_YEAR; year <= LAST_YEAR; year++) {
+			write(dir, "worlds/react/suitabilities/ssp126/forestry/Suit_Forestry_" + year + ".csv", header.toString(),
+					rowA.toString(), rowB.toString());
+		}
+	}
+
+	/**
+	 * The parameters sheet, with {@link #PARAMETERS_HEADER} and the given rows. A row written with the 12
+	 * fields of the sheet before the forestry columns gets them added, blank; other rows are written as given.
+	 */
 	public static Path parameters(Path dir, String... rows) {
 		String[] lines = new String[rows.length + 1];
 		lines[0] = PARAMETERS_HEADER;
-		System.arraycopy(rows, 0, lines, 1, rows.length);
+		for (int i = 0; i < rows.length; i++) {
+			boolean beforeForestry = rows[i].split(",", -1).length == FIELDS_BEFORE_FORESTRY;
+			lines[i + 1] = beforeForestry ? rows[i] + ",," : rows[i];
+		}
 		return write(dir, "AFTs/react/Reactive_parameters.csv", lines);
+	}
+
+	/** {@link #STANDARD_ROWS} followed by {@link #FORESTRY_ROWS}. */
+	public static String[] standardAndForestryRows() {
+		return concat(STANDARD_ROWS, FORESTRY_ROWS);
+	}
+
+	private static String[] concat(String[] first, String... second) {
+		String[] all = new String[first.length + second.length];
+		System.arraycopy(first, 0, all, 0, first.length);
+		System.arraycopy(second, 0, all, first.length, second.length);
+		return all;
 	}
 
 	/** A complete small project for 2020–2021, with everything the startup checks read. */
@@ -118,7 +192,8 @@ public final class ReactToyData {
 			write(dir, "worlds/react/suitabilities/ssp126/pasture/Suit_Agri_pastoral_" + year + ".csv",
 					"Lon,Lat,Pasture_sum", PIXEL_A + ",1.232", PIXEL_B + ",0.336");
 			write(dir, "worlds/react/capitals/ssp126/EU_capitals_ssp126_" + year + ".csv",
-					"Lon,Lat,react_GDP_50,react_GDP_100", PIXEL_A + ",0.893,0.447", PIXEL_B + ",0.696,0.348");
+					"Lon,Lat,react_GDP_50,react_GDP_100,react_pop", PIXEL_A + ",0.893,0.447,0.3",
+					PIXEL_B + ",0.696,0.348,0.7");
 			write(dir, "worlds/react/irrigation/ssp126/Irrigation_demand_" + year + ".csv",
 					"\"Lon\",\"Lat\",\"CerealsC3i0\",\"CerealsC3i0060\",\"CerealsC3i0200\",\"CerealsC3i1000\"",
 					PIXEL_A + ",13.911,20,41.879,60.651", PIXEL_B + ",364.677,400,461.521,551.665");
@@ -136,7 +211,8 @@ public final class ReactToyData {
 
 	/**
 	 * Builds a {@link ReactRunContext} for the toy project: the AFTs of {@link #STANDARD_ROWS} with
-	 * sensible baselines, an {@code <AFT>_suit} suitability capital for each, and every element reactive.
+	 * sensible baselines, an {@code <AFT>_suit} suitability capital for each, and every element reactive
+	 * but forestry, which is opt-in ({@link #withForestry()}).
 	 */
 	public static final class Context {
 		private final Path project;
@@ -145,7 +221,7 @@ public final class ReactToyData {
 		private final Map<String, String> cells = new LinkedHashMap<>(
 				Map.of("1,1", "North", "1,2", "South", "2,1", "North"));
 		private final Set<String> regions = new LinkedHashSet<>(List.of("North", "South"));
-		private final Set<ReactElement> reactive = EnumSet.allOf(ReactElement.class);
+		private final Set<ReactElement> reactive = EnumSet.complementOf(EnumSet.of(ReactElement.FORESTRY));
 		private ReactRunContext.PriceSource prices = (service, region, year) -> 100.0;
 		private Path outputFolder;
 		private Set<Integer> mapYears = Set.of();
@@ -227,6 +303,23 @@ public final class ReactToyData {
 				reactive.remove(element);
 			}
 			return this;
+		}
+
+		/** Switches elements on. */
+		public Context on(ReactElement... elements) {
+			reactive.addAll(List.of(elements));
+			return this;
+		}
+
+		/**
+		 * Adds the {@link #FORESTRY_ROWS} AFTs' baselines, with their initial rotations in
+		 * {@code Other_intensity}, and switches forestry on. Write the sheet with
+		 * {@link ReactToyData#standardAndForestryRows()} to match.
+		 */
+		public Context withForestry() {
+			aft("IntBF", 0, INT_BF_ROTATION, false, false);
+			aft("ExtBF", 0, EXT_BF_ROTATION, false, false);
+			return on(ReactElement.FORESTRY);
 		}
 
 		/** The run's output folder: {@code output} in the project folder unless changed. */

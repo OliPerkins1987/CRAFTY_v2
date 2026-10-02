@@ -144,12 +144,14 @@ class CoreFactsTest {
 
 	@Test
 	void theRunAndSwitchesAreRead() {
+		ConfigLoader.config.reactive_forestry = true;
+
 		ReactRunContext context = CoreFacts.fromCore();
 
 		assertEquals(dir, context.projectPath());
 		assertEquals(2020, context.firstYear());
 		assertEquals(2021, context.lastYear());
-		assertEquals(Set.of(ReactElement.FERTILISER, ReactElement.STOCKING), context.reactive());
+		assertEquals(Set.of(ReactElement.FERTILISER, ReactElement.STOCKING, ReactElement.FORESTRY), context.reactive());
 	}
 
 	@Test

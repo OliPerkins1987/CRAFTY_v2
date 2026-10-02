@@ -111,6 +111,10 @@ public final class ReactConfigLoader {
 
 		c.yieldTechChange = root.number("yield_tech_change", c.yieldTechChange);
 
+		Section forestry = root.section("forestry");
+		c.forestryRotations = forestry.wholeNumbers("rotations", c.forestryRotations);
+		forestry.rejectUnknownKeys();
+
 		Section outputs = root.section("outputs");
 		c.outputEveryYear = outputs.flag("every_year", c.outputEveryYear);
 		c.outputInputs = outputs.flag("inputs", c.outputInputs);
@@ -186,6 +190,19 @@ public final class ReactConfigLoader {
 				return current;
 			}
 			return n;
+		}
+
+		/** A list of whole numbers, such as {@code [10, 20, 30]}. */
+		List<Integer> wholeNumbers(String key, List<Integer> current) {
+			Object value = lookup(key);
+			if (value == null) {
+				return current;
+			}
+			if (!(value instanceof List<?> list) || !list.stream().allMatch(Integer.class::isInstance)) {
+				problems.add(prefix + key + " must be a list of whole numbers, e.g. [10, 20, 30]");
+				return current;
+			}
+			return list.stream().map(Integer.class::cast).toList();
 		}
 
 		boolean flag(String key, boolean current) {

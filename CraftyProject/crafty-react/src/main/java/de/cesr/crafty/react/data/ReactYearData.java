@@ -16,13 +16,15 @@ import de.cesr.crafty.core.cli.CustomLogger;
  *
  * Everything is keyed by **LPJ-GUESS name**, not by AFT: several AFTs share a crop (ten AFTs use six
  * crops in the sandbox), so keying by AFT would hold the same array many times. An AFT reaches its own
- * arrays through {@link AftReactParameters#lpjgName()}.
+ * arrays through {@link AftReactParameters#lpjgName()}. Forestry is one table for all wood, keyed by
+ * rotation length.
  *
- * Only what is needed is read. An element's switch decides whether react <em>changes</em> that
- * management, not whether its data is needed, so irrigation demand, runoff and the irrigation cost index
- * are read whenever a reactive AFT irrigates, even with irrigation switched off: water applied is still
- * {@code min(runoff, demand)}, which sets the irrigation level in the yield surface. Capitals are the
- * exception, since a capital is only read when its element reacts.
+ * Only what is needed is read: a land use's data only when it is in use, as the startup checks found
+ * (one of its elements is on and it has a reactive AFT). Within crops, an element's switch decides whether
+ * react <em>changes</em> that management, not whether its data is needed, so irrigation demand, runoff and
+ * the irrigation cost index are read whenever crops are in use and a reactive AFT irrigates, even with
+ * irrigation switched off: water applied is still {@code min(runoff, demand)}, which sets the irrigation
+ * level in the yield surface. Capitals are read per element.
  *
  * Nothing changes after loading, so later phases can read it from several threads.
  */
@@ -35,21 +37,27 @@ public final class ReactYearData {
 	private final Map<String, float[]> pastureNpp;
 	private final Map<String, float[][]> irrigationWaterDemand;
 	private final float[] runoff;
+	private final List<Integer> forestryRotations;
+	/** One array per rotation, in the order of {@link #forestryRotations}. */
+	private final float[][] forestryYields;
 	private final Map<String, float[]> capitals;
 
 	private ReactYearData(int year, Map<String, float[][]> cropYields, Map<String, float[]> pastureNpp,
-			Map<String, float[][]> irrigationWaterDemand, float[] runoff, Map<String, float[]> capitals) {
+			Map<String, float[][]> irrigationWaterDemand, float[] runoff, List<Integer> forestryRotations,
+			float[][] forestryYields, Map<String, float[]> capitals) {
 		this.year = year;
 		this.cropYields = cropYields;
 		this.pastureNpp = pastureNpp;
 		this.irrigationWaterDemand = irrigationWaterDemand;
 		this.runoff = runoff;
+		this.forestryRotations = forestryRotations;
+		this.forestryYields = forestryYields;
 		this.capitals = capitals;
 	}
 
 	/** A year with nothing loaded, for a run where no element is reactive. */
 	static ReactYearData empty(int year) {
-		return new ReactYearData(year, Map.of(), Map.of(), Map.of(), new float[0], Map.of());
+		return new ReactYearData(year, Map.of(), Map.of(), Map.of(), new float[0], List.of(), new float[0][], Map.of());
 	}
 
 	/** Reads one year's files. The files were found, and their headers checked, at startup. */
@@ -61,17 +69,20 @@ public final class ReactYearData {
 		double yieldFactor = config.yieldFileUnits().toTonnesPerHectare();
 		double waterFactor = config.irrigationFileUnits().toCubicMetresPerHectare();
 
+		// The startup checks found files only for the land uses in use.
+		Map<LpjgType, Map<Integer, Path>> files = checked.suitabilityFiles();
+
 		Map<String, float[][]> cropYields = new LinkedHashMap<>();
-		Set<String> crops = lpjgNames(parameters.reactive(LpjgType.CROPS));
-		if (!crops.isEmpty()) {
-			cropYields.putAll(readByName(checked.suitabilityFiles().get(LpjgType.CROPS).get(year), grid, crops,
-					ReactStartupCheck.CROP_LEVELS, yieldFactor));
+		if (files.containsKey(LpjgType.CROPS)) {
+			Set<String> crops = lpjgNames(parameters.reactive(LpjgType.CROPS));
+			cropYields.putAll(readByName(files.get(LpjgType.CROPS).get(year), grid, crops, ReactStartupCheck.CROP_LEVELS,
+					yieldFactor));
 		}
 
 		Map<String, float[]> pastureNpp = new LinkedHashMap<>();
-		Set<String> pastures = lpjgNames(parameters.reactive(LpjgType.PASTURE));
-		if (!pastures.isEmpty()) {
-			Path file = checked.suitabilityFiles().get(LpjgType.PASTURE).get(year);
+		if (files.containsKey(LpjgType.PASTURE)) {
+			Set<String> pastures = lpjgNames(parameters.reactive(LpjgType.PASTURE));
+			Path file = files.get(LpjgType.PASTURE).get(year);
 			float[][] values = LpjFileReader.read(file, grid, List.copyOf(pastures), yieldFactor);
 			int column = 0;
 			for (String pasture : pastures) {
@@ -89,6 +100,14 @@ public final class ReactYearData {
 					List.of(ReactStartupCheck.RUNOFF), waterFactor)[0];
 		}
 
+		List<Integer> forestryRotations = List.of();
+		float[][] forestryYields = new float[0][];
+		if (files.containsKey(LpjgType.FORESTRY)) {
+			forestryRotations = config.forestryRotations();
+			forestryYields = LpjFileReader.read(files.get(LpjgType.FORESTRY).get(year), grid,
+					forestryRotations.stream().map(ReactStartupCheck::forestryColumn).toList(), yieldFactor);
+		}
+
 		Map<String, float[]> capitals = new LinkedHashMap<>();
 		Set<String> capitalNames = parameters.capitalsNamed(context.reactive());
 		if (!capitalNames.isEmpty()) {
@@ -101,12 +120,13 @@ public final class ReactYearData {
 		}
 
 		LOGGER.info(String.format("CRAFTY-react loaded year %d in %.2f s: crops %s, pasture %s, irrigation demand %s,"
-				+ " runoff %s, capitals %s", year, (System.nanoTime() - start) / 1e9, cropYields.keySet(),
+				+ " runoff %s, forestry %s, capitals %s", year, (System.nanoTime() - start) / 1e9, cropYields.keySet(),
 				pastureNpp.keySet(), irrigationWaterDemand.keySet(), runoff.length > 0 ? "yes" : "not needed",
-				capitals.keySet()));
+				forestryRotations.isEmpty() ? "not needed" : forestryRotations.size() + " rotations", capitals.keySet()));
 
 		return new ReactYearData(year, Collections.unmodifiableMap(cropYields), Collections.unmodifiableMap(pastureNpp),
-				Collections.unmodifiableMap(irrigationWaterDemand), runoff, Collections.unmodifiableMap(capitals));
+				Collections.unmodifiableMap(irrigationWaterDemand), runoff, forestryRotations, forestryYields,
+				Collections.unmodifiableMap(capitals));
 	}
 
 	private static Set<String> lpjgNames(Iterable<AftReactParameters> afts) {
@@ -181,6 +201,26 @@ public final class ReactYearData {
 			throw new ReactInputException("Year " + year + " holds no runoff: no reactive AFT irrigates");
 		}
 		return runoff;
+	}
+
+	/**
+	 * The forestry yield on a rotation of so many years, in t/ha/yr, for every pixel: the harvest per year
+	 * of an evenly aged forest cut at that age (carbon, as LPJ-GUESS gives it).
+	 *
+	 * @param rotation one of {@link #forestryRotations()}, in years
+	 */
+	public float[] forestryYield(int rotation) {
+		int index = forestryRotations.indexOf(rotation);
+		if (index < 0) {
+			throw new ReactInputException("Year " + year + " holds no forestry yield for a rotation of " + rotation
+					+ " years; it holds " + forestryRotations);
+		}
+		return forestryYields[index];
+	}
+
+	/** The rotations whose forestry yields were loaded, in years; empty when forestry is not in use. */
+	public List<Integer> forestryRotations() {
+		return forestryRotations;
 	}
 
 	/** A react capital's value for every pixel, as it was written. */
