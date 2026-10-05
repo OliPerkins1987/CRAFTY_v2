@@ -103,9 +103,10 @@ public final class ReactYearData {
 		List<Integer> forestryRotations = List.of();
 		float[][] forestryYields = new float[0][];
 		if (files.containsKey(LpjgType.FORESTRY)) {
+			// Already m3/ha/yr: converted from LPJ-GUESS's carbon before the run, so read as they are.
 			forestryRotations = config.forestryRotations();
 			forestryYields = LpjFileReader.read(files.get(LpjgType.FORESTRY).get(year), grid,
-					forestryRotations.stream().map(ReactStartupCheck::forestryColumn).toList(), yieldFactor);
+					forestryRotations.stream().map(ReactStartupCheck::forestryColumn).toList(), 1.0);
 		}
 
 		Map<String, float[]> capitals = new LinkedHashMap<>();
@@ -204,8 +205,9 @@ public final class ReactYearData {
 	}
 
 	/**
-	 * The forestry yield on a rotation of so many years, in t/ha/yr, for every pixel: the harvest per year
-	 * of an evenly aged forest cut at that age (carbon, as LPJ-GUESS gives it).
+	 * The forestry yield on a rotation of so many years, in m³/ha/yr, for every pixel: the harvest per year
+	 * of an evenly aged forest cut at that age, as the forestry files hold it (converted from LPJ-GUESS's
+	 * carbon before the run; {@code yield_file_units} does not apply).
 	 *
 	 * @param rotation one of {@link #forestryRotations()}, in years
 	 */

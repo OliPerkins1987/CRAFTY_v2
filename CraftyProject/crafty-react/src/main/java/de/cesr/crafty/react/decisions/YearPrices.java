@@ -11,7 +11,8 @@ import de.cesr.crafty.react.data.ReactInputException;
 import de.cesr.crafty.react.data.ReactRunContext;
 
 /**
- * What each service react needs is worth this year, in every decision unit, in $ per tonne.
+ * What each service react needs is worth this year, in every decision unit, in $ per unit of the service:
+ * per tonne for crops and pasture, per m³ for forestry.
  *
  * The price is the service's weight in the unit's region and year. In price-explicit utility the weight is a
  * price in $, and react uses it as it is, with no normalisation (phase 3 plan, Q1). It is looked up once
@@ -89,7 +90,7 @@ public final class YearPrices {
 	}
 
 	/**
-	 * A service's price in every unit, $/t, indexed by unit.
+	 * A service's price in every unit ($/t for crops and pasture, $/m³ for forestry), indexed by unit.
 	 *
 	 * @throws ReactInputException if the service was not looked up this year
 	 */

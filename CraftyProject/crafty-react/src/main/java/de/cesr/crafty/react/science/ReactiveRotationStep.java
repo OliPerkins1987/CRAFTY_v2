@@ -10,7 +10,7 @@ import java.util.function.IntToDoubleFunction;
  *
  * <b>The rotation</b> is the stand's age at harvest, H years, on the grid {@code forestry.rotations} (default
  * 10, 20, …, 100). LPJ-GUESS yields are processed to give one yield per rotation: 
- * the carbon at harvest spread over the rotation, as
+ * the wood at harvest (m³/ha) spread over the rotation, as
  * an evenly aged forest with 1/H of it cut each year. So the yield is already per year and is not divided by
  * H again. A forestry AFT's intensity is its harvest rate, 1/H, so its intensity cost is the harvest rate ×
  * the cost of one harvest:
@@ -23,18 +23,18 @@ import java.util.function.IntToDoubleFunction;
  * being one step shorter, a more frequent harvest: see {@link #prospectStep}. <b>Capital</b> AFTs take their
  * rotation from a capital, afresh each year: see {@link #capitalRotation}.
  *
- * Units are real: yields in t/ha/yr, price in $/t, the cost of one harvest in $/ha. R's
- * {@code Evaluate_AFT_Forestry.R} multiplies the kg/m² yields by 10 when it prices them; here that × 10 is
- * done when the files are read. The R version of these rules is {@code forestry_rules.R}, kept with the
- * golden scripts in {@code CRAFTY_PLUM/CRAFTY_dev/debugging}.
+ * Units are real: yields in m³/ha/yr of wood, price in $/m³, the cost of one harvest in $/ha. The forestry
+ * files already hold m³/ha/yr, converted from LPJ-GUESS's carbon before the run, and are read as they are.
+ * (R's {@code Evaluate_AFT_Forestry.R} priced the carbon itself, kg/m² × 10.) The R version of these rules
+ * is {@code forestry_rules.R}, kept with the golden scripts in {@code CRAFTY_PLUM/CRAFTY_dev/debugging}.
  */
 public final class ReactiveRotationStep {
 
 	/**
 	 * One place's forestry economics for one AFT, which don't change during its steps.
 	 *
-	 * @param yieldAt     the yield at a rotation (years, on the grid), t/ha/yr
-	 * @param price       the service's price, $/t
+	 * @param yieldAt     the yield at a rotation (years, on the grid), m³/ha/yr
+	 * @param price       the service's price, $/m³
 	 * @param harvestCost the cost of one harvest, $/ha (the service's row in {@code global_costs.csv})
 	 */
 	public record Economics(IntToDoubleFunction yieldAt, double price, double harvestCost) {

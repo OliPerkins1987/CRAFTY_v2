@@ -118,11 +118,11 @@ public final class ReactToyData {
 	public static final double HARDWOOD_HARVEST_COST = 1750;
 
 	/**
-	 * The toy forestry files' values, in kg C/m²/yr, for pixel A, one per rotation of
+	 * The toy forestry files' values, in m³/ha/yr (read as they are), for pixel A, one per rotation of
 	 * {@link ReactConfig#DEFAULT_ROTATIONS}: a yield that rises and falls with the rotation. Pixel B has no
 	 * forest, so all its values are 0.
 	 */
-	public static final double[] FORESTRY_PIXEL_A = { 0.02, 0.05, 0.08, 0.1, 0.11, 0.115, 0.115, 0.11, 0.105, 0.1 };
+	public static final double[] FORESTRY_PIXEL_A = { 0.2, 0.5, 0.8, 1.0, 1.1, 1.15, 1.15, 1.1, 1.05, 1.0 };
 
 	/** global_costs.csv as in the sandbox, cut down. */
 	public static Path globalCosts(Path dir) {

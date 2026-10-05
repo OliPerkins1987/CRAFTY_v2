@@ -150,18 +150,35 @@ class ReactYearDataTest {
 	// ---- forestry (32b) ----
 
 	@Test
-	void forestryYieldsAreLoadedForEveryRotationInTonnesPerHectarePerYear() {
+	void forestryYieldsAreLoadedForEveryRotationInCubicMetresPerHectarePerYear() {
 		ReactToyData.forestry(dir);
 		ReactYearData year = load(ReactToyData.context(dir).withForestry(), 2020);
 		int a = pixel(-91.25, 17.75);
 		int b = pixel(-121.75, 37.25);
 
 		assertEquals(ReactConfig.DEFAULT_ROTATIONS, year.forestryRotations());
-		assertEquals(0.2, year.forestryYield(10)[a], 1e-5, "0.02 kg/m2 = 0.2 t/ha");
+		assertEquals(0.2, year.forestryYield(10)[a], 1e-5, "0.2 m3/ha/yr, read as it is");
 		assertEquals(1.1, year.forestryYield(50)[a], 1e-5);
 		assertEquals(1.0, year.forestryYield(100)[a], 1e-5);
 		assertEquals(0f, year.forestryYield(50)[b], "no forest");
 		assertThrows(ReactInputException.class, () -> year.forestryYield(35));
+	}
+
+	@Test
+	void yieldFileUnitsDoesNotApplyToTheForestryFiles() {
+		// The forestry files hold m3/ha/yr, converted before the run; yield_file_units is for crops and pasture.
+		ReactToyData.forestry(dir);
+		int a = pixel(-91.25, 17.75);
+		ReactYearData kgPerM2 = load(ReactToyData.context(dir).withForestry(), 2020);
+		ReactToyData.write(dir, "AFTs/react/react_config.yaml", "inputs:", "  yield_file_units: t_per_ha");
+		ReactConfig tonnes = ReactConfigLoader.load(dir);
+		ReactRunContext built = ReactToyData.context(dir).withForestry().build();
+		ReactYearData tPerHa = ReactYearData.load(tonnes, built, ReactStartupCheck.run(tonnes, built), 2020);
+
+		assertEquals(10 * tPerHa.crop("CerealsC3", "0")[a], kgPerM2.crop("CerealsC3", "0")[a], 1e-5,
+				"crop yields follow yield_file_units");
+		assertEquals(1.1, kgPerM2.forestryYield(50)[a], 1e-5);
+		assertEquals(1.1, tPerHa.forestryYield(50)[a], 1e-5, "forestry yields are read as they are either way");
 	}
 
 	@Test

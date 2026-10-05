@@ -21,7 +21,11 @@ import java.util.regex.Pattern;
  */
 public final class ReactConfig {
 
-	/** Units of the crop yield, pasture NPP and forestry yield files, and the factor that converts them to t/ha. */
+	/**
+	 * Units of the crop yield and pasture NPP files, and the factor that converts them to t/ha. The forestry
+	 * files are not covered: they hold m³/ha/yr, converted from LPJ-GUESS's carbon before the run, and are read
+	 * as they are.
+	 */
 	public enum YieldUnits {
 		KG_PER_M2("kg_per_m2", 10), T_PER_HA("t_per_ha", 1);
 
@@ -101,8 +105,8 @@ public final class ReactConfig {
 	// Crop yield change per year from technology: the yield surface is multiplied by
 	// (1 + yield_tech_change x years since start_year). 0 means no change.
 	double yieldTechChange = 0;
-	// The forestry rotation grid, in years: each is a harvest_age_<H> column of the forestry files, and a
-	// rotation moves one place along it at a time.
+	// The forestry rotation grid, in years: each is a harvest_age_<H> column of the forestry files (m3/ha/yr,
+	// read as they are), and a rotation moves one place along it at a time.
 	List<Integer> forestryRotations = DEFAULT_ROTATIONS;
 
 	// ---- inspection files (the outputs section): what react read, fitted and decided ----
@@ -241,7 +245,7 @@ public final class ReactConfig {
 
 	/**
 	 * The forestry rotation grid, in years, shortest first ({@code forestry.rotations}). The forestry files
-	 * have a {@code harvest_age_<H>} column for each.
+	 * have a {@code harvest_age_<H>} column for each, in m³/ha/yr.
 	 */
 	public List<Integer> forestryRotations() {
 		return forestryRotations;
@@ -376,7 +380,7 @@ public final class ReactConfig {
 				"stocking: initial " + stockingInitial + ", step " + stockingStep + ", min " + stockingMin + ", max "
 						+ stockingMax + ", harvest " + stockingHarvest,
 				"yield_tech_change: " + yieldTechChange,
-				"forestry: rotations " + forestryRotations,
+				"forestry: rotations " + forestryRotations + " (files in m3/ha/yr, read as they are)",
 				"outputs: every_year " + outputEveryYear + ", inputs " + outputInputs + ", coefficients "
 						+ outputCoefficients + ", crops " + outputCrops + ", pasture " + outputPasture);
 	}
