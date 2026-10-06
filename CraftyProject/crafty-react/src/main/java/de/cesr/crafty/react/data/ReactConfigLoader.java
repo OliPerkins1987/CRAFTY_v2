@@ -121,6 +121,7 @@ public final class ReactConfigLoader {
 		c.outputCoefficients = outputs.flag("coefficients", c.outputCoefficients);
 		c.outputCrops = outputs.flag("crops", c.outputCrops);
 		c.outputPasture = outputs.flag("pasture", c.outputPasture);
+		c.outputForestry = outputs.flag("forestry", c.outputForestry);
 		outputs.rejectUnknownKeys();
 
 		root.rejectUnknownKeys();

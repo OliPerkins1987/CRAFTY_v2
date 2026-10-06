@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,8 @@ import de.cesr.crafty.react.data.ReactYearData;
 import de.cesr.crafty.react.decisions.CropDecisions;
 import de.cesr.crafty.react.decisions.CropManagement;
 import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.ForestryDecisions;
+import de.cesr.crafty.react.decisions.ForestryManagement;
 import de.cesr.crafty.react.decisions.PastureDecisions;
 import de.cesr.crafty.react.decisions.PastureManagement;
 import de.cesr.crafty.react.decisions.YearPrices;
@@ -34,8 +37,9 @@ import de.cesr.crafty.react.science.CropSurfaces;
 
 /**
  * The inspection files, on the toy project: two pixels, A (in the North and the South) and B (North), so
- * three decision units; crops AFTs IntC3C_irrig (irrigated) and ExtC3C; pasture AFT IntP. Prices are 300 $/t
- * in the North and 150 in the South, and core writes its maps in 2020.
+ * three decision units; crops AFTs IntC3C_irrig (irrigated) and ExtC3C; pasture AFT IntP; and, in the forestry
+ * tests, forestry AFTs IntBF (Prospect) and ExtBF (Capital). Prices are 300 per unit of each service in the North
+ * and 150 in the South, and core writes its maps in 2020.
  */
 class ReactOutputsTest {
 
@@ -57,6 +61,7 @@ class ReactOutputsTest {
 		final DecisionUnits units;
 		final CropDecisions crops;
 		final PastureDecisions pasture;
+		final ForestryDecisions forestry;
 		final ReactOutputs outputs;
 		ReactYearData data;
 		CropSurfaces surfaces;
@@ -67,6 +72,7 @@ class ReactOutputsTest {
 			units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
 			crops = CropDecisions.create(inputs, units);
 			pasture = PastureDecisions.create(inputs, units);
+			forestry = ForestryDecisions.create(inputs, units);
 			outputs = ReactOutputs.create(inputs, units);
 		}
 
@@ -75,10 +81,13 @@ class ReactOutputsTest {
 			surfaces = CropSurfaces.fit(data);
 			Set<String> services = new LinkedHashSet<>(crops.servicesNeedingPrices());
 			services.addAll(pasture.servicesNeedingPrices());
+			services.addAll(forestry.servicesNeedingPrices());
 			prices = YearPrices.forYear(year, services, units, inputs.context().prices());
 			crops.decide(data, surfaces, prices);
 			pasture.decide(data, prices);
-			return outputs.write(data, surfaces, prices, crops.managements().values(), pasture.managements().values());
+			forestry.decide(data, prices);
+			return outputs.write(data, surfaces, prices, crops.managements().values(), pasture.managements().values(),
+					forestry.managements().values());
 		}
 
 		CropManagement crop(String label) {
@@ -87,6 +96,10 @@ class ReactOutputsTest {
 
 		PastureManagement intP() {
 			return pasture.managements().get("IntP");
+		}
+
+		ForestryManagement forestryAft(String label) {
+			return forestry.managements().get(label);
 		}
 
 		LpjGrid grid() {
@@ -248,6 +261,83 @@ class ReactOutputsTest {
 
 		assertEquals(List.of("service,region,price", "C3cereals,North,300.0", "C3cereals,South,150.0",
 				"Pasture,North,300.0", "Pasture,South,150.0"), Files.readAllLines(file("Prices", 2020)));
+	}
+
+	// ---- forestry: one row per unit, one column per AFT ----
+
+	/** The toy project with its forestry AFTs, files and Hardwood harvest cost, and forestry on. */
+	private Run forestryRun() {
+		ReactToyData.forestry(dir);
+		return run(context().withForestry());
+	}
+
+	private static double[] asDoubles(int[] values) {
+		return Arrays.stream(values).asDoubleStream().toArray();
+	}
+
+	@Test
+	void theForestryFilesHoldEachForestryAftsRotationYieldAndCost() throws IOException {
+		settings("outputs:", "  forestry: true");
+		Run run = forestryRun();
+
+		List<Path> written = run.decideAndWrite(2020);
+
+		assertEquals(List.of("ssp126-React-Forestry-Rotation-2020.csv", "ssp126-React-Forestry-Yield-2020.csv",
+				"ssp126-React-Forestry-IntensityCost-2020.csv", "ssp126-React-Prices-2020.csv"), names(written));
+		ForestryManagement intBF = run.forestryAft("IntBF");
+		ForestryManagement extBF = run.forestryAft("ExtBF");
+		List<String> both = List.of("IntBF", "ExtBF");
+		assertUnitFile(run, file("Forestry-Rotation", 2020), both,
+				List.of(asDoubles(intBF.rotation()), asDoubles(extBF.rotation())));
+		assertUnitFile(run, file("Forestry-Yield", 2020), both, List.of(intBF.yield(), extBF.yield()));
+		assertUnitFile(run, file("Forestry-IntensityCost", 2020), both, List.of(intBF.cost(), extBF.cost()));
+		for (String[] row : rows(file("Forestry-Rotation", 2020)).subList(1, run.units.size() + 1)) {
+			assertTrue(row[3].matches("\\d+") && row[4].matches("\\d+"), "whole years: " + String.join(",", row));
+		}
+	}
+
+	@Test
+	void withForestryOffThereAreNoForestryFiles() {
+		settings("outputs:", "  forestry: true");
+		ReactToyData.forestry(dir);
+		Run run = run(context().withForestry().off(ReactElement.FORESTRY));
+
+		List<String> written = names(run.decideAndWrite(2020));
+
+		assertTrue(written.stream().noneMatch(name -> name.contains("Forestry")), written.toString());
+	}
+
+	@Test
+	void thePricesFileIsWrittenWithTheForestrySwitchAndHasTheForestryServices() throws IOException {
+		settings("outputs:", "  forestry: true");
+		forestryRun().decideAndWrite(2020);
+
+		// Hardwood is priced for IntBF, a Prospect AFT; ExtBF (Capital) needs no price.
+		assertEquals(List.of("service,region,price", "C3cereals,North,300.0", "C3cereals,South,150.0",
+				"Pasture,North,300.0", "Pasture,South,150.0", "Hardwood,North,300.0", "Hardwood,South,150.0"),
+				Files.readAllLines(file("Prices", 2020)));
+	}
+
+	@Test
+	void theInputsFileHasEachRotationsForestryYieldAndThePopulationCapital() throws IOException {
+		settings("outputs:", "  inputs: true");
+		Run run = forestryRun();
+		run.decideAndWrite(2020);
+
+		List<String[]> rows = rows(file("Inputs", 2020));
+		List<String> header = Arrays.asList(rows.get(0));
+		List<String> forestryColumns = IntStream.rangeClosed(1, 10).mapToObj(i -> "yield_forestry_" + 10 * i).toList();
+		assertEquals(forestryColumns, header.stream().filter(c -> c.startsWith("yield_forestry_")).toList());
+		assertEquals(header.indexOf("npp_Pasture_sum") + 1, header.indexOf("yield_forestry_10"),
+				"after the pasture NPP, before the capitals");
+		for (int pixel = 0; pixel < run.grid().size(); pixel++) {
+			String[] row = rows.get(pixel + 1);
+			for (int rotation : run.data.forestryRotations()) {
+				assertEquals(run.data.forestryYield(rotation)[pixel],
+						Float.parseFloat(row[header.indexOf("yield_forestry_" + rotation)]), "as loaded");
+			}
+			assertEquals(run.data.capital("react_pop")[pixel], Float.parseFloat(row[header.indexOf("capital_react_pop")]));
+		}
 	}
 
 	// ---- inputs and coefficients: one row per pixel ----

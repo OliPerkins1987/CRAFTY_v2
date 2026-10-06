@@ -116,6 +116,7 @@ public final class ReactConfig {
 	boolean outputCoefficients = false;
 	boolean outputCrops = false;
 	boolean outputPasture = false;
+	boolean outputForestry = false;
 
 	/** A config holding every default. */
 	public static ReactConfig defaults() {
@@ -278,6 +279,11 @@ public final class ReactConfig {
 		return outputPasture;
 	}
 
+	/** Per decision unit: each forestry AFT's rotation, yield (its _suit) and intensity cost. */
+	public boolean outputForestry() {
+		return outputForestry;
+	}
+
 	// ---- checks ----
 
 	/** Everything wrong with the settings, as messages; empty if they can be used. */
@@ -382,6 +388,7 @@ public final class ReactConfig {
 				"yield_tech_change: " + yieldTechChange,
 				"forestry: rotations " + forestryRotations + " (files in m3/ha/yr, read as they are)",
 				"outputs: every_year " + outputEveryYear + ", inputs " + outputInputs + ", coefficients "
-						+ outputCoefficients + ", crops " + outputCrops + ", pasture " + outputPasture);
+						+ outputCoefficients + ", crops " + outputCrops + ", pasture " + outputPasture + ", forestry "
+						+ outputForestry);
 	}
 }

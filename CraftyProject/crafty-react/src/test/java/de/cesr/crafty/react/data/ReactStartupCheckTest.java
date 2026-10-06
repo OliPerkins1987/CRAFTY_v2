@@ -477,6 +477,27 @@ class ReactStartupCheckTest {
 				ReactElement.OTHER_INTENSITY).withoutCapital("IntP_suit")), "IntP_suit");
 	}
 
+	@Test
+	void aMissingForestrySuitCapitalStopsTheRunOnlyWithForestryOn() {
+		ReactToyData.forestry(dir);
+
+		assertMentions(problems(ReactToyData.context(dir).withForestry().withoutCapital("ExtBF_suit")),
+				"no capital(s) [ExtBF_suit]", "Capitals.csv");
+		// With forestry off the forestry AFTs keep the model's own values, so react hands nothing to it.
+		run(ReactToyData.context(dir).withForestry().off(ReactElement.FORESTRY).withoutCapital("ExtBF_suit"));
+	}
+
+	@Test
+	void aForestrySuitTypedCapitalIsWarnedAboutWhenProductionIsSeparate() {
+		ReactToyData.forestry(dir);
+
+		List<String> warnings = run(ReactToyData.context(dir).withForestry().separateProductionCompetitiveness(true)
+				.capital("IntBF_suit", false)).warnings();
+
+		assertEquals(1, warnings.size(), warnings.toString());
+		assertMentions(warnings.get(0), "capital(s) [IntBF_suit] are typed Capital in Capitals.csv");
+	}
+
 	// ---- warning: costs the model charges that nothing gives ----
 
 	/** A cost file for both toy years. */
@@ -538,6 +559,23 @@ class ReactStartupCheckTest {
 
 		assertEquals(1, warnings.size(), warnings.toString());
 		assertMentions(warnings.get(0), "Nfert_costs", "for IntC3C_irrig, ExtC3C in 2020-2021", "their fertiliser costs");
+	}
+
+	@Test
+	void withForestryOnReactGivesTheForestryAftsTheirIntensityCostEvenWithOtherIntensityOff() {
+		ReactToyData.forestry(dir);
+		ReactToyData.Context context = ReactToyData.context(dir).withForestry().off(ReactElement.OTHER_INTENSITY)
+				.charged(ReactElement.OTHER_INTENSITY, "IntBF", "ExtBF", "AF");
+
+		List<String> warnings = run(withCostFile(context, ReactElement.OTHER_INTENSITY, "X,Y")).warnings();
+
+		// AF names Hardwood but isn't reactive, so its cost must come from the file.
+		assertEquals(List.of("CRAFTY-react: Intensity_costs has no column (or no rows) for AF in 2020-2021, and"
+				+ " react does not hand over their other intensity costs, so the model charges them 0"), warnings);
+
+		List<String> forestryOff = run(withCostFile(context.off(ReactElement.FORESTRY), ReactElement.OTHER_INTENSITY,
+				"X,Y")).warnings();
+		assertMentions(String.join("\n", forestryOff), "Intensity_costs has no column (or no rows) for IntBF, ExtBF, AF");
 	}
 
 	@Test
@@ -608,6 +646,20 @@ class ReactStartupCheckTest {
 		assertEquals(1, warnings.size(), warnings.toString());
 		assertMentions(warnings.get(0), "for IntC3C_irrig_suit, ExtC3C_suit in 2020-2021,");
 		assertTrue(!warnings.get(0).contains("IntP_suit"), warnings.get(0));
+	}
+
+	@Test
+	void aForestrySuitReactHandsOverNeedsNoColumnInTheCapitalsFile() {
+		ReactToyData.forestry(dir);
+		String header = "X,Y,IntFodder_suit,AF_suit,Urban_suit";
+
+		assertEquals(List.of(), run(withCapitalsFile(ReactToyData.context(dir).withForestry(), header, "1,1,1,1,1"))
+				.warnings());
+
+		// With forestry off react hands them nothing, so they must come from the file.
+		List<String> warnings = run(withCapitalsFile(ReactToyData.context(dir).withForestry().off(ReactElement.FORESTRY),
+				header, "1,1,1,1,1")).warnings();
+		assertMentions(String.join("\n", warnings), "for IntBF_suit, ExtBF_suit in 2020-2021,");
 	}
 
 	@Test

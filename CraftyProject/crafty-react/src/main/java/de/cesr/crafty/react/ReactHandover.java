@@ -11,6 +11,7 @@ import de.cesr.crafty.react.data.ReactInputException;
 import de.cesr.crafty.react.data.ReactStartupCheck;
 import de.cesr.crafty.react.decisions.CropManagement;
 import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.ForestryManagement;
 import de.cesr.crafty.react.decisions.PastureManagement;
 
 /**
@@ -21,10 +22,13 @@ import de.cesr.crafty.react.decisions.PastureManagement;
  * (irrigated AFTs), other intensity.</li>
  * <li>Pasture AFT: the production as its {@code <AFT>_suit} capital, and each cost that was worked out:
  * husbandry (as the intensity cost), stocking.</li>
+ * <li>Forestry AFT: the yield as its {@code <AFT>_suit} capital, and the rotation cost as its intensity cost.
+ * Forestry has one switch, so both are always worked out, whether or not other intensity is on.</li>
  * </ul>
  * Only the reactive AFTs' entries, and only the costs of elements that are on, are written. Everything else
  * stays as core loaded it that year. A cost is worked out exactly when its element is on (see
- * {@link CropManagement} and {@link PastureManagement}), so that is what is checked here.
+ * {@link CropManagement}, {@link PastureManagement} and {@link ForestryManagement}), so that is what is checked
+ * here. An AFT belongs to one land use, so no two stages write the same AFT's cost.
  *
  * Each cell's unit is worked out once, when react starts. The cells don't change during a run.
  */
@@ -64,7 +68,8 @@ final class ReactHandover {
 	}
 
 	/** Writes the year's values into every cell. */
-	Counts write(Collection<CropManagement> crops, Collection<PastureManagement> pasture) {
+	Counts write(Collection<CropManagement> crops, Collection<PastureManagement> pasture,
+			Collection<ForestryManagement> forestry) {
 		int suitCapitals = 0;
 		int costColumns = 0;
 		for (CropManagement m : crops) {
@@ -94,6 +99,12 @@ final class ReactHandover {
 				put(m.label(), m.stockingCost(), Cell::getStockingCosts);
 				costColumns++;
 			}
+		}
+		for (ForestryManagement m : forestry) {
+			put(m.label() + ReactStartupCheck.SUIT, m.yield(), Cell::getCapitals);
+			suitCapitals++;
+			put(m.label(), m.cost(), Cell::getIntensityCosts);
+			costColumns++;
 		}
 		return new Counts(suitCapitals, costColumns, cells.length);
 	}

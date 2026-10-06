@@ -341,7 +341,7 @@ public final class ReactStartupCheck {
 	// ---- check 13: the _suit capitals react hands over ----
 
 	/**
-	 * React hands each reactive AFT's yield (crops) or production (pasture) to the model as its
+	 * React hands each reactive AFT's yield (crops, forestry) or production (pasture) to the model as its
 	 * {@code <AFT>_suit} capital, when one of its land use's elements is on (phase 3 plan, Q6). That capital
 	 * must be one of the model's (phase 5 plan, Q2): core only reads an AFT's sensitivity to the capitals in
 	 * {@code Capitals.csv}, so otherwise react's value would be ignored.
@@ -378,15 +378,15 @@ public final class ReactStartupCheck {
 
 	/**
 	 * The reactive AFTs whose {@code _suit} react hands over: the crops AFTs when a crop element is on, the
-	 * pasture AFTs when a pasture element is on, as the two stages have them.
+	 * pasture AFTs when a pasture element is on, the forestry AFTs when forestry is on, as the three stages
+	 * have them.
 	 */
 	private List<AftReactParameters> suitsHandedOver(ReactiveParameters parameters) {
 		List<AftReactParameters> handedOver = new ArrayList<>();
-		if (landUseOn(LpjgType.CROPS)) {
-			handedOver.addAll(parameters.reactive(LpjgType.CROPS));
-		}
-		if (landUseOn(LpjgType.PASTURE)) {
-			handedOver.addAll(parameters.reactive(LpjgType.PASTURE));
+		for (LpjgType type : LpjgType.values()) {
+			if (landUseOn(type)) {
+				handedOver.addAll(parameters.reactive(type));
+			}
 		}
 		return handedOver;
 	}
@@ -400,7 +400,9 @@ public final class ReactStartupCheck {
 	 * this does not stop the run.
 	 * <ul>
 	 * <li>React gives an AFT the cost when the element is on and the AFT is reactive: a crops AFT for N, an
-	 * irrigated crops AFT for irrigation, a pasture AFT for stocking, either for other intensity.</li>
+	 * irrigated crops AFT for irrigation, a pasture AFT for stocking, either for other intensity. With forestry
+	 * on it also gives a forestry AFT its intensity cost (the rotation cost), whether or not other intensity
+	 * is on.</li>
 	 * <li>A file gives it when its header has the AFT's column, matched as core matches it (any case, quotes
 	 * and spaces ignored), or for irrigation the shared {@value #SHARED_IRRIGATION_COLUMN} column; and it has
 	 * a line after the header. Only those two lines are read. A file that cannot be read gives nothing.</li>
@@ -474,20 +476,25 @@ public final class ReactStartupCheck {
 		return String.join("; ", groups);
 	}
 
-	/** The AFTs whose cost for an element react hands to the model. */
+	/**
+	 * The AFTs whose cost for an element react hands to the model. The intensity cost is also forestry's: with
+	 * forestry on, react hands it over for the forestry AFTs, whether or not other intensity is on.
+	 */
 	private Set<String> costsHandedOver(ReactiveParameters parameters, ReactElement element) {
-		if (!context.isReactive(element)) {
-			return Set.of();
-		}
 		List<AftReactParameters> afts = new ArrayList<>();
-		switch (element) {
-			case FERTILISER -> afts.addAll(parameters.reactive(LpjgType.CROPS));
-			case IRRIGATION -> afts.addAll(irrigatedCrops(parameters));
-			case OTHER_INTENSITY -> {
-				afts.addAll(parameters.reactive(LpjgType.CROPS));
-				afts.addAll(parameters.reactive(LpjgType.PASTURE));
+		if (context.isReactive(element)) {
+			switch (element) {
+				case FERTILISER -> afts.addAll(parameters.reactive(LpjgType.CROPS));
+				case IRRIGATION -> afts.addAll(irrigatedCrops(parameters));
+				case OTHER_INTENSITY -> {
+					afts.addAll(parameters.reactive(LpjgType.CROPS));
+					afts.addAll(parameters.reactive(LpjgType.PASTURE));
+				}
+				case STOCKING -> afts.addAll(parameters.reactive(LpjgType.PASTURE));
 			}
-			case STOCKING -> afts.addAll(parameters.reactive(LpjgType.PASTURE));
+		}
+		if (element == ReactElement.OTHER_INTENSITY && context.isReactive(ReactElement.FORESTRY)) {
+			afts.addAll(parameters.reactive(LpjgType.FORESTRY));
 		}
 		Set<String> labels = new HashSet<>();
 		afts.forEach(aft -> labels.add(aft.label()));

@@ -21,6 +21,8 @@ import de.cesr.crafty.react.data.ReactYearData;
 import de.cesr.crafty.react.decisions.CropDecisions;
 import de.cesr.crafty.react.decisions.CropManagement;
 import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.ForestryDecisions;
+import de.cesr.crafty.react.decisions.ForestryManagement;
 import de.cesr.crafty.react.decisions.PastureDecisions;
 import de.cesr.crafty.react.decisions.PastureManagement;
 import de.cesr.crafty.react.decisions.YearPrices;
@@ -36,8 +38,9 @@ import de.cesr.crafty.react.science.CropSurfaces;
  * capitals and cost files have been loaded into the cells.
  *
  * Each year it loads that year's data and runs react's stages on it, in order:
- * the cropland decisions ({@link CropDecisions}), then the pasture decisions
- * ({@link PastureDecisions}). It logs one line for the year and one per AFT,
+ * the cropland decisions ({@link CropDecisions}), the pasture decisions
+ * ({@link PastureDecisions}), then the forestry decisions
+ * ({@link ForestryDecisions}). It logs one line for the year and one per AFT,
  * and writes the inspection files switched on in react_config.yaml
  * ({@link ReactOutputs}).
  *
@@ -60,6 +63,9 @@ public class ReactiveUpdater extends AbstractUpdater {
 
 	/** The pasture stage, which carries each AFT's stocking rate from year to year. */
 	private final PastureDecisions pasture;
+
+	/** The forestry stage, which carries each Prospect AFT's rotation from year to year. */
+	private final ForestryDecisions forestry;
 
 	/** The inspection files, as react_config.yaml asks for them. */
 	private final ReactOutputs outputs;
@@ -97,16 +103,18 @@ public class ReactiveUpdater extends AbstractUpdater {
 	}
 
 	private ReactiveUpdater(ReactInputs inputs, DecisionUnits units, Map<String, Cell> cells) {
-		this(inputs, units, CropDecisions.create(inputs, units), PastureDecisions.create(inputs, units), cells);
+		this(inputs, units, CropDecisions.create(inputs, units), PastureDecisions.create(inputs, units),
+				ForestryDecisions.create(inputs, units), cells);
 	}
 
 	/** With react's stages and cells passed in, so that a test can choose them. */
 	ReactiveUpdater(ReactInputs inputs, DecisionUnits units, CropDecisions crops, PastureDecisions pasture,
-			Map<String, Cell> cells) {
+			ForestryDecisions forestry, Map<String, Cell> cells) {
 		this.inputs = inputs;
 		this.units = units;
 		this.crops = crops;
 		this.pasture = pasture;
+		this.forestry = forestry;
 		this.outputs = ReactOutputs.create(inputs, units);
 		this.handover = ReactHandover.build(cells, units);
 	}
@@ -152,20 +160,21 @@ public class ReactiveUpdater extends AbstractUpdater {
 	void handOver(int year) {
 		Collection<CropManagement> cropsDecided = crops.managements().values();
 		Collection<PastureManagement> pastureDecided = pasture.managements().values();
-		if (cropsDecided.isEmpty() && pastureDecided.isEmpty()) {
+		Collection<ForestryManagement> forestryDecided = forestry.managements().values();
+		if (cropsDecided.isEmpty() && pastureDecided.isEmpty() && forestryDecided.isEmpty()) {
 			return;
 		}
 		long start = System.nanoTime();
-		ReactHandover.Counts counts = handover.write(cropsDecided, pastureDecided);
+		ReactHandover.Counts counts = handover.write(cropsDecided, pastureDecided, forestryDecided);
 		LOGGER.info(String.format("CRAFTY-react handed year %d to the model in %.2f s: %d _suit capitals and %d cost"
 				+ " columns in %d cells", year, (System.nanoTime() - start) / 1e9, counts.suitCapitals(),
 				counts.costColumns(), counts.cells()));
 	}
 
 	/**
-	 * Loads a year (the year before is released) and runs react's stages on it: the cropland decisions, then
-	 * the pasture decisions. A stage with no AFT to decide (none of its elements on) is skipped; with neither,
-	 * only the data is loaded.
+	 * Loads a year (the year before is released) and runs react's stages on it: the cropland decisions, the
+	 * pasture decisions, then the forestry decisions. A stage with no AFT to decide (none of its elements on)
+	 * is skipped; with none to decide, only the data is loaded.
 	 *
 	 * @throws ReactInputException if the year cannot be decided, for example when a service has no price
 	 */
@@ -173,11 +182,14 @@ public class ReactiveUpdater extends AbstractUpdater {
 		ReactYearData data = inputs.forYear(year);
 		boolean decideCrops = !crops.managements().isEmpty();
 		boolean decidePasture = !pasture.managements().isEmpty();
-		if (!decideCrops && !decidePasture) {
+		boolean decideForestry = !forestry.managements().isEmpty();
+		if (!decideCrops && !decidePasture && !decideForestry) {
 			return;
 		}
 		long start = System.nanoTime();
-		Integer lastYearDecided = decideCrops ? crops.lastYear() : pasture.lastYear();
+		// The stages decide the same years, so any one of them says whether this is the spin-up.
+		Integer lastYearDecided = decideCrops ? crops.lastYear()
+				: decidePasture ? pasture.lastYear() : forestry.lastYear();
 		int steps = lastYearDecided == null ? inputs.config().spinupIterations() : 1;
 		CropSurfaces surfaces = null;
 		String fitted = "";
@@ -185,26 +197,33 @@ public class ReactiveUpdater extends AbstractUpdater {
 			surfaces = CropSurfaces.fit(data);
 			fitted = String.format("surfaces fitted in %.2f s; ", (System.nanoTime() - start) / 1e9);
 		}
-		// One look-up a year, for the services both stages need.
+		// One look-up a year, for the services the three stages need.
 		Set<String> services = new LinkedHashSet<>(crops.servicesNeedingPrices());
 		services.addAll(pasture.servicesNeedingPrices());
+		services.addAll(forestry.servicesNeedingPrices());
 		YearPrices prices = YearPrices.forYear(year, services, units, inputs.context().prices());
 		Map<String, CropManagement> cropsDecided = decideCrops ? crops.decide(data, surfaces, prices) : Map.of();
 		Map<String, PastureManagement> pastureDecided = decidePasture ? pasture.decide(data, prices) : Map.of();
+		Map<String, ForestryManagement> forestryDecided = decideForestry ? forestry.decide(data, prices) : Map.of();
 
-		LOGGER.info(String.format("CRAFTY-react decided year %d in %.2f s (%s%d %s): %d crops AFT(s) and %d pasture"
-				+ " AFT(s) in %d decision units", year, (System.nanoTime() - start) / 1e9, fitted, steps,
-				steps == 1 ? "step" : "spin-up steps", cropsDecided.size(), pastureDecided.size(), units.size()));
+		LOGGER.info(String.format("CRAFTY-react decided year %d in %.2f s (%s%d %s): %d crops AFT(s), %d pasture"
+				+ " AFT(s) and %d forestry AFT(s) in %d decision units", year, (System.nanoTime() - start) / 1e9, fitted,
+				steps, steps == 1 ? "step" : "spin-up steps", cropsDecided.size(), pastureDecided.size(),
+				forestryDecided.size(), units.size()));
 		for (CropManagement management : cropsDecided.values()) {
 			LOGGER.info("CRAFTY-react " + year + " " + management.summary());
 		}
 		for (PastureManagement management : pastureDecided.values()) {
 			LOGGER.info("CRAFTY-react " + year + " " + management.summary());
 		}
+		for (ForestryManagement management : forestryDecided.values()) {
+			LOGGER.info("CRAFTY-react " + year + " " + management.summary());
+		}
 
 		if (outputs.writes(year)) {
 			long writing = System.nanoTime();
-			List<Path> files = outputs.write(data, surfaces, prices, cropsDecided.values(), pastureDecided.values());
+			List<Path> files = outputs.write(data, surfaces, prices, cropsDecided.values(), pastureDecided.values(),
+					forestryDecided.values());
 			LOGGER.info(String.format("CRAFTY-react wrote %d inspection file(s) for %d to %s in %.2f s", files.size(),
 					year, outputs.folder(), (System.nanoTime() - writing) / 1e9));
 		}
@@ -223,5 +242,10 @@ public class ReactiveUpdater extends AbstractUpdater {
 	/** The pasture stage, holding each pasture AFT's management for the last year decided. */
 	public PastureDecisions getPastureDecisions() {
 		return pasture;
+	}
+
+	/** The forestry stage, holding each forestry AFT's management for the last year decided. */
+	public ForestryDecisions getForestryDecisions() {
+		return forestry;
 	}
 }

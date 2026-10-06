@@ -24,6 +24,7 @@ import de.cesr.crafty.react.data.ReactStartupCheck;
 import de.cesr.crafty.react.data.ReactYearData;
 import de.cesr.crafty.react.decisions.CropManagement;
 import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.ForestryManagement;
 import de.cesr.crafty.react.decisions.PastureManagement;
 import de.cesr.crafty.react.decisions.YearPrices;
 import de.cesr.crafty.react.science.CropSurfaces;
@@ -40,7 +41,8 @@ import de.cesr.crafty.react.science.CropSurfaces;
  * <ul>
  * <li>{@code inputs}: {@code Inputs}, one row per pixel (Lon, Lat) and one column per input, in real units
  * as loaded: {@code yield_<crop><level>} (t/ha), {@code demand_<crop><level>} (m³/ha), {@code runoff}
- * (m³/ha), {@code npp_<pasture>} (t/ha), {@code capital_<name>} and {@code irrigation_cost_index};</li>
+ * (m³/ha), {@code npp_<pasture>} (t/ha), {@code yield_forestry_<rotation>} (m³/ha/yr),
+ * {@code capital_<name>} and {@code irrigation_cost_index};</li>
  * <li>{@code coefficients}: {@code Coefficients}, one row per pixel and one column per crop and
  * coefficient: {@code <crop>_A}, {@code _B}, {@code _C}, {@code _D}, {@code _alpha}, {@code _beta}, and
  * {@code _D0}, {@code _D1000}, {@code _alphaD} for irrigated crops;</li>
@@ -51,8 +53,11 @@ import de.cesr.crafty.react.science.CropSurfaces;
  * <li>{@code pasture}: the same for pasture AFTs: {@code Pasture-Husbandry}, {@code Pasture-Stocking},
  * {@code Pasture-Production} (the AFT's {@code _suit}), {@code Pasture-IntensityCost},
  * {@code Pasture-StockingCost};</li>
- * <li>with {@code crops} or {@code pasture}: {@code Prices}, the price react used for each service in each
- * region ({@code service,region,price}).</li>
+ * <li>{@code forestry}: the same for forestry AFTs: {@code Forestry-Rotation} (years, whole numbers),
+ * {@code Forestry-Yield} (the AFT's {@code _suit}, m³/ha/yr), {@code Forestry-IntensityCost} (the rotation
+ * cost, $/ha/yr);</li>
+ * <li>with {@code crops}, {@code pasture} or {@code forestry}: {@code Prices}, the price react used for each
+ * service in each region ({@code service,region,price}).</li>
  * </ul>
  * A file only has the AFTs its quantity applies to (only irrigated AFTs in {@code Crops-WaterCost}, for
  * example), and a quantity that was not worked out has no file. Numbers are written in full, with a
@@ -102,7 +107,7 @@ public final class ReactOutputs {
 	/** Whether any file is written for a year: something is switched on, and the year is one to write. */
 	public boolean writes(int year) {
 		boolean any = config.outputInputs() || config.outputCoefficients() || config.outputCrops()
-				|| config.outputPasture();
+				|| config.outputPasture() || config.outputForestry();
 		return any && (config.outputEveryYear() || mapYears.contains(year));
 	}
 
@@ -114,11 +119,13 @@ public final class ReactOutputs {
 	 * @param prices   the prices react used this year
 	 * @param crops    each crops AFT's management for the year (empty when none was decided)
 	 * @param pasture  each pasture AFT's management for the year (empty when none was decided)
+	 * @param forestry each forestry AFT's management for the year (empty when none was decided)
 	 * @return the files written, in order
 	 * @throws ReactInputException naming the file, if one cannot be written
 	 */
 	public List<Path> write(ReactYearData year, CropSurfaces surfaces, YearPrices prices,
-			Collection<CropManagement> crops, Collection<PastureManagement> pasture) {
+			Collection<CropManagement> crops, Collection<PastureManagement> pasture,
+			Collection<ForestryManagement> forestry) {
 		int y = year.year();
 		List<Path> written = new ArrayList<>();
 		if (!writes(y)) {
@@ -155,7 +162,17 @@ public final class ReactOutputs {
 			writeUnits(written, "Pasture-StockingCost", y, stocked, PastureManagement::label,
 					PastureManagement::stockingCost);
 		}
-		if ((config.outputCrops() || config.outputPasture()) && !prices.services().isEmpty()) {
+		if (config.outputForestry()) {
+			List<ForestryManagement> all = List.copyOf(forestry);
+			writeUnitValues(written, "Forestry-Rotation", y, all, ForestryManagement::label, m -> {
+				int[] rotation = m.rotation();
+				return unit -> String.valueOf(rotation[unit]);
+			});
+			writeUnits(written, "Forestry-Yield", y, all, ForestryManagement::label, ForestryManagement::yield);
+			writeUnits(written, "Forestry-IntensityCost", y, all, ForestryManagement::label, ForestryManagement::cost);
+		}
+		if ((config.outputCrops() || config.outputPasture() || config.outputForestry())
+				&& !prices.services().isEmpty()) {
 			writePrices(written, y, prices);
 		}
 		return written;
@@ -184,6 +201,9 @@ public final class ReactOutputs {
 		}
 		for (String pasture : year.pastures()) {
 			columns.add(floats("npp_" + pasture, year.pasture(pasture)));
+		}
+		for (int rotation : year.forestryRotations()) {
+			columns.add(floats("yield_forestry_" + rotation, year.forestryYield(rotation)));
 		}
 		for (String capital : year.capitals()) {
 			columns.add(floats("capital_" + capital, year.capital(capital)));
@@ -237,21 +257,30 @@ public final class ReactOutputs {
 
 	private <M> void writeUnits(List<Path> written, String name, int year, List<M> afts, Function<M, String> label,
 			Function<M, double[]> quantity) {
+		writeUnitValues(written, name, year, afts, label, aft -> {
+			double[] values = quantity.apply(aft);
+			return unit -> String.valueOf(values[unit]);
+		});
+	}
+
+	/** One file per quantity: one row per decision unit, one column per AFT, each value as {@code value} writes it. */
+	private <M> void writeUnitValues(List<Path> written, String name, int year, List<M> afts, Function<M, String> label,
+			Function<M, IntFunction<String>> value) {
 		if (afts.isEmpty()) {
 			return;
 		}
 		StringBuilder header = new StringBuilder("Lon,Lat,region");
-		List<double[]> columns = new ArrayList<>();
+		List<IntFunction<String>> columns = new ArrayList<>();
 		for (M aft : afts) {
 			header.append(',').append(label.apply(aft));
-			columns.add(quantity.apply(aft));
+			columns.add(value.apply(aft));
 		}
 		write(written, name, year, header.toString(), units.size(), unit -> {
 			int pixel = units.pixel(unit);
 			StringBuilder row = new StringBuilder();
 			row.append(grid.lon(pixel)).append(',').append(grid.lat(pixel)).append(',').append(units.region(unit));
-			for (double[] values : columns) {
-				row.append(',').append(values[unit]);
+			for (IntFunction<String> column : columns) {
+				row.append(',').append(column.apply(unit));
 			}
 			return row.toString();
 		});

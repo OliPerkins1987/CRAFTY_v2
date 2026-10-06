@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
@@ -49,6 +50,8 @@ import de.cesr.crafty.react.data.ReactToyData;
 import de.cesr.crafty.react.data.ReactYearData;
 import de.cesr.crafty.react.decisions.CropDecisions;
 import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.ForestryDecisions;
+import de.cesr.crafty.react.decisions.ForestryManagement;
 import de.cesr.crafty.react.decisions.PastureDecisions;
 import de.cesr.crafty.react.decisions.YearPrices;
 import de.cesr.crafty.react.output.ReactOutputs;
@@ -226,6 +229,13 @@ class ReactiveUpdaterTest {
 		return ReactToyData.context(tempDir).prices((service, region, year) -> 300);
 	}
 
+	/** The same with the toy forestry AFTs and files: use with {@code context.withForestry()}. */
+	private ReactInputs forestryInputs(ReactToyData.Context context) {
+		ReactToyData.project(tempDir);
+		ReactToyData.forestry(tempDir);
+		return ReactInputs.create(ReactConfig.defaults(), context.build());
+	}
+
 	@Test
 	void eachYearIsDecidedOnceSoTheSpinUpHappensOnce() {
 		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(toyContext()));
@@ -280,19 +290,48 @@ class ReactiveUpdaterTest {
 	}
 
 	@Test
+	void theForestryStageIsDecidedOnceAYearSoItsSpinUpHappensOnce() {
+		ReactiveUpdater updater = new ReactiveUpdater(forestryInputs(toyContext().withForestry()));
+
+		Timestep.setCurrentYear(2020);
+		updater.step(); // year zero, during initialisation
+		int[] yearZero = updater.getForestryDecisions().managements().get("IntBF").rotation().clone();
+		updater.step(); // the first scheduled step, for the same year
+		assertEquals(2020, updater.getForestryDecisions().lastYear());
+		assertArrayEquals(yearZero, updater.getForestryDecisions().managements().get("IntBF").rotation(),
+				"the same year is not decided again");
+
+		// The same as deciding 2020 once, on its own.
+		ReactInputs fresh = ReactInputs.create(ReactConfig.defaults(), toyContext().withForestry().build());
+		DecisionUnits units = DecisionUnits.build(fresh.checked().cellKey(), fresh.context().regions());
+		ForestryDecisions once = ForestryDecisions.create(fresh, units);
+		once.decide(fresh.forYear(2020),
+				YearPrices.forYear(2020, once.servicesNeedingPrices(), units, fresh.context().prices()));
+		assertArrayEquals(once.managements().get("IntBF").rotation(), yearZero);
+
+		Timestep.setCurrentYear(2021);
+		updater.step();
+		assertEquals(2021, updater.getForestryDecisions().lastYear());
+		assertEquals(2021, updater.getCropDecisions().lastYear(), "the three stages decide each year");
+	}
+
+	@Test
 	void stagesCanBePassedIn() {
-		ReactInputs inputs = toyInputs(toyContext());
+		ReactInputs inputs = forestryInputs(toyContext().withForestry());
 		DecisionUnits units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
 		CropDecisions crops = CropDecisions.create(inputs, units);
 		PastureDecisions pasture = PastureDecisions.create(inputs, units);
-		ReactiveUpdater updater = new ReactiveUpdater(inputs, units, crops, pasture, Map.of());
+		ForestryDecisions forestry = ForestryDecisions.create(inputs, units);
+		ReactiveUpdater updater = new ReactiveUpdater(inputs, units, crops, pasture, forestry, Map.of());
 
 		updater.step();
 
 		assertSame(crops, updater.getCropDecisions());
 		assertSame(pasture, updater.getPastureDecisions());
+		assertSame(forestry, updater.getForestryDecisions());
 		assertEquals(2020, crops.lastYear());
 		assertEquals(2020, pasture.lastYear());
+		assertEquals(2020, forestry.lastYear());
 	}
 
 	@Test
@@ -325,6 +364,23 @@ class ReactiveUpdaterTest {
 		Path react = output.resolve(ReactOutputs.FOLDER);
 		assertTrue(Files.exists(react.resolve("ssp126-React-Crops-Yield-2021.csv")), "2021 is a map year");
 		assertFalse(Files.exists(react.resolve("ssp126-React-Crops-Yield-2020.csv")), "2020 is not");
+	}
+
+	@Test
+	void theStepWritesTheForestryFiles() {
+		ReactToyData.project(tempDir);
+		ReactToyData.forestry(tempDir);
+		ReactToyData.write(tempDir, ReactConfigLoader.LOCATION.toString(), "outputs:", "  forestry: true");
+		Path output = tempDir.resolve("run output");
+		ReactiveUpdater updater = new ReactiveUpdater(ReactInputs.create(ReactConfigLoader.load(tempDir),
+				toyContext().withForestry().outputFolder(output).mapYears(2020).build()));
+
+		updater.step();
+
+		Path react = output.resolve(ReactOutputs.FOLDER);
+		for (String quantity : List.of("Rotation", "Yield", "IntensityCost")) {
+			assertTrue(Files.exists(react.resolve("ssp126-React-Forestry-" + quantity + "-2020.csv")), quantity);
+		}
 	}
 
 	/** Every file under a folder, with its size and time of last change. */
@@ -368,6 +424,43 @@ class ReactiveUpdaterTest {
 				&& e.getMessage().contains("no weight"), e.getMessage());
 	}
 
+	/** Prices for every service but Hardwood, which has no weight. */
+	private ReactToyData.Context noHardwoodPrice(ReactToyData.Context context) {
+		return context.prices((service, region, year) -> {
+			if (service.equals("Hardwood")) {
+				throw new ReactInputException("no weight");
+			}
+			return 300;
+		});
+	}
+
+	@Test
+	void aMissingForestryPriceNamesTheProblem() {
+		ReactiveUpdater updater = new ReactiveUpdater(
+				forestryInputs(noHardwoodPrice(ReactToyData.context(tempDir).withForestry())));
+
+		ReactInputException e = assertThrows(ReactInputException.class, () -> updater.decideYear(2020));
+
+		assertTrue(e.getMessage().contains("Hardwood") && e.getMessage().contains("2020")
+				&& e.getMessage().contains("no weight"), e.getMessage());
+	}
+
+	@Test
+	void aRunWhoseForestryAftsAreAllCapitalNeedsNoForestryPrice() {
+		ReactToyData.project(tempDir);
+		ReactToyData.forestry(tempDir);
+		String[] rows = ReactToyData.standardAndForestryRows();
+		rows[rows.length - 2] = "IntBF,AFT,0,Hardwood,,,,,,,,,,"; // the Prospect AFT, made not reactive
+		ReactToyData.parameters(tempDir, rows);
+		ReactiveUpdater updater = new ReactiveUpdater(ReactInputs.create(ReactConfig.defaults(),
+				noHardwoodPrice(ReactToyData.context(tempDir).withForestry()).build()));
+
+		updater.decideYear(2020);
+
+		assertEquals(List.of("ExtBF"), List.copyOf(updater.getForestryDecisions().managements().keySet()));
+		assertEquals(2020, updater.getForestryDecisions().lastYear());
+	}
+
 	@Test
 	void withOnlyStockingOnPastureIsDecidedAndCropsAreNot() {
 		ReactiveUpdater updater = new ReactiveUpdater(toyInputs(ReactToyData.context(tempDir)
@@ -405,6 +498,23 @@ class ReactiveUpdaterTest {
 		assertEquals(2020, updater.getInputs().currentYear().year());
 		assertEquals(null, updater.getCropDecisions().lastYear());
 		assertEquals(null, updater.getPastureDecisions().lastYear());
+		assertEquals(null, updater.getForestryDecisions().lastYear());
+	}
+
+	@Test
+	void withForestryOffTheForestryAftsAreNotDecidedOrHandedOver() {
+		Map<String, Cell> cells = toyCells();
+		ReactiveUpdater updater = new ReactiveUpdater(
+				forestryInputs(toyContext().withForestry().off(ReactElement.FORESTRY)), cells);
+
+		updater.step();
+
+		assertTrue(updater.getForestryDecisions().managements().isEmpty(), "phase 3 plan, Q6");
+		assertEquals(null, updater.getForestryDecisions().lastYear());
+		assertEquals(2020, updater.getCropDecisions().lastYear());
+		for (Cell cell : cells.values()) {
+			assertFalse(cell.getCapitals().containsKey("IntBF_suit") || cell.getIntensityCosts().containsKey("IntBF"));
+		}
 	}
 
 	// ---- handing over to the model (31c) ----
@@ -431,6 +541,49 @@ class ReactiveUpdaterTest {
 				cells.get("1,2").getCapitals().get("IntC3C_irrig_suit"));
 		assertEquals(updater.getPastureDecisions().managements().get("IntP").stockingCost()[south],
 				cells.get("1,2").getStockingCosts().get("IntP"));
+	}
+
+	@Test
+	void eachStepHandsForestryToTheCells() {
+		// Pixel A's best rotation is 70 years at 100 $/m3; at 10 $/m3 the cost of a harvest weighs more (32d).
+		ReactInputs inputs = forestryInputs(ReactToyData.context(tempDir).withForestry()
+				.prices((service, region, year) -> region.equals("South") ? 10 : 100));
+		Map<String, Cell> cells = toyCells();
+		ReactiveUpdater updater = new ReactiveUpdater(inputs, cells);
+		DecisionUnits units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
+		int north = units.unitOf("1,1");
+		int south = units.unitOf("1,2");
+
+		updater.step();
+
+		ForestryManagement intBF = updater.getForestryDecisions().managements().get("IntBF");
+		assertEquals(70, intBF.rotation()[north]);
+		assertEquals(100, intBF.rotation()[south]);
+		assertEquals(intBF.yield()[north], cells.get("1,1").getCapitals().get("IntBF_suit"));
+		assertEquals(intBF.yield()[south], cells.get("1,2").getCapitals().get("IntBF_suit"));
+		assertEquals(intBF.cost()[north], cells.get("1,1").getIntensityCosts().get("IntBF"));
+		assertEquals(intBF.cost()[south], cells.get("1,2").getIntensityCosts().get("IntBF"));
+	}
+
+	@Test
+	void withOnlyForestryOnOnlyForestryIsDecidedAndHandedOver() {
+		Map<String, Cell> cells = toyCells();
+		ReactiveUpdater updater = new ReactiveUpdater(forestryInputs(toyContext().withForestry()
+				.off(ReactElement.FERTILISER, ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY, ReactElement.STOCKING)),
+				cells);
+
+		updater.step();
+
+		assertEquals(2020, updater.getForestryDecisions().lastYear(), "forestry alone is a year to decide");
+		assertEquals(List.of("IntBF", "ExtBF"), List.copyOf(updater.getForestryDecisions().managements().keySet()));
+		assertEquals(null, updater.getCropDecisions().lastYear());
+		assertEquals(null, updater.getPastureDecisions().lastYear());
+		for (Cell cell : cells.values()) {
+			assertEquals(Set.of("IntBF_suit", "ExtBF_suit"), cell.getCapitals().keySet());
+			assertEquals(Set.of("IntBF", "ExtBF"), cell.getIntensityCosts().keySet());
+			assertTrue(cell.getNfertCosts().isEmpty() && cell.getIrrigationCosts().isEmpty()
+					&& cell.getStockingCosts().isEmpty());
+		}
 	}
 
 	@Test

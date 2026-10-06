@@ -23,6 +23,8 @@ import de.cesr.crafty.react.data.ReactYearData;
 import de.cesr.crafty.react.decisions.CropDecisions;
 import de.cesr.crafty.react.decisions.CropManagement;
 import de.cesr.crafty.react.decisions.DecisionUnits;
+import de.cesr.crafty.react.decisions.ForestryDecisions;
+import de.cesr.crafty.react.decisions.ForestryManagement;
 import de.cesr.crafty.react.decisions.PastureDecisions;
 import de.cesr.crafty.react.decisions.PastureManagement;
 import de.cesr.crafty.react.decisions.YearPrices;
@@ -40,16 +42,30 @@ class ReactHandoverTest {
 	private DecisionUnits units;
 	private CropDecisions crops;
 	private PastureDecisions pasture;
+	private ForestryDecisions forestry;
 	private final Map<String, Cell> cells = new LinkedHashMap<>();
 
 	/** Checks the toy project and decides 2020, with a lower price in the South so that the units differ. */
 	private void decide(ReactToyData.Context context) {
+		decide(context, false);
+	}
+
+	/** The same with the toy forestry AFTs and files: use with {@code context.withForestry()}. */
+	private void decideWithForestry(ReactToyData.Context context) {
+		decide(context, true);
+	}
+
+	private void decide(ReactToyData.Context context, boolean forestryFiles) {
 		ReactToyData.project(dir);
+		if (forestryFiles) {
+			ReactToyData.forestry(dir);
+		}
 		ReactInputs inputs = ReactInputs.create(ReactConfig.defaults(),
 				context.prices((service, region, year) -> region.equals("South") ? 150 : 300).build());
 		units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
 		crops = CropDecisions.create(inputs, units);
 		pasture = PastureDecisions.create(inputs, units);
+		forestry = ForestryDecisions.create(inputs, units);
 		ReactYearData data = inputs.forYear(2020);
 		YearPrices prices = YearPrices.forYear(2020, crops.servicesNeedingPrices(), units, inputs.context().prices());
 		if (!crops.managements().isEmpty()) {
@@ -58,13 +74,15 @@ class ReactHandoverTest {
 		YearPrices pasturePrices = YearPrices.forYear(2020, pasture.servicesNeedingPrices(), units,
 				inputs.context().prices());
 		pasture.decide(data, pasturePrices);
+		forestry.decide(data, YearPrices.forYear(2020, forestry.servicesNeedingPrices(), units, inputs.context().prices()));
 		cells.put("1,1", new Cell(1, 1));
 		cells.put("1,2", new Cell(1, 2));
 		cells.put("2,1", new Cell(2, 1));
 	}
 
 	private ReactHandover.Counts handOver() {
-		return ReactHandover.build(cells, units).write(crops.managements().values(), pasture.managements().values());
+		return ReactHandover.build(cells, units).write(crops.managements().values(), pasture.managements().values(),
+				forestry.managements().values());
 	}
 
 	private CropManagement crop(String label) {
@@ -159,6 +177,66 @@ class ReactHandoverTest {
 		assertEquals(pastureAft("IntP").stockingCost()[unit], cell.getStockingCosts().get("IntP"));
 		assertEquals(20.0, cell.getIntensityCosts().get("IntP"), "other intensity is off, so core's cost stays");
 		assertEquals(new ReactHandover.Counts(1, 1, 3), counts);
+	}
+
+	@Test
+	void eachCellTakesItsUnitsForestrySuitAndRotationCost() {
+		decideWithForestry(ReactToyData.context(dir).withForestry());
+
+		ReactHandover.Counts counts = handOver();
+
+		for (Map.Entry<String, Cell> entry : cells.entrySet()) {
+			int unit = units.unitOf(entry.getKey());
+			Cell cell = entry.getValue();
+			for (String label : new String[] { "IntBF", "ExtBF" }) {
+				ForestryManagement m = forestry.managements().get(label);
+				assertEquals(m.yield()[unit], cell.getCapitals().get(label + "_suit"), label + " in " + entry.getKey());
+				assertEquals(m.cost()[unit], cell.getIntensityCosts().get(label), label + " in " + entry.getKey());
+			}
+		}
+		// As in eachCellTakesItsUnitsSuitAndCosts, and a _suit and an intensity cost for each forestry AFT.
+		assertEquals(new ReactHandover.Counts(5, 9, 3), counts);
+	}
+
+	@Test
+	void withOtherIntensityOffTheForestryIntensityCostIsStillHandedOver() {
+		decideWithForestry(ReactToyData.context(dir).withForestry().off(ReactElement.OTHER_INTENSITY));
+		Cell cell = cells.get("1,1");
+		cell.getIntensityCosts().put("IntC3C_irrig", 20.0);
+		cell.getIntensityCosts().put("IntP", 21.0);
+		cell.getIntensityCosts().put("IntBF", 22.0);
+
+		handOver();
+
+		assertEquals(20.0, cell.getIntensityCosts().get("IntC3C_irrig"), "other intensity is off, so core's cost stays");
+		assertEquals(21.0, cell.getIntensityCosts().get("IntP"));
+		assertEquals(forestry.managements().get("IntBF").cost()[units.unitOf("1,1")], cell.getIntensityCosts().get("IntBF"),
+				"forestry has its own switch");
+	}
+
+	@Test
+	void aNonReactiveForestryAftAndForestryAftsWithForestryOffKeepCoresValues() {
+		decideWithForestry(ReactToyData.context(dir).withForestry());
+		Cell cell = cells.get("1,1");
+		cell.getCapitals().put("AF_suit", 0.6);
+		cell.getIntensityCosts().put("AF", 13.0);
+
+		handOver();
+
+		assertEquals(0.6, cell.getCapitals().get("AF_suit"), "AF names Hardwood but is not reactive");
+		assertEquals(13.0, cell.getIntensityCosts().get("AF"));
+
+		decideWithForestry(ReactToyData.context(dir).withForestry().off(ReactElement.FORESTRY));
+		cell = cells.get("1,1");
+		cell.getCapitals().put("IntBF_suit", 0.4);
+		cell.getIntensityCosts().put("IntBF", 30.0);
+
+		ReactHandover.Counts counts = handOver();
+
+		assertTrue(forestry.managements().isEmpty(), "phase 3 plan, Q6");
+		assertEquals(0.4, cell.getCapitals().get("IntBF_suit"));
+		assertEquals(30.0, cell.getIntensityCosts().get("IntBF"));
+		assertEquals(new ReactHandover.Counts(3, 7, 3), counts, "crops and pasture only");
 	}
 
 	@Test

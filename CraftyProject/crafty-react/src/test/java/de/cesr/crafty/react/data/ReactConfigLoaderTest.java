@@ -50,7 +50,8 @@ class ReactConfigLoaderTest {
 		assertEquals(10, config.irrigationFileUnits().toCubicMetresPerHectare());
 		assertEquals(List.of(10, 20, 30, 40, 50, 60, 70, 80, 90, 100), config.forestryRotations());
 		assertEquals(false, config.outputEveryYear() || config.outputInputs() || config.outputCoefficients()
-				|| config.outputCrops() || config.outputPasture(), "No inspection file unless asked for");
+				|| config.outputCrops() || config.outputPasture() || config.outputForestry(),
+				"No inspection file unless asked for");
 	}
 
 	@Test
@@ -59,11 +60,12 @@ class ReactConfigLoaderTest {
 				"outputs:",
 				"  every_year: true",
 				"  crops: true",
-				"  pasture: true");
+				"  pasture: true",
+				"  forestry: true");
 
 		ReactConfig config = ReactConfigLoader.load(project);
 
-		assertTrue(config.outputEveryYear() && config.outputCrops() && config.outputPasture());
+		assertTrue(config.outputEveryYear() && config.outputCrops() && config.outputPasture() && config.outputForestry());
 		assertEquals(false, config.outputInputs() || config.outputCoefficients(), "Unset switches stay off");
 	}
 

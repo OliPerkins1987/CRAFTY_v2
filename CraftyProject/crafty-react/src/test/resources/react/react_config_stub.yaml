@@ -68,3 +68,4 @@ outputs:                     # inspection files in <output folder>/react/; the m
   coefficients: false         # per pixel: the fitted yield and water-demand coefficients
   crops: false                # per decision unit: each crops AFT's decisions, yield (= _suit) and costs
   pasture: false              # per decision unit: each pasture AFT's decisions, production (= _suit) and costs
+  forestry: false             # per decision unit: each forestry AFT's rotation, yield (= _suit) and intensity cost
