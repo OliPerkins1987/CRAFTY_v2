@@ -80,7 +80,7 @@ class CellTest {
 			caps.put("capA", 2.0);
 			caps.put("capB", 9.0);
 			caps.put("capC", 100.0);
-			setField(c, "capitals", caps);
+			c.getCapitals().putAll(caps);
 
 			// sensitivities for S1: capA^1 * capB^0.5 * capC^0 (ignored)
 			Map<String, Double> exps = new LinkedHashMap<>();
@@ -104,6 +104,39 @@ class CellTest {
 		});
 	}
 
+	@Test
+	void productivity_countsACapitalTheCellNeverGotAsZero() throws Throwable {
+		withServices(List.of("S1"), () -> {
+			Cell c = new Cell(1, 2);
+			c.getCapitals().put("capA", 2.0);
+
+			Aft a = mock(Aft.class);
+			when(a.isInteract()).thenReturn(true);
+			when(a.getSensByService()).thenReturn(Map.of("S1", Map.of("capA", 1.0, "capB", 1.0)));
+			when(a.getProductivityLevel()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 10.0)));
+
+			assertEquals(0.0, c.productivity(a, "S1"), 0.0, "capB missing: 2 * 0 * 10");
+
+			c.getCapitals().put("capB", 3.0);
+			assertEquals(60.0, c.productivity(a, "S1"), 1e-12, "capB given: 2 * 3 * 10");
+		});
+	}
+
+	@Test
+	void productivity_isNaN_whenACapitalIsExplicitlyNaN() throws Throwable {
+		withServices(List.of("S1"), () -> {
+			Cell c = new Cell(1, 2);
+			c.getCapitals().put("capA", Double.NaN); // as CRAFTY-react could hand over
+
+			Aft a = mock(Aft.class);
+			when(a.isInteract()).thenReturn(true);
+			when(a.getSensByService()).thenReturn(Map.of("S1", Map.of("capA", 1.0)));
+			when(a.getProductivityLevel()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 10.0)));
+
+			assertTrue(Double.isNaN(c.productivity(a, "S1")), "a NaN capital is a value, not a missing one");
+		});
+	}
+
 	// -----------------------------
 	// competitiveness(...)
 	// -----------------------------
@@ -117,7 +150,7 @@ class CellTest {
 			caps.put("capA", 2.0);
 			caps.put("capB", 9.0);
 			caps.put("capC", 100.0);
-			setField(c, "capitals", caps);
+			c.getCapitals().putAll(caps);
 
 			Map<String, Double> exps = new LinkedHashMap<>();
 			exps.put("capA", 1.0);
@@ -155,7 +188,7 @@ class CellTest {
 				Map<String, Double> caps = new ConcurrentHashMap<>();
 				caps.put("capA", 0.5);
 				caps.put("capB", 0.8);
-				setField(c, "capitals", caps);
+				c.getCapitals().putAll(caps);
 
 				Map<String, Double> exps = new LinkedHashMap<>();
 				exps.put("capA", 1.0);
@@ -201,7 +234,7 @@ class CellTest {
 
 				Map<String, Double> caps = new ConcurrentHashMap<>();
 				caps.put("capA", 4.0);
-				setField(c, "capitals", caps);
+				c.getCapitals().putAll(caps);
 
 				Map<String, Double> exps = new LinkedHashMap<>();
 				exps.put("capA", 2.0);
@@ -245,7 +278,7 @@ class CellTest {
 				Map<String, Double> caps = new ConcurrentHashMap<>();
 				caps.put("yield_potential", 0.6);
 				caps.put("infrastructure", 0.9);
-				setField(c, "capitals", caps);
+				c.getCapitals().putAll(caps);
 
 				Map<String, Double> exps = new LinkedHashMap<>();
 				exps.put("yield_potential", 1.0);
@@ -291,7 +324,7 @@ class CellTest {
 
 			Map<String, Double> caps = new ConcurrentHashMap<>();
 			caps.put("capA", 2.0);
-			setField(c, "capitals", caps);
+			c.getCapitals().putAll(caps);
 
 			// S1: capA^1 * level=1 => 2
 			// S2: capA^2 * level=5 => 4*5=20
@@ -324,7 +357,7 @@ class CellTest {
 
 			Map<String, Double> caps = new ConcurrentHashMap<>();
 			caps.put("capA", 3.0);
-			setField(c, "capitals", caps);
+			c.getCapitals().putAll(caps);
 
 			Map<String, Map<String, Double>> sensByService = new ConcurrentHashMap<>();
 			sensByService.put("S1", Map.of("capA", 1.0)); // => 3

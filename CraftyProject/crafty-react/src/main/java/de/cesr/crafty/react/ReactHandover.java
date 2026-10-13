@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.function.Function;
 
 import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.core.crafty.IndexedValues;
 import de.cesr.crafty.react.data.ReactInputException;
 import de.cesr.crafty.react.data.ReactStartupCheck;
 import de.cesr.crafty.react.decisions.CropManagement;
@@ -109,8 +110,8 @@ final class ReactHandover {
 		return new Counts(suitCapitals, costColumns, cells.length);
 	}
 
-	/** Puts one entry into one of every cell's maps: the value of the cell's unit. */
-	private void put(String key, double[] byUnit, Function<Cell, Map<String, Double>> map) {
+	/** Puts one entry into one of every cell's capitals or costs: the value of the cell's unit. */
+	private void put(String key, double[] byUnit, Function<Cell, IndexedValues> map) {
 		for (int i = 0; i < cells.length; i++) {
 			map.apply(cells[i]).put(key, byUnit[unitOfCell[i]]);
 		}

@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.core.crafty.IndexedValues;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
@@ -232,7 +233,7 @@ public class CellsToCSV {
 			}
 
 			case CAPITALS -> {
-				Map<String, Double> capitals = c.getCapitals();
+				IndexedValues capitals = c.getCapitals();
 
 				for (String capitalName : capitalsToWrite) {
 					values.add(csv(capitals != null ? capitals.get(capitalName) : null));

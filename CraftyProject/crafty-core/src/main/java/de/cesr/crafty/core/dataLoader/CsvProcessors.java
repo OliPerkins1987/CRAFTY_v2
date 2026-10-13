@@ -19,6 +19,7 @@ import java.util.stream.StreamSupport;
 
 import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.core.crafty.IndexedValues;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
@@ -56,6 +57,9 @@ import tech.tablesaw.io.csv.CsvReadOptions;
  *   (it does not fully implement RFC-style quoted CSV in the streaming path).
  * - The parallel stream in {@link #processCSV(Path, CsvKind)} assumes that the target {@link CsvKind#apply}
  *   implementation writes to thread-safe structures (e.g., ConcurrentHashMap) or otherwise handles concurrency.
+ *   The cell capital and cost loaders write only to the row's own cell, whose {@link IndexedValues} must not
+ *   be written by two threads at once. A file that lists the same X,Y twice breaks that: one of the two rows
+ *   can be lost (which row won was already unpredictable with maps).
  */
 
 /**
@@ -195,7 +199,7 @@ public class CsvProcessors {
 	        return;
 	    }
 
-	    Map<String, Double> capitals = c.getCapitals();
+	    IndexedValues capitals = c.getCapitals();
 
 	    for (String capitalName : CapitalUpdater.getCapitalsList()) {
 
@@ -337,12 +341,12 @@ public class CsvProcessors {
 	 * copies drifting apart as cost types are added.
 	 */
 	private static void associateCostsToCells(Map<String, Integer> indexof, String data, List<String> aftLabels,
-			Function<Cell, Map<String, Double>> targetMap) {
+			Function<Cell, IndexedValues> targetMap) {
 		associateCostsToCells(indexof, data, aftLabels, targetMap, null);
 	}
 
 	private static void associateCostsToCells(Map<String, Integer> indexof, String data, List<String> aftLabels,
-			Function<Cell, Map<String, Double>> targetMap, String sharedColumn) {
+			Function<Cell, IndexedValues> targetMap, String sharedColumn) {
 		String[] row = COMMA.split(data, -1);
 		int x = (int) Utils.sToD(row[indexof.get("X")]);
 		int y = (int) Utils.sToD(row[indexof.get("Y")]);
@@ -352,7 +356,7 @@ public class CsvProcessors {
 			return;
 		}
 
-		Map<String, Double> costs = targetMap.apply(c);
+		IndexedValues costs = targetMap.apply(c);
 
 		/*
 		 * A shared column carries one value for the whole cell that applies to every

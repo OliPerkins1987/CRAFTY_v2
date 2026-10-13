@@ -29,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 import de.cesr.crafty.core.cli.Config;
 import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.core.crafty.IndexedValues;
 import de.cesr.crafty.core.crafty.Region;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
@@ -592,7 +593,7 @@ class ReactiveUpdaterTest {
 		Map<String, Cell> cells = toyCells();
 		ReactiveUpdater updater = new ReactiveUpdater(inputs, cells);
 		int unit = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions()).unitOf("1,1");
-		Map<String, Double> capitals = cells.get("1,1").getCapitals();
+		IndexedValues capitals = cells.get("1,1").getCapitals();
 
 		updater.step(); // year zero, during initialisation
 		double yearZero = capitals.get("IntC3C_irrig_suit");

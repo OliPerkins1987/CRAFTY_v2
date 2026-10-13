@@ -20,10 +20,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * This class is intentionally lightweight and focused on state storage; higher-level behaviour
  * (e.g., utility calculation, transitions) is implemented in child class {@link Cell}
  *
+ * Capitals and production costs are stored as {@link IndexedValues}: a double[] per cell, with each name's
+ * position shared by every cell, which takes far less memory than a map per cell. They answer the same calls
+ * as the maps they replace, with the same results (a value never put is missing, not 0).
+ *
  * Concurrency note:
- * Capitals are stored in a {@link ConcurrentHashMap} because capital values may be read frequently during
- * a step and, in some configurations, accessed from parallel computations. Callers should still ensure
- * updates are performed in a controlled way (e.g., by step/updater logic) to avoid inconsistent states.
+ * Different cells may be filled from parallel computations (the CSV loaders fill one row, so one cell, per
+ * thread), but two threads must not write to the same cell's capitals or costs at the same time. Callers should
+ * still ensure updates are performed in a controlled way (e.g., by step/updater logic) to avoid inconsistent states.
  */
 
 /**
@@ -31,19 +35,27 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  */
 public abstract class AbstractCell {
+	// Where each capital, and each AFT for each cost, sits in a cell's values; shared by every cell. A cost has
+	// its own index so that its values cover only the AFTs that pay it.
+	private static final IndexedValues.Index CAPITAL_NAMES = new IndexedValues.Index();
+	private static final IndexedValues.Index NFERT_COST_AFTS = new IndexedValues.Index();
+	private static final IndexedValues.Index IRRIGATION_COST_AFTS = new IndexedValues.Index();
+	private static final IndexedValues.Index INTENSITY_COST_AFTS = new IndexedValues.Index();
+	private static final IndexedValues.Index STOCKING_COST_AFTS = new IndexedValues.Index();
+
 //	static int size = 1;
 	private String id;
 	int x, y;
-	private ConcurrentHashMap<String, Double> capitals = new ConcurrentHashMap<>();
+	private IndexedValues capitals = new IndexedValues(CAPITAL_NAMES);
 	private ConcurrentHashMap<String, Double> ServicesTax = new ConcurrentHashMap<>();
 	private ConcurrentHashMap<String, Double> landTax = new ConcurrentHashMap<>();
 	private ConcurrentHashMap<String, Double> capitalsAdjusment = new ConcurrentHashMap<>();
 
 	// Production cost storage (AFT label -> $/ha)
-	private ConcurrentHashMap<String, Double> nfertCosts = new ConcurrentHashMap<>();
-	private ConcurrentHashMap<String, Double> irrigationCosts = new ConcurrentHashMap<>();
-	private ConcurrentHashMap<String, Double> intensityCosts = new ConcurrentHashMap<>();
-	private ConcurrentHashMap<String, Double> stockingCosts = new ConcurrentHashMap<>();
+	private IndexedValues nfertCosts = new IndexedValues(NFERT_COST_AFTS);
+	private IndexedValues irrigationCosts = new IndexedValues(IRRIGATION_COST_AFTS);
+	private IndexedValues intensityCosts = new IndexedValues(INTENSITY_COST_AFTS);
+	private IndexedValues stockingCosts = new IndexedValues(STOCKING_COST_AFTS);
 
 	private double giveUpSubsidy = 0.0;
 
@@ -150,7 +162,7 @@ public abstract class AbstractCell {
 		this.owner = owner;
 	}
 
-	public ConcurrentHashMap<String, Double> getCapitals() {
+	public IndexedValues getCapitals() {
 		return capitals ;
 	}
 
@@ -212,7 +224,7 @@ public abstract class AbstractCell {
 		this.id = id;
 	}
 
-	public void setCapitals(ConcurrentHashMap<String, Double> capitals) {
+	public void setCapitals(IndexedValues capitals) {
 		this.capitals = capitals;
 	}
 
@@ -228,19 +240,19 @@ public abstract class AbstractCell {
 		return capitalsAdjusment;
 	}
 
-	public ConcurrentHashMap<String, Double> getNfertCosts() {
+	public IndexedValues getNfertCosts() {
 		return nfertCosts;
 	}
 
-	public ConcurrentHashMap<String, Double> getIrrigationCosts() {
+	public IndexedValues getIrrigationCosts() {
 		return irrigationCosts;
 	}
 
-	public ConcurrentHashMap<String, Double> getIntensityCosts() {
+	public IndexedValues getIntensityCosts() {
 		return intensityCosts;
 	}
 
-	public ConcurrentHashMap<String, Double> getStockingCosts() {
+	public IndexedValues getStockingCosts() {
 		return stockingCosts;
 	}
 
