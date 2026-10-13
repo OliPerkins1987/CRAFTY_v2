@@ -11,6 +11,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * - The current owning manager ({@link Aft}) and region assignment.
  * - Capital used by production/utility calculations.
  * - Current service production vector ({@link #currentProd}) and the last computed utility value.
+ *   Production is per unit area (e.g. t/ha), like the capitals it comes from.
+ * - The cell's land area ({@link #area}), 1 unless {@code use_cell_area} is on. It is used only where
+ *   cells are added up into supply ({@link Cell#currentSupply(int)}); everything per cell stays per unit area.
  * - mask type used for masks and protected areas
  * - Optional visual attributes used for outputs and plotting.
  *
@@ -45,6 +48,8 @@ public abstract class AbstractCell {
 	private double giveUpSubsidy = 0.0;
 
 	private double[] currentProd;
+	// Land area, in the unit production is per (ha for t/ha yields); set by CellAreaLoader from the GIS file.
+	private double area = 1.0;
 	private double currentUtility;
 	String CurrentRegion;
 	private Aft owner;
@@ -189,6 +194,14 @@ public abstract class AbstractCell {
 
 	public void setCurrentProd(double[] currentProd) {
 		this.currentProd = currentProd;
+	}
+
+	public double getArea() {
+		return area;
+	}
+
+	public void setArea(double area) {
+		this.area = area;
 	}
 
 	public String getId() {

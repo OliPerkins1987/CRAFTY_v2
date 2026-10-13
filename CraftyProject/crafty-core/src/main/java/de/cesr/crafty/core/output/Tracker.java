@@ -42,8 +42,10 @@ import de.cesr.crafty.core.utils.general.Utils;
  * Implementation notes:
  * - Aggregation is performed with {@link ConcurrentHashMap#merge(Object, Object, java.util.function.BiFunction)}
  *   and uses parallel streams over region cells for performance.
- * - The resulting structure is a nested map: AFT label -> (service name -> summed production),
+ * - The resulting structure is a nested map: AFT label -> (service name -> summed supply),
  *   with an extra "AggregateAFT" column storing the number of cells/agents for that AFT.
+ *   When use_cell_area is on, supply is production x cell area and an "AggregateArea" column gives the
+ *   land area of the same cells.
  * - {@link #writeCSV(ConcurrentHashMap, String)} writes a rectangular CSV table, using the union of all
  *   nested keys as column headers and filling missing values with 0.
  */
@@ -55,6 +57,7 @@ import de.cesr.crafty.core.utils.general.Utils;
 
 public class Tracker extends AbstractUpdater {
 	private static final CustomLogger LOGGER = new CustomLogger(Tracker.class);
+	static final String AGGREGATE_AREA = "AggregateArea";
 
 	public static Map<String, Map<Integer, Map<String, Integer>>> sankeydata = new ConcurrentHashMap<>();
 
@@ -101,6 +104,10 @@ public class Tracker extends AbstractUpdater {
 			AFTsLoader.hashAgentNbr.forEach((label, a) -> {
 				container.get(label).put("AggregateAFT", (double) a);
 			});
+			if (ConfigLoader.config.use_cell_area) {
+				// The same cells AFTsLoader.hashAgentNbr counts.
+				accumulateCellArea(CellsLoader.hashCell.values(), container);
+			}
 			ConcurrentHashMap<String, Double> totalSupplyTracked = new ConcurrentHashMap<>();
 			container.keySet().stream().sorted().forEach(aft -> container.get(aft).entrySet().stream()
 					.sorted(Map.Entry.comparingByKey())
@@ -172,6 +179,9 @@ public class Tracker extends AbstractUpdater {
 			AFTsLoader.hashAgentNbrRegions.get(regionName).forEach((label, a) -> {
 				container.get(label).put("AggregateAFT", (double) a);
 			});
+			if (ConfigLoader.config.use_cell_area) {
+				accumulateCellArea(CellsLoader.regions.get(regionName).getCells().values(), container);
+			}
 			writeMatrixToCSV(container, ConfigLoader.config.output_folder_name + File.separator + "region_" + regionName
 					+ File.separator + "SupplyTracker_" + Timestep.getCurrentYear() + ".csv");
 		}
@@ -184,8 +194,21 @@ public class Tracker extends AbstractUpdater {
 			}
 			for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
 				container.get(cell.getOwner().getLabel()).merge(ServiceSet.getServicesList().get(i),
-						cell.getCurrentProd()[i], Double::sum);
+						cell.currentSupply(i), Double::sum);
 			}
+		}
+	}
+
+	/**
+	 * Adds the "AggregateArea" column: the land area of each AFT's cells, over the same cells as
+	 * "AggregateAFT" counts (a cell with no owner counts as "Abandoned"). AFTs with no cells get 0.
+	 */
+	private static void accumulateCellArea(Collection<Cell> cells, Map<String, Map<String, Double>> container) {
+		container.values().forEach(row -> row.put(AGGREGATE_AREA, 0.0));
+		for (Cell cell : DeterministicAggregation.cellsInStableOrder(cells)) {
+			String label = cell.getOwner() != null ? cell.getOwner().getLabel() : "Abandoned";
+			container.computeIfAbsent(label, k -> new ConcurrentHashMap<>()).merge(AGGREGATE_AREA, cell.getArea(),
+					Double::sum);
 		}
 	}
 

@@ -88,6 +88,9 @@ public class Config {
     public boolean use_normalised_price_competition = false;
     public double most_competitive_aft_probability = 0.85;
     public boolean averaged_residual_demand_per_cell = false;
+    // Cell area: when true, the GIS file's Area column gives each cell its area and supply adds up
+    // production x area. When false, every cell counts as 1 and the Area column is not read.
+    public boolean use_cell_area = false;
     public boolean use_category_based_give_in = true;
     public boolean use_cell_behaviour_model = true;
     // Neighbouring effects
@@ -176,6 +179,7 @@ public class Config {
                 + "|-> use_normalised_price_competition=" + use_normalised_price_competition + "\n"
                 + "|-> most_competitive_aft_probability=" + most_competitive_aft_probability + "\n"
                 + "|-> averaged_residual_demand_per_cell=" + averaged_residual_demand_per_cell + "\n"
+                + "|-> use_cell_area=" + use_cell_area + "\n"
                 + "|-> use_category_based_give_in=" + use_category_based_give_in + "\n"
                 + "|-> use_cell_behaviour_model=" + use_cell_behaviour_model + "\n" + "|-> use_neighbour_priority="
                 + use_neighbour_priority + "\n" + "|-> neighbour_priority_probability=" + neighbour_priority_probability

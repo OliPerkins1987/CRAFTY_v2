@@ -17,8 +17,16 @@ import tech.tablesaw.io.csv.CsvReadOptions;
 public class GisLoader {
 	private static final CustomLogger LOGGER = new CustomLogger(GisLoader.class);
 	public static ConcurrentHashMap<String, Integer> regionIDs = new ConcurrentHashMap<>();
+	// The GIS file found by the last loadGisData(), whether or not it could be read; null if none was
+	// found. CellAreaLoader reads the cells' Area column from this same file.
+	private static Path gisFile;
+
+	public static Path getGisFile() {
+		return gisFile;
+	}
 
 	public void loadGisData() {
+		gisFile = null;
 		try {
 
 			Path path;
@@ -27,6 +35,7 @@ public class GisLoader {
 			} else {
 				path = PathTools.fileFilter(true, File.separator + "GIS" + File.separator).get(0);
 			}
+			gisFile = path;
 			ProjectLoader.WorldName = path.toFile().getName().replace("_Regions", "").replace(".csv", "");
 			LOGGER.info("WorldName = " + ProjectLoader.WorldName);
 			LOGGER.info("Read GIS data = " + path);

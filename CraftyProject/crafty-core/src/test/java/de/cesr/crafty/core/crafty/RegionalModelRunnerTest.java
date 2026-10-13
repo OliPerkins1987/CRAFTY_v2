@@ -64,6 +64,7 @@ class RegionalModelRunnerTest {
 		if (ConfigLoader.config != null) {
 			ConfigLoader.config.use_explicit_price_utility = false;
 			ConfigLoader.config.use_price_only_utility = false;
+			ConfigLoader.config.use_cell_area = false;
 		}
 
 		// restore ConfigLoader.config
@@ -131,9 +132,11 @@ class RegionalModelRunnerTest {
 			Cell c1 = mock(Cell.class);
 			double[] currentProd= {1,2};
 			when(c1.getCurrentProd()).thenReturn(currentProd);
+			when(c1.currentSupply(anyInt())).thenCallRealMethod();
 			double[] currentProd2= {3,4};
 			Cell c2 = mock(Cell.class);
 			when(c2.getCurrentProd()).thenReturn(currentProd2);
+			when(c2.currentSupply(anyInt())).thenCallRealMethod();
 
 			ConcurrentHashMap<String, Cell> cells = new ConcurrentHashMap<>();
 			cells.put("0,0", c1);
@@ -150,6 +153,79 @@ class RegionalModelRunnerTest {
 
 			verify(c1, times(1)).calculateCurrentProductivity();
 			verify(c2, times(1)).calculateCurrentProductivity();
+		}
+	}
+
+	@Test
+	void regionalSupply_weightsEachCellByItsArea_onlyWhenCellAreaIsOn() throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1", "S2"));
+
+			Cell c1 = cellWith(new double[] { 1, 2 }, 10.0);
+			Cell c2 = cellWith(new double[] { 3, 4 }, 0.5);
+			installRegion("R1", regionOf(c1, c2));
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+
+			// Off: areas are ignored, every cell counts as 1.
+			ConfigLoader.config.use_cell_area = false;
+			r.regionalSupply();
+			assertEquals(4.0, r.getRegionalSupply().get("S1"), 1e-12);
+			assertEquals(6.0, r.getRegionalSupply().get("S2"), 1e-12);
+
+			// On: 1 x 10 + 3 x 0.5 and 2 x 10 + 4 x 0.5.
+			ConfigLoader.config.use_cell_area = true;
+			r.regionalSupply();
+			assertEquals(11.5, r.getRegionalSupply().get("S1"), 1e-12);
+			assertEquals(22.0, r.getRegionalSupply().get("S2"), 1e-12);
+		}
+	}
+
+	@Test
+	void supplyUpdatedAfterACompetitionBatch_matchesAFullRecount_withUnequalAreas() throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1", "S2"));
+			ConfigLoader.config.use_cell_area = true;
+
+			double[] p1 = { 1, 2 };
+			Cell c1 = cellWith(p1, 10.0);
+			// A new owner on c1: its production changes when it is recalculated.
+			doAnswer(inv -> {
+				p1[0] = 5;
+				p1[1] = 0;
+				return null;
+			}).when(c1).calculateCurrentProductivity();
+			Cell c2 = cellWith(new double[] { 3, 4 }, 0.5);
+			installRegion("R1", regionOf(c1, c2));
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+
+			invokePrivate(r, "computeRegionsSupply");
+			assertEquals(11.5, r.getRegionalSupply().get("S1"), 1e-12);
+			assertEquals(22.0, r.getRegionalSupply().get("S2"), 1e-12);
+
+			// The batch update adds only c1's change: (5 - 1) x 10 and (0 - 2) x 10.
+			Method batch = RegionalModelRunner.class.getDeclaredMethod("applyProductivityChangeToRegionalSupply",
+					java.util.List.class);
+			batch.setAccessible(true);
+			batch.invoke(r, java.util.List.of(c1));
+			double s1AfterBatch = r.getRegionalSupply().get("S1");
+			double s2AfterBatch = r.getRegionalSupply().get("S2");
+			assertEquals(51.5, s1AfterBatch, 1e-12);
+			assertEquals(2.0, s2AfterBatch, 1e-12);
+
+			// A full recount from the cells gives the same totals.
+			invokePrivate(r, "computeRegionsSupply");
+			assertEquals(r.getRegionalSupply().get("S1"), s1AfterBatch, 1e-12);
+			assertEquals(r.getRegionalSupply().get("S2"), s2AfterBatch, 1e-12);
 		}
 	}
 
@@ -267,6 +343,48 @@ class RegionalModelRunnerTest {
 	}
 
 	@Test
+	void calculeMarginal_averagesOverRegionArea_whenCellAreaIsOn() throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedStatic<ServicesUpdater> su = Mockito.mockStatic(ServicesUpdater.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1"));
+			ss.when(ServiceSet::getPenalise_Oversupply).thenReturn(new ConcurrentHashMap<>(Map.of("S1", false)));
+
+			su.when(ServicesUpdater::getDemandByRegions).thenReturn(Map.of("R1", Map.of("S1", 100.0)));
+			su.when(ServicesUpdater::getWeightByRegions).thenReturn(Map.of("R1", Map.of("S1", 0.5)));
+
+			ConfigLoader.config.averaged_residual_demand_per_cell = true;
+
+			// Two cells, 5 units of land between them.
+			Cell c1 = new Cell(0, 0);
+			Cell c2 = new Cell(1, 0);
+			c1.setArea(2.0);
+			c2.setArea(3.0);
+			installRegion("R1", regionOf(c1, c2));
+
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 80.0)));
+
+			// Off: per cell. 20 / 2 cells x 0.5 / 100 = 0.05
+			ConfigLoader.config.use_cell_area = false;
+			invokePrivate(r, "computeMarginal");
+			assertEquals(0.05, r.getMarginal().get("S1"), 1e-12);
+
+			// On: per unit area. 20 / 5 x 0.5 / 100 = 0.02
+			ConfigLoader.config.use_cell_area = true;
+			invokePrivate(r, "computeMarginal");
+			assertEquals(0.02, r.getMarginal().get("S1"), 1e-12);
+		} finally {
+			ConfigLoader.config.averaged_residual_demand_per_cell = false;
+		}
+	}
+
+	@Test
 	void calculeDistributionMean_sumsUtilityDividedByAgentCount_andAddsZerosForMissingAfts() throws Exception {
 		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
 				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
@@ -330,6 +448,25 @@ class RegionalModelRunnerTest {
 	// =========================================================
 	// Helpers
 	// =========================================================
+
+	/** A mock cell with fixed production and area, whose supply is the real currentSupply(). */
+	private static Cell cellWith(double[] production, double area) {
+		Cell c = mock(Cell.class);
+		when(c.getCurrentProd()).thenReturn(production);
+		when(c.getArea()).thenReturn(area);
+		when(c.currentSupply(anyInt())).thenCallRealMethod();
+		return c;
+	}
+
+	private static Region regionOf(Cell... cells) {
+		ConcurrentHashMap<String, Cell> map = new ConcurrentHashMap<>();
+		for (int i = 0; i < cells.length; i++) {
+			map.put(i + ",0", cells[i]);
+		}
+		Region region = new Region("R1");
+		region.setCells(map);
+		return region;
+	}
 
 	private static Region mockRegion(String name, ConcurrentHashMap<String, Cell> cells, int sizeOverride) {
 		Region r = mock(Region.class);

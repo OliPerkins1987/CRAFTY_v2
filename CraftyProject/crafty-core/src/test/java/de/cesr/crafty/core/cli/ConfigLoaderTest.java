@@ -699,4 +699,28 @@ class ConfigLoaderTest {
         assertTrue(failure.getMessage().contains("reactive_fertlizer"),
                 "The unknown key must be named. Got: " + failure.getMessage());
     }
+
+    // =========================================================
+    // Cell area
+    // =========================================================
+
+    @Test
+    void cellAreaShouldBeOffByDefault() {
+        assertFalse(new Config().use_cell_area);
+    }
+
+    @Test
+    void cellAreaShouldLoadFromYaml() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("cell-area-config.yaml");
+        Files.writeString(configFile, "use_cell_area: true\n");
+        ConfigLoader.configPath = configFile.toString();
+
+        Config cfg = invokeLoadConfig();
+
+        assertTrue(cfg.use_cell_area);
+    }
 }

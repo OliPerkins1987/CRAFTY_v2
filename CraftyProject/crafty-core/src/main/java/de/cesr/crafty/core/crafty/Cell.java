@@ -23,6 +23,8 @@ import de.cesr.crafty.core.utils.general.DeterministicRandom;
  *   capitals raised to AFT-specific sensitivity exponents (service -> capital -> exponent),
  *   multiplied by an AFT-specific productivity level for the service.
  *   {@link #calculateCurrentProductivity()} fills the full production vector for all services.
+ *   {@link #currentSupply(int)} is what the cell adds to supply: production times its area when
+ *   {@code use_cell_area} is on, production alone otherwise.
  *
  * - Behavioural land abandonment (give-up):
  *   {@link #giveUp(RegionalModelRunner, ConcurrentHashMap)} compares the cell utility to the mean utility
@@ -135,6 +137,16 @@ public class Cell extends AbstractCell {
 		for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
 			getCurrentProd()[i] = productivity(getOwner(), services[i]);
 		}
+	}
+
+	/**
+	 * What this cell adds to the supply of one service. Production is per unit area, so with
+	 * {@code use_cell_area} on this is production times the cell's area (e.g. t/ha x ha = t); with it off
+	 * it is production alone, as before cell areas existed. This is the only place area enters supply.
+	 */
+	public double currentSupply(int serviceIndex) {
+		double production = getCurrentProd()[serviceIndex];
+		return ConfigLoader.config.use_cell_area ? production * getArea() : production;
 	}
 
 	void giveUp(RegionalModelRunner r, ConcurrentHashMap<String, Double> distributionMean) {

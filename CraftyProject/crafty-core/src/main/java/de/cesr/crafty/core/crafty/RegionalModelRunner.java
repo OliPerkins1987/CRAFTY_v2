@@ -33,7 +33,8 @@ import de.cesr.crafty.core.utils.general.Utils;
  * Executes the CRAFTY decision cycle for a single region and a single simulation year.
  *
  * {@code RegionalModelRunner} encapsulates all region level calculations required to:
- * - Compute supply (per service) from cell-level productivity.
+ * - Compute supply (per service) from cell-level productivity ({@link Cell#currentSupply(int)}: times
+ *   each cell's area when use_cell_area is on).
  * - Derive marginal utilities from demand–supply gaps (optionally averaged per cell).
  * - Apply region-level service taxes/subsidies and AFT-level land taxes/subsidies (cached on each AFT).
  * - Compute cell utilities, distribution statistics (mean utility per AFT), and utility ranges.
@@ -84,6 +85,9 @@ public class RegionalModelRunner {
 
     double score;
     private double maxUtility, minUtility;
+    // The region's total cell area, and the cell count it was summed for (see residualDivisor()).
+    private double regionArea;
+    private int regionAreaCellCount = -1;
     public Region R;
 
     public ListenerByRegion listner;
@@ -158,7 +162,7 @@ public class RegionalModelRunner {
         setRegionalSupply(new ConcurrentHashMap<>());
         for (Cell c : DeterministicAggregation.cellsInStableOrder(R.getCells().values())) {
             for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
-                getRegionalSupply().merge(ServiceSet.getServicesList().get(i), c.getCurrentProd()[i], Double::sum);
+                getRegionalSupply().merge(ServiceSet.getServicesList().get(i), c.currentSupply(i), Double::sum);
             }
         }
     }
@@ -286,13 +290,30 @@ public class RegionalModelRunner {
 
             marg = marg * serviceWeight;
             if (ConfigLoader.config.averaged_residual_demand_per_cell) {
-                marg = marg / R.getCells().size();
+                marg = marg / residualDivisor();
             }
             if (ConfigLoader.config.use_relative_marginal_utility) {
                 marg = serviceDemand != 0 ? marg / serviceDemand : marg;
             }
             getMarginal().put(serviceName, marg);
         });
+    }
+
+    /**
+     * What averaged_residual_demand_per_cell divides the residual by: the region's total cell area when
+     * use_cell_area is on (residual per unit area), its number of cells otherwise. The area is summed in a
+     * fixed cell order, so it is reproducible, and summed again only if the region's cell count changes.
+     */
+    private double residualDivisor() {
+        int cellCount = R.getCells().size();
+        if (!ConfigLoader.config.use_cell_area) {
+            return cellCount;
+        }
+        if (cellCount != regionAreaCellCount) {
+            regionArea = DeterministicAggregation.sumCells(R.getCells().values(), Cell::getArea);
+            regionAreaCellCount = cellCount;
+        }
+        return regionArea;
     }
 
     public void regionalSupply() {
@@ -461,11 +482,11 @@ public class RegionalModelRunner {
 
         for (Cell c : cells) {
             for (int i = 0; i < services.size(); i++) {
-                before.merge(services.get(i), c.getCurrentProd()[i], Double::sum);
+                before.merge(services.get(i), c.currentSupply(i), Double::sum);
             }
             c.calculateCurrentProductivity();
             for (int i = 0; i < services.size(); i++) {
-                after.merge(services.get(i), c.getCurrentProd()[i], Double::sum);
+                after.merge(services.get(i), c.currentSupply(i), Double::sum);
             }
         }
 

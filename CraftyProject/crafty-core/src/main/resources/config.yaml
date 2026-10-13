@@ -27,6 +27,7 @@ costs_directory: ''                            # Directory containing production
 
 most_competitive_aft_probability: 0.8         # Probability of selecting the highest-utility AFT for cell
 averaged_residual_demand_per_cell: false      # Averaged residual demand for each cell
+use_cell_area: false                          # Supply = production x cell area, areas from the GIS file's Area column; false: every cell counts as 1
 
 # Neighbouring effects
 use_neighbour_priority: true                   # Prioritise AFTs in neighbouring cells for land competition

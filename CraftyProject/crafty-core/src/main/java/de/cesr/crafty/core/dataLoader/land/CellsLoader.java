@@ -24,6 +24,8 @@ import de.cesr.crafty.core.utils.file.PathTools;
  * {@code CellsLoader} is responsible for building the in-memory representation of the model world:
  * - Reads the baseline map CSV and creates {@link Cell} instances (via {@link CsvProcessors} / {@link CsvKind#BASELINE}).
  * - Loads auxiliary GIS attributes (via {@link GisLoader}) that assign region identifiers and other spatial fields.
+ * - When {@code config.use_cell_area} is on, gives each cell its area from the GIS file's Area column
+ *   (via {@link CellAreaLoader}).
  * - Builds the region container(s) ({@link #regions}) either as:
  *   - multiple regions when {@code config.regionalisation} is enabled, or
  *   - a single “world” region containing all cells otherwise.
@@ -69,6 +71,9 @@ public class CellsLoader {
 		AFTsLoader.hashAgentNbr();
 
 		new GisLoader().loadGisData();
+		if (ConfigLoader.config.use_cell_area) {
+			CellAreaLoader.load();
+		}
 		regionsInitialize();
 		AFTsLoader.hashAgentNbrRegions();
 		AFTsLoader.hashAgentNbr();

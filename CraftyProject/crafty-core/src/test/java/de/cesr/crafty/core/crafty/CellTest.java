@@ -13,6 +13,7 @@ import org.junit.jupiter.api.function.Executable;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import de.cesr.crafty.core.cli.Config;
 import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.output.Listener;
@@ -352,6 +353,40 @@ class CellTest {
 			Cell c = new Cell(0, 0);
 			assertThrows(ArrayIndexOutOfBoundsException.class,
 					() -> c.calculateCurrentProductivity(new String[] { "onlyOne" }));
+		});
+	}
+
+	// -----------------------------
+	// area and currentSupply(...)
+	// -----------------------------
+
+	@Test
+	void area_defaultsToOne() {
+		assertEquals(1.0, new Cell(0, 0).getArea(), 0.0);
+	}
+
+	@Test
+	void currentSupply_isProductionTimesArea_onlyWhenCellAreaIsOn() throws Throwable {
+		withServices(List.of("S1", "S2"), () -> {
+			Config cfg = (Config) ensureConfigInstance();
+			boolean before = cfg.use_cell_area;
+			try {
+				Cell c = new Cell(0, 0);
+				c.getCurrentProd()[0] = 2.0; // t/ha
+				c.getCurrentProd()[1] = 0.5;
+				c.setArea(2500.0); // ha
+
+				cfg.use_cell_area = true;
+				assertEquals(5000.0, c.currentSupply(0), 1e-9);
+				assertEquals(1250.0, c.currentSupply(1), 1e-9);
+
+				// Off: the area is ignored and supply is production, exactly as before cell areas existed.
+				cfg.use_cell_area = false;
+				assertEquals(2.0, c.currentSupply(0), 0.0);
+				assertEquals(0.5, c.currentSupply(1), 0.0);
+			} finally {
+				cfg.use_cell_area = before;
+			}
 		});
 	}
 
