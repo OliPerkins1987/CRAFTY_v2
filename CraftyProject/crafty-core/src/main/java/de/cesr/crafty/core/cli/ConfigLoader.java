@@ -144,6 +144,7 @@ public class ConfigLoader {
 		validateGiveUpConfig();
 		validateTwinnedAftConfig();
 		validatePriceUtilityConfig();
+		validateConversionCostConfig();
 		validateReactiveConfig();
 		try {
 			loadExternalRScriptRunnerConfig();
@@ -174,6 +175,48 @@ public class ConfigLoader {
 		if (config.use_explicit_price_utility && config.use_price_only_utility) {
 			LOGGER.fatal("use_explicit_price_utility and use_price_only_utility are mutually exclusive");
 		}
+	}
+
+	/**
+	 * Conversion cost is a $/ha cost, so the run stops if it is switched on without
+	 * price-explicit utility, the only utility mode with costs. It is designed for
+	 * the normalised-price comparison, so the run warns if that is off.
+	 */
+	static void validateConversionCostConfig() {
+		if (config == null) return;
+		String error = conversionCostConfigError(config);
+		if (error != null) {
+			LOGGER.fatal(error);
+			return;
+		}
+		String warning = conversionCostConfigWarning(config);
+		if (warning != null) {
+			LOGGER.warn(warning);
+		}
+	}
+
+	/**
+	 * The rule behind {@link #validateConversionCostConfig()}, kept separate because
+	 * LOGGER.fatal exits the JVM and so cannot be exercised from a test.
+	 *
+	 * @return the message to stop the run with, or null if the settings are valid
+	 */
+	static String conversionCostConfigError(Config c) {
+		if (c.use_conversion_cost && !c.use_explicit_price_utility) {
+			return "use_conversion_cost needs use_explicit_price_utility: true. Conversion cost is a $/ha cost "
+					+ "and only means something against price-explicit utility, which is the only mode with costs.";
+		}
+		return null;
+	}
+
+	/** @return the warning to log, or null if there is nothing to warn about */
+	static String conversionCostConfigWarning(Config c) {
+		if (c.use_conversion_cost && !c.use_normalised_price_competition) {
+			return "use_conversion_cost is on but use_normalised_price_competition is off. Conversion cost is "
+					+ "designed for the normalised-price comparison; with other competition paths the model may "
+					+ "produce odd results.";
+		}
+		return null;
 	}
 
 	/**

@@ -39,6 +39,7 @@ class ReactHandoverTest {
 	@TempDir
 	Path dir;
 
+	private ReactInputs inputs;
 	private DecisionUnits units;
 	private CropDecisions crops;
 	private PastureDecisions pasture;
@@ -60,7 +61,7 @@ class ReactHandoverTest {
 		if (forestryFiles) {
 			ReactToyData.forestry(dir);
 		}
-		ReactInputs inputs = ReactInputs.create(ReactConfig.defaults(),
+		inputs = ReactInputs.create(ReactConfig.defaults(),
 				context.prices((service, region, year) -> region.equals("South") ? 150 : 300).build());
 		units = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions());
 		crops = CropDecisions.create(inputs, units);
@@ -80,9 +81,10 @@ class ReactHandoverTest {
 		cells.put("2,1", new Cell(2, 1));
 	}
 
+	/** Hands over with the context's production levels, as the updater does. */
 	private ReactHandover.Counts handOver() {
-		return ReactHandover.build(cells, units).write(crops.managements().values(), pasture.managements().values(),
-				forestry.managements().values());
+		return ReactHandover.build(cells, units, inputs.context()::productionLevel).write(crops.managements().values(),
+				pasture.managements().values(), forestry.managements().values());
 	}
 
 	private CropManagement crop(String label) {
@@ -244,8 +246,101 @@ class ReactHandoverTest {
 		decide(ReactToyData.context(dir));
 		cells.put("9,9", new Cell(9, 9));
 
-		ReactInputException e = assertThrows(ReactInputException.class, () -> ReactHandover.build(cells, units));
+		ReactInputException e = assertThrows(ReactInputException.class,
+				() -> ReactHandover.build(cells, units, inputs.context()::productionLevel));
 
 		assertTrue(e.getMessage().contains("9,9"), e.getMessage());
+	}
+
+	// ---- costs scaled by the production level (35a) ----
+
+	@Test
+	void eachCostIsScaledByTheAftsProductionLevelForItsServiceAndTheSuitIsNot() {
+		// Asked for the AFT's own service: any other service would give 1 here.
+		decide(ReactToyData.context(dir).productionLevels((aft, service) -> aft.equals("IntC3C_irrig")
+				&& service.equals("C3cereals") ? 0.5 : aft.equals("IntP") && service.equals("Pasture") ? 0.25 : 1.0));
+
+		ReactHandover.Counts counts = handOver();
+
+		for (Map.Entry<String, Cell> entry : cells.entrySet()) {
+			int unit = units.unitOf(entry.getKey());
+			Cell cell = entry.getValue();
+			CropManagement intC3C = crop("IntC3C_irrig");
+			assertEquals(intC3C.yield()[unit], cell.getCapitals().get("IntC3C_irrig_suit"), "the yield is not scaled");
+			assertEquals(intC3C.nitrogenCost()[unit] * 0.5, cell.getNfertCosts().get("IntC3C_irrig"));
+			assertEquals(intC3C.irrigationCost()[unit] * 0.5, cell.getIrrigationCosts().get("IntC3C_irrig"));
+			assertEquals(intC3C.intensityCost()[unit] * 0.5, cell.getIntensityCosts().get("IntC3C_irrig"));
+			assertEquals(crop("ExtC3C").nitrogenCost()[unit], cell.getNfertCosts().get("ExtC3C"), "ExtC3C is at 1");
+			PastureManagement intP = pastureAft("IntP");
+			assertEquals(intP.production()[unit], cell.getCapitals().get("IntP_suit"), "the production is not scaled");
+			assertEquals(intP.intensityCost()[unit] * 0.25, cell.getIntensityCosts().get("IntP"));
+			assertEquals(intP.stockingCost()[unit] * 0.25, cell.getStockingCosts().get("IntP"));
+		}
+		assertEquals(new ReactHandover.Counts(3, 7, 3, Map.of("IntC3C_irrig", 0.5, "IntP", 0.25)), counts);
+	}
+
+	@Test
+	void aForestryAftsRotationCostIsScaledAndItsYieldIsNot() {
+		decideWithForestry(ReactToyData.context(dir).withForestry()
+				.productionLevels((aft, service) -> aft.equals("IntBF") && service.equals("Hardwood") ? 0.75 : 1.0));
+
+		ReactHandover.Counts counts = handOver();
+
+		ForestryManagement intBF = forestry.managements().get("IntBF");
+		ForestryManagement extBF = forestry.managements().get("ExtBF");
+		for (Map.Entry<String, Cell> entry : cells.entrySet()) {
+			int unit = units.unitOf(entry.getKey());
+			Cell cell = entry.getValue();
+			assertEquals(intBF.yield()[unit], cell.getCapitals().get("IntBF_suit"));
+			assertEquals(intBF.cost()[unit] * 0.75, cell.getIntensityCosts().get("IntBF"));
+			assertEquals(extBF.cost()[unit], cell.getIntensityCosts().get("ExtBF"));
+		}
+		assertEquals(Map.of("IntBF", 0.75), counts.scaled());
+	}
+
+	@Test
+	void withStockingOffThePastureHusbandryCostIsStillScaled() {
+		// The Pasture level is then core's stocking rate; the cost is scaled all the same (35a plan, Q2).
+		decide(ReactToyData.context(dir).off(ReactElement.STOCKING)
+				.productionLevels((aft, service) -> aft.equals("IntP") ? 1.5 : 1.0));
+
+		handOver();
+
+		int unit = units.unitOf("1,1");
+		Cell cell = cells.get("1,1");
+		assertEquals(pastureAft("IntP").intensityCost()[unit] * 1.5, cell.getIntensityCosts().get("IntP"));
+		assertFalse(cell.getStockingCosts().containsKey("IntP"), "stocking is core's");
+	}
+
+	@Test
+	void atLevelZeroTheCostsAreZero() {
+		decide(ReactToyData.context(dir).productionLevels((aft, service) -> aft.equals("IntP") ? 0 : 1.0));
+
+		handOver();
+
+		Cell cell = cells.get("1,1");
+		assertEquals(0.0, cell.getIntensityCosts().get("IntP"));
+		assertEquals(0.0, cell.getStockingCosts().get("IntP"));
+		assertEquals(pastureAft("IntP").production()[units.unitOf("1,1")], cell.getCapitals().get("IntP_suit"));
+	}
+
+	@Test
+	void theLevelIsAskedForAtEachHandover() {
+		// Core changes it when it loads a year-specific production file.
+		double[] level = { 1.0 };
+		decide(ReactToyData.context(dir).productionLevels((aft, service) -> aft.equals("ExtC3C") ? level[0] : 1.0));
+		ReactHandover handover = ReactHandover.build(cells, units, inputs.context()::productionLevel);
+		double nitrogenCost = crop("ExtC3C").nitrogenCost()[units.unitOf("1,1")];
+
+		ReactHandover.Counts atOne = handover.write(crops.managements().values(), pasture.managements().values(),
+				forestry.managements().values());
+		assertEquals(nitrogenCost, cells.get("1,1").getNfertCosts().get("ExtC3C"));
+		assertEquals(Map.of(), atOne.scaled());
+
+		level[0] = 2.0;
+		ReactHandover.Counts atTwo = handover.write(crops.managements().values(), pasture.managements().values(),
+				forestry.managements().values());
+		assertEquals(nitrogenCost * 2, cells.get("1,1").getNfertCosts().get("ExtC3C"));
+		assertEquals(Map.of("ExtC3C", 2.0), atTwo.scaled());
 	}
 }

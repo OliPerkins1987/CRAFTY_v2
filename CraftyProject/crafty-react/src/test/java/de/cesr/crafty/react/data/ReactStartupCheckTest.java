@@ -675,6 +675,36 @@ class ReactStartupCheckTest {
 		assertMentions(warnings.get(0), "for react_GDP_50 in 2020,");
 	}
 
+	// ---- warning: year-specific production files (35a) ----
+
+	@Test
+	void theAftsReactHandsACostToWithYearSpecificProductionFilesAreWarnedAbout() {
+		// IntFodder isn't reactive, so react hands it no cost and the file changes nothing of react's.
+		List<String> warnings = run(ReactToyData.context(dir).yearlyProductionFiles("IntP", 2021)
+				.yearlyProductionFiles("IntFodder", 2020, 2021).yearlyProductionFiles("ExtC3C", 2020, 2021)).warnings();
+
+		assertEquals(List.of("CRAFTY-react: the model loads year-specific production files for ExtC3C in 2020-2021;"
+				+ " IntP in 2021. React multiplies those AFTs' costs by their production level when it hands them over,"
+				+ " which is before the model loads that year's file, so in a year whose file changes the level their"
+				+ " costs follow it a year late"), warnings);
+	}
+
+	@Test
+	void anAftReactHandsNoCostToIsNotWarnedAbout() {
+		// Only stocking on: react hands the crops AFTs no cost. With forestry off, the forestry AFTs none either.
+		ReactToyData.parameters(dir, ReactToyData.standardAndForestryRows());
+		ReactToyData.Context context = ReactToyData.context(dir).withForestry()
+				.off(ReactElement.FERTILISER, ReactElement.IRRIGATION, ReactElement.OTHER_INTENSITY, ReactElement.FORESTRY)
+				.yearlyProductionFiles("IntC3C_irrig", 2021).yearlyProductionFiles("IntBF", 2021)
+				.yearlyProductionFiles("IntP", 2021);
+
+		List<String> warnings = run(context).warnings();
+
+		String warning = warnings.stream().filter(w -> w.contains("production files")).findFirst().orElseThrow();
+		assertMentions(warning, "production files for IntP in 2021.");
+		assertTrue(!warning.contains("IntC3C_irrig") && !warning.contains("IntBF"), warning);
+	}
+
 	@Test
 	void yearsAreWrittenAsRanges() {
 		assertEquals("2020-2022, 2025, 2030-2031", ReactStartupCheck.yearRanges(List.of(2020, 2021, 2022, 2025, 2030, 2031)));

@@ -64,6 +64,10 @@ public abstract class AbstractAft {
 	private String twinLabel = null;
 	private double twinCost = 0.0;
 
+	// Conversion cost: a cost of leaving this AFT's use, added to its utility when an
+	// AFT from another category challenges it (use_conversion_cost)
+	private double conversionCost = 0.0;
+
 	// Subsidy eligibility (0.0 = none, 1.0 = full, fractional = partial)
 	private double receivesSubsidy = 0.0;
 
@@ -285,6 +289,14 @@ public abstract class AbstractAft {
 
 	public boolean hasTwin() {
 		return twinLabel != null && !twinLabel.isBlank();
+	}
+
+	public double getConversionCost() {
+		return conversionCost;
+	}
+
+	public void setConversionCost(double conversionCost) {
+		this.conversionCost = conversionCost;
 	}
 
 	public double getReceivesSubsidy() {

@@ -49,6 +49,11 @@ use_twinned_afts: false                        # Enable twinned AFT competition 
 use_twinned_cost: false                        # Use cost-based takeover rule instead of standard give-in dispatch
 twinned_competition_rate: 1.0                  # Fraction of eligible twin-owned cells checked per tick [0,1]
 
+# Conversion cost (explicit-price utility only)
+# Owner's "Conversion_cost" (AFTsMetaData) is added to its utility when challenged by an AFT from another Category.
+# Needs Conversion_cost and Category columns in AFTsMetaData. Designed for use_normalised_price_competition.
+use_conversion_cost: false                     # Requires use_explicit_price_utility
+
 # Land-control directories can contain one or more mask inputs.
 
 # Output Configuration

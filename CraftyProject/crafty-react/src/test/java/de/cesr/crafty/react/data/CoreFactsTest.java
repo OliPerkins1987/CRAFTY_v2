@@ -244,6 +244,44 @@ class CoreFactsTest {
 	}
 
 	@Test
+	void aProductionLevelIsReadFromCoreEachTimeItIsAskedFor() {
+		ReactRunContext context = CoreFacts.fromCore();
+
+		assertEquals(3.5, context.productionLevel("IntP", "Pasture"));
+		// As when core loads a year-specific production file during the run.
+		AFTsLoader.getAftHash().get("IntP").getProductivityLevel().put("Pasture", 2.0);
+		assertEquals(2.0, context.productionLevel("IntP", "Pasture"));
+		assertEquals(0.0, context.productionLevel("IntP", "Timber"), "no level for the service");
+		assertThrows(ReactInputException.class, () -> context.productionLevel("Nobody", "Pasture"));
+	}
+
+	@Test
+	void theYearsCoreLoadsAYearSpecificProductionFileAreRead() throws Exception {
+		Map<String, Map<String, Path>> originalPaths = AFTsLoader.aft_production_paths;
+		Field scenario = de.cesr.crafty.core.dataLoader.ProjectLoader.class.getDeclaredField("scenario");
+		scenario.setAccessible(true);
+		Object originalScenario = scenario.get(null);
+		Path file = dir.resolve("production.csv");
+		try {
+			scenario.set(null, "ssp126");
+			Map<String, Map<String, Path>> paths = new HashMap<>();
+			// With aft_production_parameters_directory set core keys a year's file "<year>", otherwise
+			// "<scenario>|<year>". Other scenarios' files and years outside the run don't count.
+			paths.put("IntC3C_irrig", Map.of("ssp126|2020", file, "ssp245|2021", file, "ssp126|2019", file,
+					"ssp126", file));
+			paths.put("IntP", Map.of("2021", file, "default_", file));
+			paths.put("AF", Map.of("default_", file));
+			AFTsLoader.aft_production_paths = paths;
+
+			assertEquals(Map.of("IntC3C_irrig", List.of(2020), "IntP", List.of(2021)),
+					CoreFacts.fromCore().yearlyProductionFiles());
+		} finally {
+			AFTsLoader.aft_production_paths = originalPaths;
+			scenario.set(null, originalScenario);
+		}
+	}
+
+	@Test
 	void theServicesComeFromCoresServiceList() throws Exception {
 		Field servicesList = de.cesr.crafty.core.dataLoader.serivces.ServiceSet.class.getDeclaredField("servicesList");
 		servicesList.setAccessible(true);

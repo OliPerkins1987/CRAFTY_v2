@@ -1,6 +1,7 @@
 package de.cesr.crafty.react;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -46,7 +47,8 @@ import de.cesr.crafty.react.science.CropSurfaces;
  *
  * Then it hands the decisions to the model ({@link ReactHandover}): each
  * reactive AFT's {@code _suit} capital and the costs of the elements that are
- * on go straight into the cells, over what core has just loaded.
+ * on go straight into the cells, over what core has just loaded. The costs are
+ * multiplied by the AFT's production level for its service (35a).
  */
 public class ReactiveUpdater extends AbstractUpdater {
 
@@ -116,7 +118,7 @@ public class ReactiveUpdater extends AbstractUpdater {
 		this.pasture = pasture;
 		this.forestry = forestry;
 		this.outputs = ReactOutputs.create(inputs, units);
-		this.handover = ReactHandover.build(cells, units);
+		this.handover = ReactHandover.build(cells, units, inputs.context()::productionLevel);
 	}
 
 	/** Loads react's settings and checks the project, stopping the run if it cannot be used. */
@@ -154,8 +156,9 @@ public class ReactiveUpdater extends AbstractUpdater {
 	}
 
 	/**
-	 * Puts the last year decided into the model's cells, with one log line. With nothing decided (no element
-	 * on), nothing is handed over.
+	 * Puts the last year decided into the model's cells, with one log line, and a second naming the AFTs whose
+	 * costs were scaled by a production level other than 1. With nothing decided (no element on), nothing is
+	 * handed over.
 	 */
 	void handOver(int year) {
 		Collection<CropManagement> cropsDecided = crops.managements().values();
@@ -169,6 +172,12 @@ public class ReactiveUpdater extends AbstractUpdater {
 		LOGGER.info(String.format("CRAFTY-react handed year %d to the model in %.2f s: %d _suit capitals and %d cost"
 				+ " columns in %d cells", year, (System.nanoTime() - start) / 1e9, counts.suitCapitals(),
 				counts.costColumns(), counts.cells()));
+		if (!counts.scaled().isEmpty()) {
+			List<String> scaled = new ArrayList<>();
+			counts.scaled().forEach((label, level) -> scaled.add(label + " at " + level));
+			LOGGER.info("CRAFTY-react " + year + " costs handed over scaled by production level: "
+					+ String.join(", ", scaled));
+		}
 	}
 
 	/**

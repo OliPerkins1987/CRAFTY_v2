@@ -54,6 +54,7 @@ import de.cesr.crafty.react.decisions.DecisionUnits;
 import de.cesr.crafty.react.decisions.ForestryDecisions;
 import de.cesr.crafty.react.decisions.ForestryManagement;
 import de.cesr.crafty.react.decisions.PastureDecisions;
+import de.cesr.crafty.react.decisions.PastureManagement;
 import de.cesr.crafty.react.decisions.YearPrices;
 import de.cesr.crafty.react.output.ReactOutputs;
 import de.cesr.crafty.react.science.CropSurfaces;
@@ -564,6 +565,22 @@ class ReactiveUpdaterTest {
 		assertEquals(intBF.yield()[south], cells.get("1,2").getCapitals().get("IntBF_suit"));
 		assertEquals(intBF.cost()[north], cells.get("1,1").getIntensityCosts().get("IntBF"));
 		assertEquals(intBF.cost()[south], cells.get("1,2").getIntensityCosts().get("IntBF"));
+	}
+
+	@Test
+	void eachStepScalesTheCostsByTheModelsProductionLevels() {
+		ReactInputs inputs = toyInputs(toyContext().productionLevels((aft, service) -> aft.equals("IntP") ? 0.5 : 1.0));
+		Map<String, Cell> cells = toyCells();
+		ReactiveUpdater updater = new ReactiveUpdater(inputs, cells);
+		int south = DecisionUnits.build(inputs.checked().cellKey(), inputs.context().regions()).unitOf("1,2");
+
+		updater.step();
+
+		PastureManagement intP = updater.getPastureDecisions().managements().get("IntP");
+		assertEquals(intP.stockingCost()[south] * 0.5, cells.get("1,2").getStockingCosts().get("IntP"));
+		assertEquals(intP.production()[south], cells.get("1,2").getCapitals().get("IntP_suit"));
+		assertEquals(updater.getCropDecisions().managements().get("IntC3C_irrig").nitrogenCost()[south],
+				cells.get("1,2").getNfertCosts().get("IntC3C_irrig"));
 	}
 
 	@Test

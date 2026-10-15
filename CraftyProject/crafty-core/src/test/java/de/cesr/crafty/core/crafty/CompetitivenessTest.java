@@ -70,6 +70,7 @@ class CompetitivenessTest {
         if (ConfigLoader.config != null) {
             ConfigLoader.config.use_explicit_price_utility = false;
             ConfigLoader.config.use_price_only_utility = false;
+            ConfigLoader.config.use_conversion_cost = false;
         }
 
         // restore config
@@ -1012,6 +1013,216 @@ class CompetitivenessTest {
                 }
             }
         });
+    }
+
+    // -------------------------------------------------------
+    // Conversion cost (use_conversion_cost)
+    // -------------------------------------------------------
+    //
+    // The owner holds the cell at utility 20 and has a conversion cost of 100; the challenger's
+    // utility is 130; give-in is 0.1. Every path lets the challenger in without the cost and
+    // keeps it out with it (uO' = 20 + 100 = 120):
+    //   normalised price: (130-20)/150 = 0.73 > 0.1, but (130-120)/250 = 0.04 < 0.1
+    //   min-max (0..200): 0.65 > 0.10 + 0.1,          but 0.65 < 0.60 + 0.1
+    //   raw (meanY 200):  130-20 = 110 > 200 x 0.1,   but 130-120 = 10 < 20
+
+    private static final double OWNER_UTILITY = 20.0;
+    private static final double CHALLENGER_UTILITY = 130.0;
+    private static final double OWNER_CONVERSION_COST = 100.0;
+
+    @FunctionalInterface
+    private interface RunnerBody {
+        void run(RegionalModelRunner r) throws Throwable;
+    }
+
+    /**
+     * A real interacting AFT, not a mock: effectiveGiveIn reads the category field
+     * directly, which a mock would leave null.
+     */
+    private static Aft conversionAft(String label, String category, double conversionCost) {
+        Aft a = new Aft(label);
+        a.setType(ManagerTypes.AFT);
+        a.setCategory(new AftCategory(category));
+        a.setConversionCost(conversionCost);
+        a.setGiveInMean(0.1);
+        a.setGiveInSD(0.0);
+        return a;
+    }
+
+    /** A cell held by owner at OWNER_UTILITY, on which the challenger's utility is CHALLENGER_UTILITY. */
+    private static Cell challengedCell(Aft owner, Aft challenger) {
+        Cell c = Mockito.spy(new Cell(0, 0));
+        setOwner(c, owner);
+        c.setCurrentUtility(OWNER_UTILITY);
+        doReturn(CHALLENGER_UTILITY).when(c).competitiveness(challenger, "S1");
+        return c;
+    }
+
+    /** Explicit-price utility, one service S1 at price 1.0 in 2020, and use_conversion_cost as given. */
+    private void withConversionCost(boolean conversionCostOn, RunnerBody body) throws Throwable {
+        withServices(List.of("S1"), () -> {
+            ensureConfigInstance();
+            AftCategorised.useCategorisationGivIn = false;
+            CellBehaviourUpdater.behaviourUsed = false;
+
+            RegionalModelRunner r = mock(RegionalModelRunner.class);
+            Service s1 = mock(Service.class);
+            when(s1.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, 1.0)));
+            Region region = mock(Region.class);
+            when(region.getServicesHash()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", s1)));
+            r.R = region;
+
+            try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class)) {
+                ts.when(Timestep::getCurrentYear).thenReturn(2020);
+                ts.when(Timestep::getStartYear).thenReturn(2020);
+
+                ConfigLoader.config.use_explicit_price_utility = true;
+                ConfigLoader.config.use_conversion_cost = conversionCostOn;
+                try {
+                    body.run(r);
+                } finally {
+                    ConfigLoader.config.use_explicit_price_utility = false;
+                    ConfigLoader.config.use_conversion_cost = false;
+                }
+            }
+        });
+    }
+
+    private boolean callLandUseChange(String method, Cell c, Aft owner, Aft competitor, RegionalModelRunner r) {
+        try {
+            Method m = Competitiveness.class.getDeclaredMethod(method, Cell.class, Aft.class, Aft.class,
+                    RegionalModelRunner.class);
+            m.setAccessible(true);
+            return (boolean) m.invoke(null, c, owner, competitor, r);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void conversionCost_blocksACrossCategoryTakeover_inNormalisedPricePath() throws Throwable {
+        withConversionCost(true, r -> {
+            Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+            Aft challenger = conversionAft("COMP", "Agri_Crops", 0.0);
+            Cell c = challengedCell(owner, challenger);
+
+            assertFalse(callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r),
+                    "(130-120)/250 = 0.04 < give-in 0.1: the owner's conversion cost must keep the challenger out");
+        });
+    }
+
+    @Test
+    void conversionCost_isIgnored_whenOwnerAndChallengerShareACategory() throws Throwable {
+        withConversionCost(true, r -> {
+            Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+            Aft challenger = conversionAft("COMP", "Nonex", 0.0);
+            Cell c = challengedCell(owner, challenger);
+
+            assertTrue(callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r),
+                    "Same category: no conversion cost, so (130-20)/150 = 0.73 > 0.1 takes over");
+        });
+    }
+
+    @Test
+    void conversionCost_isIgnored_whenTheSwitchIsOff() throws Throwable {
+        withConversionCost(false, r -> {
+            Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+            Aft challenger = conversionAft("COMP", "Agri_Crops", 0.0);
+            Cell c = challengedCell(owner, challenger);
+
+            assertTrue(callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r),
+                    "use_conversion_cost off: the comparison must be exactly as before");
+        });
+    }
+
+    @Test
+    void conversionCost_isTheOwners_notTheChallengers() throws Throwable {
+        // It is a cost of leaving a use, so a challenger's own conversion cost must not count.
+        withConversionCost(true, r -> {
+            Aft owner = conversionAft("OWN", "Agri_Crops", 0.0);
+            Aft challenger = conversionAft("COMP", "Nonex", OWNER_CONVERSION_COST);
+            Cell c = challengedCell(owner, challenger);
+
+            assertTrue(callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r),
+                    "The owner has no conversion cost, so the challenger takes over");
+        });
+    }
+
+    @Test
+    void conversionCost_doesNotApply_toAnAbandonedCell() throws Throwable {
+        withConversionCost(true, r -> {
+            Aft abandoned = new Aft("Abandoned");
+            abandoned.setConversionCost(OWNER_CONVERSION_COST);
+            Aft challenger = conversionAft("COMP", "Agri_Crops", 0.0);
+            Cell c = challengedCell(abandoned, challenger);
+
+            assertTrue(callLandUsechangeNormalisedPriceUtility(c, abandoned, challenger, r),
+                    "An abandoned cell has no owner to pay a conversion cost");
+            assertTrue(callLandUsechangeNormalisedPriceUtility(c, null, challenger, r),
+                    "An empty cell has no owner to pay a conversion cost");
+        });
+    }
+
+    @Test
+    void conversionCost_isNeverStoredOnTheCell() throws Throwable {
+        // currentUtility also feeds giving up, utility statistics and outputs.
+        withConversionCost(true, r -> {
+            Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+            Aft challenger = conversionAft("COMP", "Agri_Crops", 0.0);
+            Cell c = challengedCell(owner, challenger);
+
+            callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r);
+
+            assertEquals(OWNER_UTILITY, c.getCurrentUtility(), 0.0);
+            assertEquals(OWNER_UTILITY + OWNER_CONVERSION_COST,
+                    Competitiveness.ownerUtilityAgainst(c, owner, challenger), 0.0);
+        });
+    }
+
+    @Test
+    void conversionCost_isZero_whenEitherCategoryIsMissing() throws Throwable {
+        ensureConfigInstance();
+        ConfigLoader.config.use_conversion_cost = true;
+
+        Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+        Aft uncategorised = conversionAft("COMP", "Agri_Crops", OWNER_CONVERSION_COST);
+        uncategorised.setCategory(null);
+
+        assertEquals(0.0, Competitiveness.conversionCost(owner, uncategorised), 0.0);
+        assertEquals(0.0, Competitiveness.conversionCost(uncategorised, owner), 0.0);
+    }
+
+    @Test
+    void conversionCost_alsoAppliesInTheMinMaxNormalisedPath() throws Throwable {
+        for (boolean on : new boolean[] { false, true }) {
+            withConversionCost(on, r -> {
+                when(r.getMinUtility()).thenReturn(0.0);
+                when(r.getMaxUtility()).thenReturn(200.0);
+                Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+                Aft challenger = conversionAft("COMP", "Agri_Crops", 0.0);
+                Cell c = challengedCell(owner, challenger);
+
+                assertEquals(!on,
+                        callLandUseChange("landUsechangeNormalisedUtility", c, owner, challenger, r),
+                        "0.65 beats 0.10 + 0.1 without the cost, but not 0.60 + 0.1 with it");
+            });
+        }
+    }
+
+    @Test
+    void conversionCost_alsoAppliesInTheRawPath() throws Throwable {
+        for (boolean on : new boolean[] { false, true }) {
+            withConversionCost(on, r -> {
+                when(r.getDistributionMeanY()).thenReturn(new ConcurrentHashMap<>(Map.of("OWN", 200.0)));
+                Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+                Aft challenger = conversionAft("COMP", "Agri_Crops", 0.0);
+                Cell c = challengedCell(owner, challenger);
+
+                assertEquals(!on,
+                        callLandUseChange("landUsechange", c, owner, challenger, r),
+                        "130-20 = 110 beats 200 x 0.1 without the cost, but 130-120 = 10 does not");
+            });
+        }
     }
 
     // -------------------------------------------------------

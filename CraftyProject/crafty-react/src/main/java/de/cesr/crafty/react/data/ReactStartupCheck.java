@@ -55,8 +55,9 @@ import de.cesr.crafty.core.cli.CustomLogger;
  * Some checks only warn: a {@code <AFT>_suit} react hands over that is typed Capital, when the model
  * separates production from competitiveness (with check 13); that every AFT the model charges a cost gets
  * it from somewhere, either react's handover or a column in the model's own cost file; the same for
- * every capital the model has, and its own capitals files (phase 5 plan, §3.4); and reactive forestry AFTs
- * with forestry switched off. The warnings are logged, and kept in the {@link Result}.
+ * every capital the model has, and its own capitals files (phase 5 plan, §3.4); reactive forestry AFTs
+ * with forestry switched off; and AFTs react hands a cost to that have year-specific production files (35a).
+ * The warnings are logged, and kept in the {@link Result}.
  */
 public final class ReactStartupCheck {
 
@@ -181,6 +182,7 @@ public final class ReactStartupCheck {
 		forestryMessages(parameters);
 		warnings.addAll(costFileWarnings(parameters));
 		warnings.addAll(capitalsFileWarnings(parameters));
+		warnings.addAll(productionFileWarnings(parameters));
 		warnings.forEach(LOGGER::warn);
 		LOGGER.info("CRAFTY-react startup checks passed: " + parameters.reactive().size() + " reactive AFT(s) "
 				+ parameters.reactive().stream().map(AftReactParameters::label).toList() + ", reactive elements "
@@ -465,6 +467,36 @@ public final class ReactStartupCheck {
 		}
 		return List.of("CRAFTY-react: the model's capitals file has no column (or no rows) for "
 				+ whichInWhichYears(yearsUncovered) + ", and react does not hand them over, so the model gives them 0");
+	}
+
+	// ---- warning: production levels that change a year before react's costs follow ----
+
+	/**
+	 * React multiplies each cost it hands over by the AFT's production level for its service, as the model holds
+	 * it at the time (35a). React hands over before the model loads that year's production file, so in a year
+	 * whose year-specific production file changes the level, react's costs still follow the level before it,
+	 * and catch up the year after. The AFTs react hands a cost to that have such files are named, with the
+	 * years, in one warning.
+	 */
+	private List<String> productionFileWarnings(ReactiveParameters parameters) {
+		Set<String> handedOver = new HashSet<>();
+		for (ReactElement element : ReactElement.values()) {
+			handedOver.addAll(costsHandedOver(parameters, element));
+		}
+		Map<String, List<Integer>> yearsByAft = new LinkedHashMap<>();
+		for (AftReactParameters aft : parameters.reactive()) {
+			List<Integer> years = context.yearlyProductionFiles().get(aft.label());
+			if (years != null && handedOver.contains(aft.label())) {
+				yearsByAft.put(aft.label(), years);
+			}
+		}
+		if (yearsByAft.isEmpty()) {
+			return List.of();
+		}
+		return List.of("CRAFTY-react: the model loads year-specific production files for " + whichInWhichYears(yearsByAft)
+				+ ". React multiplies those AFTs' costs by their production level when it hands them over, which is"
+				+ " before the model loads that year's file, so in a year whose file changes the level their costs"
+				+ " follow it a year late");
 	}
 
 	/** For example {@code IntFodder, AF in 2020-2030; Solar in 2025}: names grouped by the years they share. */

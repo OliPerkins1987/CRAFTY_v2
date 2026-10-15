@@ -37,13 +37,18 @@ import java.util.Set;
  * @param separateProductionCompetitiveness core's {@code separate_production_competitiveness}: when on, an
  *                        AFT's production counts only the capitals typed Suitability, and its
  *                        competitiveness counts them all; when off, a capital's type makes no difference
+ * @param productionLevels an AFT's production level for a service, as core holds it at the time (see
+ *                        {@link ProductionLevelSource})
+ * @param yearlyProductionFiles for each AFT that has them, the years of the run in which core loads a
+ *                        year-specific production file for it
  */
 public record ReactRunContext(Path projectPath, String scenario, int firstYear, int lastYear, Path servicesFile,
 		Map<String, AftBaseline> afts, Set<String> services, Map<String, String> cellRegions, Set<String> regions,
 		Set<ReactElement> reactive, PriceSource prices, Path outputFolder, Set<Integer> mapYears,
 		Map<String, Boolean> capitals, Map<ReactElement, List<String>> chargedAfts,
 		Map<Integer, Map<ReactElement, Path>> costFiles, Map<Integer, Path> modelCapitalsFiles,
-		boolean separateProductionCompetitiveness) {
+		boolean separateProductionCompetitiveness, ProductionLevelSource productionLevels,
+		Map<String, List<Integer>> yearlyProductionFiles) {
 
 	/**
 	 * An AFT's baselines, from core's {@code AFTsMetaData.csv}: what it does when nothing is reactive.
@@ -72,6 +77,22 @@ public record ReactRunContext(Path projectPath, String scenario, int firstYear, 
 	/** What a service is worth in a region in a year. */
 	public double price(String service, String region, int year) {
 		return prices.price(service, region, year);
+	}
+
+	/**
+	 * An AFT's production level for a service: the {@code Production} column of its production file, as core
+	 * holds it at the time. React's costs are per ha of the land an AFT uses for its service, so the handover
+	 * multiplies them by this (35a). It can change during the run, when core loads a year-specific production
+	 * file, so it is asked for each time it is needed.
+	 */
+	@FunctionalInterface
+	public interface ProductionLevelSource {
+		double level(String aft, String service);
+	}
+
+	/** An AFT's production level for a service, as core holds it now. */
+	public double productionLevel(String aft, String service) {
+		return productionLevels.level(aft, service);
 	}
 
 	/** Every CRAFTY cell, as {@code "x,y"}. */

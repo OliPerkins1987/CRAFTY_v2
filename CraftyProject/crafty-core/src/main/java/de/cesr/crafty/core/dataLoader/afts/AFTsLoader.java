@@ -348,6 +348,10 @@ public class AFTsLoader extends HashSet<Aft> {
 			if (csv.containsKey("Twin_cost")) {
 				a.setTwinCost(Utils.sToD(csv.get("Twin_cost").get(i)));
 			}
+			// Blank (e.g. masks) means no conversion cost: sToD returns 0 for it.
+			if (csv.containsKey("Conversion_cost")) {
+				a.setConversionCost(Utils.sToD(csv.get("Conversion_cost").get(i)));
+			}
 			if (csv.containsKey("Receives_subsidy")) {
 				String val = csv.get("Receives_subsidy").get(i).trim();
 				try {
@@ -374,6 +378,14 @@ public class AFTsLoader extends HashSet<Aft> {
 		}
 		if (ConfigLoader.config.use_twinned_cost && !csv.containsKey("Twin_cost")) {
 			LOGGER.fatal("use_twinned_cost is true but 'Twin_cost' column is missing from AFTsMetaData");
+		}
+		if (ConfigLoader.config.use_conversion_cost && !csv.containsKey("Conversion_cost")) {
+			LOGGER.fatal("use_conversion_cost is true but 'Conversion_cost' column is missing from AFTsMetaData");
+		}
+		// Conversion cost only applies between AFTs of different categories; without the
+		// column every category would be null and the cost would silently never apply.
+		if (ConfigLoader.config.use_conversion_cost && !csv.containsKey("Category")) {
+			LOGGER.fatal("use_conversion_cost is true but 'Category' column is missing from AFTsMetaData");
 		}
 		if (ConfigLoader.config.use_price_explicit_giving_up && !csv.containsKey("Receives_subsidy")) {
 			LOGGER.warn("use_price_explicit_giving_up is true but 'Receives_subsidy' column is missing "

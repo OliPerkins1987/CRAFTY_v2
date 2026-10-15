@@ -723,4 +723,77 @@ class ConfigLoaderTest {
 
         assertTrue(cfg.use_cell_area);
     }
+
+    // =========================================================
+    // Conversion cost
+    // =========================================================
+
+    @Test
+    void conversionCostSwitchedOffShouldNeverStopOrWarn() throws Exception {
+        assertFalse(new Config().use_conversion_cost, "Conversion cost must be off by default");
+
+        // With the switch off, neither the utility mode nor the competition path matters.
+        for (Config c : List.of(new Config(), configWithSwitchesOn("use_explicit_price_utility"),
+                configWithSwitchesOn("use_price_only_utility"))) {
+            assertNull(ConfigLoader.conversionCostConfigError(c));
+            assertNull(ConfigLoader.conversionCostConfigWarning(c));
+        }
+    }
+
+    @Test
+    void conversionCostWithoutExplicitPriceUtilityShouldStopTheRun() throws Exception {
+        // The other utility modes have no costs, so a $/ha cost would mean nothing there.
+        for (Config c : List.of(configWithSwitchesOn("use_conversion_cost"),
+                configWithSwitchesOn("use_conversion_cost", "use_price_only_utility"),
+                configWithSwitchesOn("use_conversion_cost", "use_normalised_price_competition"))) {
+            String error = ConfigLoader.conversionCostConfigError(c);
+
+            assertNotNull(error, "Conversion cost without explicit-price utility must be rejected");
+            assertTrue(error.contains("use_explicit_price_utility"), "The message must say how to fix it. Got: " + error);
+        }
+    }
+
+    @Test
+    void conversionCostShouldNotNeedProductionCosts() throws Exception {
+        // A conversion cost with no other production costs is a valid set-up.
+        Config c = configWithSwitchesOn("use_conversion_cost", "use_explicit_price_utility");
+
+        assertFalse(c.use_production_costs);
+        assertNull(ConfigLoader.conversionCostConfigError(c));
+    }
+
+    @Test
+    void conversionCostWithoutNormalisedPriceCompetitionShouldWarnButNotStop() throws Exception {
+        Config c = configWithSwitchesOn("use_conversion_cost", "use_explicit_price_utility");
+
+        assertNull(ConfigLoader.conversionCostConfigError(c), "This set-up must not stop the run");
+        String warning = ConfigLoader.conversionCostConfigWarning(c);
+        assertNotNull(warning, "Conversion cost is designed for normalised-price competition");
+        assertTrue(warning.contains("use_normalised_price_competition"),
+                "The warning must name the switch. Got: " + warning);
+    }
+
+    @Test
+    void conversionCostWithNormalisedPriceCompetitionShouldNotWarn() throws Exception {
+        Config c = configWithSwitchesOn("use_conversion_cost", "use_explicit_price_utility",
+                "use_normalised_price_competition");
+
+        assertNull(ConfigLoader.conversionCostConfigError(c));
+        assertNull(ConfigLoader.conversionCostConfigWarning(c));
+    }
+
+    @Test
+    void conversionCostShouldLoadFromYaml() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("conversion-cost-config.yaml");
+        Files.writeString(configFile, "use_explicit_price_utility: true\nuse_conversion_cost: true\n");
+        ConfigLoader.configPath = configFile.toString();
+
+        Config cfg = invokeLoadConfig();
+
+        assertTrue(cfg.use_conversion_cost);
+    }
 }

@@ -211,8 +211,8 @@ public final class ReactToyData {
 
 	/**
 	 * Builds a {@link ReactRunContext} for the toy project: the AFTs of {@link #STANDARD_ROWS} with
-	 * sensible baselines, an {@code <AFT>_suit} suitability capital for each, and every element reactive
-	 * but forestry, which is opt-in ({@link #withForestry()}).
+	 * sensible baselines, an {@code <AFT>_suit} suitability capital for each, every element reactive
+	 * but forestry, which is opt-in ({@link #withForestry()}), and every production level 1.
 	 */
 	public static final class Context {
 		private final Path project;
@@ -231,6 +231,8 @@ public final class ReactToyData {
 		private final Map<Integer, Map<ReactElement, Path>> costFiles = new LinkedHashMap<>();
 		private final Map<Integer, Path> modelCapitalsFiles = new LinkedHashMap<>();
 		private boolean separateProductionCompetitiveness = false;
+		private ReactRunContext.ProductionLevelSource productionLevels = (aft, service) -> 1.0;
+		private final Map<String, List<Integer>> yearlyProductionFiles = new LinkedHashMap<>();
 		private int firstYear;
 		private int lastYear;
 
@@ -373,6 +375,18 @@ public final class ReactToyData {
 			return this;
 		}
 
+		/** Each AFT's production level for a service, as core holds it; 1 for every AFT and service unless set. */
+		public Context productionLevels(ReactRunContext.ProductionLevelSource levels) {
+			productionLevels = levels;
+			return this;
+		}
+
+		/** The years core loads a year-specific production file for an AFT; none unless set. */
+		public Context yearlyProductionFiles(String label, Integer... years) {
+			yearlyProductionFiles.put(label, List.of(years));
+			return this;
+		}
+
 		public ReactRunContext build() {
 			Map<String, Boolean> allCapitals = new LinkedHashMap<>();
 			afts.keySet().forEach(label -> allCapitals.put(label + ReactStartupCheck.SUIT, true));
@@ -383,7 +397,8 @@ public final class ReactToyData {
 					new LinkedHashSet<>(regions),
 					reactive.isEmpty() ? EnumSet.noneOf(ReactElement.class) : EnumSet.copyOf(reactive), prices,
 					outputFolder, mapYears, allCapitals, new EnumMap<>(chargedAfts), new LinkedHashMap<>(costFiles),
-					new LinkedHashMap<>(modelCapitalsFiles), separateProductionCompetitiveness);
+					new LinkedHashMap<>(modelCapitalsFiles), separateProductionCompetitiveness, productionLevels,
+					new LinkedHashMap<>(yearlyProductionFiles));
 		}
 	}
 }

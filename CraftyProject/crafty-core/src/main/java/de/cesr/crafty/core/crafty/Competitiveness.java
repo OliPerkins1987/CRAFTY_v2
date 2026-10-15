@@ -181,7 +181,7 @@ public class Competitiveness {
         if (owner == null || owner.isAbandoned()) {
             return uC >= r.getDistributionMeanY().get(competitor.getLabel());
         }
-        double uO = c.getCurrentUtility();
+        double uO = ownerUtilityAgainst(c, owner, competitor);
 
         double nbr = r.getDistributionMeanY() != null
                 ? (r.getDistributionMeanY().get(owner.getLabel()) * (giveInThreshold(c, owner, competitor)))
@@ -203,7 +203,8 @@ public class Competitiveness {
             return uC > 0;
         }
 
-        double uO = (c.getCurrentUtility() - r.getMinUtility()) / (r.getMaxUtility() - r.getMinUtility());
+        double uO = (ownerUtilityAgainst(c, owner, competitor) - r.getMinUtility())
+                / (r.getMaxUtility() - r.getMinUtility());
         double giveIn = effectiveGiveIn(c, owner, competitor);
         return (uC > uO + giveIn) && uC > 0;
     }
@@ -220,7 +221,7 @@ public class Competitiveness {
         if (owner == null || owner.isAbandoned()) {
             return true;
         }
-        double uO = c.getCurrentUtility();
+        double uO = ownerUtilityAgainst(c, owner, competitor);
         double normDiff = (uC - uO) / (Math.abs(uC) + Math.abs(uO));
 
         double giveIn;
@@ -311,6 +312,34 @@ public class Competitiveness {
             }
         }
         return owner.getGiveInMean() + owner.getGiveInSD() * gaussian;
+    }
+
+    // ── Conversion cost ─────────────────────────────────────────────────
+
+    /**
+     * The owner's utility as a challenger has to beat it: the cell's current utility, plus the
+     * owner's conversion cost when the challenger is from another category. Conversion cost is
+     * a cost of leaving the owner's use, so it is always the owner's. It is never stored on the
+     * cell, so giving up, utility statistics and outputs still see the plain utility.
+     */
+    static double ownerUtilityAgainst(Cell c, Aft owner, Aft competitor) {
+        return c.getCurrentUtility() + conversionCost(owner, competitor);
+    }
+
+    /**
+     * Zero unless use_conversion_cost is on and the two AFTs are in different categories.
+     * Startup only allows the switch with explicit-price utility, so the cost is in the
+     * same $/ha as the utility it is added to.
+     */
+    static double conversionCost(Aft owner, Aft competitor) {
+        if (!ConfigLoader.config.use_conversion_cost) {
+            return 0.0;
+        }
+        AftCategory o = owner.getCategory(), k = competitor.getCategory();
+        if (o == null || k == null || o.getName().equals(k.getName())) {
+            return 0.0;
+        }
+        return owner.getConversionCost();
     }
 
     // ── Competition entry points ────────────────────────────────────────

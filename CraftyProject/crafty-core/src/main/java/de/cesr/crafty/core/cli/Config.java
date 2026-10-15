@@ -67,6 +67,11 @@ public class Config {
     public boolean use_twinned_cost = false;
     public double twinned_competition_rate = 1.0;
 
+    // Conversion cost (explicit-price utility only): when a cell's owner is challenged by an AFT from
+    // another Category, the owner's Conversion_cost (AFTsMetaData) is added to its utility before the
+    // two are compared.
+    public boolean use_conversion_cost = false;
+
     // CRAFTY-react: AFTs adjust their management endogenously (needs the crafty-react module).
     // reactive_afts is the master switch; each element below can only be on when it is.
     public boolean reactive_afts = false;
@@ -207,6 +212,7 @@ public class Config {
                 + "|-> use_twinned_afts=" + use_twinned_afts + "\n"
                 + "|-> use_twinned_cost=" + use_twinned_cost + "\n"
                 + "|-> twinned_competition_rate=" + twinned_competition_rate + "\n"
+                + "|-> use_conversion_cost=" + use_conversion_cost + "\n"
                 + "|-> reactive_afts=" + reactive_afts + "\n"
                 + "|-> reactive_fertilizer=" + reactive_fertilizer + "\n"
                 + "|-> reactive_irrigation=" + reactive_irrigation + "\n"

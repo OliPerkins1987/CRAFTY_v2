@@ -1,6 +1,7 @@
 package de.cesr.crafty.react.data;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -8,8 +9,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
+import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.crafty.Cell;
 import de.cesr.crafty.core.crafty.Service;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
@@ -65,7 +68,8 @@ public final class CoreFacts {
 				new LinkedHashSet<>(CellsLoader.regions.keySet()), reactiveElements(), CoreFacts::price,
 				Path.of(ConfigLoader.config.output_folder_name), new LinkedHashSet<>(Listener.yearsMapExporting),
 				capitals, chargedAfts(), costFiles(), modelCapitalsFiles(),
-				ConfigLoader.config.separate_production_competitiveness);
+				ConfigLoader.config.separate_production_competitiveness, CoreFacts::productionLevel,
+				yearlyProductionFiles());
 	}
 
 	/** The model's cells, by id ({@code "x,y"}): where react hands its values over. */
@@ -111,6 +115,41 @@ public final class CoreFacts {
 			}
 		}
 		return byYear;
+	}
+
+	/**
+	 * For each AFT that has them, the years of the run in which core loads a year-specific production file for
+	 * it. Core keys such a file {@code <year>} when {@code aft_production_parameters_directory} is set and
+	 * {@code <scenario>|<year>} otherwise, and only ever makes one of the two kinds (AFTsLoader), so a year is
+	 * counted when either key is there.
+	 */
+	static Map<String, List<Integer>> yearlyProductionFiles() {
+		Map<String, List<Integer>> byAft = new TreeMap<>();
+		String scenario = ProjectLoader.getScenario();
+		AFTsLoader.aft_production_paths.forEach((label, paths) -> {
+			List<Integer> years = new ArrayList<>();
+			for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
+				if (paths.containsKey(String.valueOf(year)) || paths.containsKey(scenario + "|" + year)) {
+					years.add(year);
+				}
+			}
+			if (!years.isEmpty()) {
+				byAft.put(label, List.copyOf(years));
+			}
+		});
+		return byAft;
+	}
+
+	/**
+	 * An AFT's production level for a service, read from core each time: core changes it when it loads a
+	 * year-specific production file. 0 if the AFT has none for the service.
+	 */
+	static double productionLevel(String label, String service) {
+		Aft aft = AFTsLoader.getAftHash().get(label);
+		if (aft == null) {
+			throw new ReactInputException("No such AFT in the model: " + label);
+		}
+		return aft.getProductivityLevel().getOrDefault(service, 0.0);
 	}
 
 	/** Which elements are switched on in core's config.yaml. */
