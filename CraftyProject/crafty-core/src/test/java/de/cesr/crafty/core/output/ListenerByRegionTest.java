@@ -294,4 +294,84 @@ class ListenerByRegionTest {
 			assertTrue(dirFromConfig.contains("baseOutputDir"));
 		}
 	}
+
+	// =========================================================
+	// Price feedback: exportPrices
+	// =========================================================
+
+	/** A mock region R1 whose services have these file prices in 2000. */
+	private static Region regionWithFilePrices(Map<String, Double> filePrices) {
+		Region region = Mockito.mock(Region.class);
+		Mockito.when(region.getName()).thenReturn("R1");
+		ConcurrentHashMap<String, Service> servicesHash = new ConcurrentHashMap<>();
+		filePrices.forEach((serviceName, price) -> {
+			Service service = Mockito.mock(Service.class);
+			Mockito.when(service.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2000, price)));
+			servicesHash.put(serviceName, service);
+		});
+		Mockito.when(region.getServicesHash()).thenReturn(servicesHash);
+		return region;
+	}
+
+	@Test
+	void exportPrices_writesFilePricePriceAndMultiplier_forEveryService() {
+		setConfigField("generate_output_files", true);
+		setConfigField("output_folder_name", "baseOutputDir");
+		Region region = regionWithFilePrices(Map.of("S1", 200.0, "S2", 50.0));
+
+		try (MockedStatic<Timestep> timestepMock = mockStatic(Timestep.class);
+				MockedStatic<AFTsLoader> aftsMock = mockStatic(AFTsLoader.class);
+				MockedStatic<ServiceSet> serviceSetMock = mockStatic(ServiceSet.class);
+				MockedStatic<PathTools> pathToolsMock = mockStatic(PathTools.class);
+				MockedStatic<CsvTools> csvToolsMock = mockStatic(CsvTools.class)) {
+
+			timestepMock.when(Timestep::getCurrentYear).thenReturn(2000);
+			timestepMock.when(Timestep::getTick).thenReturn(0);
+			timestepMock.when(Timestep::getSize).thenReturn(2);
+			serviceSetMock.when(ServiceSet::getServicesList).thenReturn(Arrays.asList("S1", "S2"));
+			aftsMock.when(AFTsLoader::getAftHash).thenReturn(new ConcurrentHashMap<>());
+			pathToolsMock.when(() -> PathTools.makeDirectory(anyString()))
+					.thenAnswer(invocation -> invocation.getArgument(0));
+
+			ListenerByRegion listener = new ListenerByRegion(region);
+			listener.initializeListeners();
+
+			// S2 has no multiplier yet, so it is at its file price.
+			listener.exportPrices(Map.of("S1", 0.8));
+
+			String[][] prices = getPrivateMatrix(listener, "priceListener");
+			assertEquals(Arrays.asList("Year", "FilePrice:S1", "FilePrice:S2", "Price:S1", "Price:S2", "Multiplier:S1",
+					"Multiplier:S2"), Arrays.asList(prices[0]));
+			assertEquals(Arrays.asList("2000", "200.0", "50.0", "160.0", "50.0", "0.8", "1.0"), Arrays.asList(prices[1]));
+
+			csvToolsMock.verify(() -> CsvTools.writeCSVfile(Mockito.same(prices),
+					Mockito.eq(Path.of("baseOutputDir" + java.io.File.separator + "region_R1" + java.io.File.separator
+							+ "region_R1-ServicePrices.csv"))));
+		}
+	}
+
+	@Test
+	void exportPrices_writesNothing_whenOutputFilesAreOff() {
+		setConfigField("generate_output_files", false);
+		Region region = regionWithFilePrices(Map.of("S1", 200.0));
+
+		try (MockedStatic<Timestep> timestepMock = mockStatic(Timestep.class);
+				MockedStatic<AFTsLoader> aftsMock = mockStatic(AFTsLoader.class);
+				MockedStatic<ServiceSet> serviceSetMock = mockStatic(ServiceSet.class);
+				MockedStatic<CsvTools> csvToolsMock = mockStatic(CsvTools.class)) {
+
+			timestepMock.when(Timestep::getCurrentYear).thenReturn(2000);
+			timestepMock.when(Timestep::getSize).thenReturn(1);
+			serviceSetMock.when(ServiceSet::getServicesList).thenReturn(Collections.singletonList("S1"));
+			aftsMock.when(AFTsLoader::getAftHash).thenReturn(new ConcurrentHashMap<>());
+
+			ListenerByRegion listener = new ListenerByRegion(region);
+			listener.initializeListeners();
+			listener.exportPrices(Map.of("S1", 0.8));
+
+			csvToolsMock.verifyNoInteractions();
+		} finally {
+			setConfigField("generate_output_files", true);
+		}
+	}
 }

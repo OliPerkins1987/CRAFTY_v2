@@ -7,17 +7,26 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.react.ReactHandover.Column;
+import de.cesr.crafty.react.ReactHandover.Target;
+import de.cesr.crafty.react.data.CellKey;
 import de.cesr.crafty.react.data.ReactConfig;
 import de.cesr.crafty.react.data.ReactElement;
 import de.cesr.crafty.react.data.ReactInputException;
 import de.cesr.crafty.react.data.ReactInputs;
+import de.cesr.crafty.react.data.ReactStartupCheck;
 import de.cesr.crafty.react.data.ReactToyData;
 import de.cesr.crafty.react.data.ReactYearData;
 import de.cesr.crafty.react.decisions.CropDecisions;
@@ -33,6 +42,9 @@ import de.cesr.crafty.react.science.CropSurfaces;
 /**
  * The handover on the toy project: cells (1,1) North and (1,2) South in pixel A, and (2,1) North in pixel B.
  * Pixel A straddles a border, so its two cells take the values of two different decision units.
+ *
+ * The tests at the end (37a) write columns straight into larger grids of cells, each with its own cell key, to
+ * check the grouping and the loop by unit against a plain loop over every cell.
  */
 class ReactHandoverTest {
 
@@ -342,5 +354,169 @@ class ReactHandoverTest {
 				forestry.managements().values());
 		assertEquals(nitrogenCost * 2, cells.get("1,1").getNfertCosts().get("ExtC3C"));
 		assertEquals(Map.of("ExtC3C", 2.0), atTwo.scaled());
+	}
+
+	// ---- writing by unit (37a) ----
+
+	/**
+	 * A cell key for a grid of {@code width} x {@code height} cells, {@code side} x {@code side} cells to a 0.5°
+	 * pixel, listed row by row. Cells in rows below {@code southFrom} are North and the rest South, so a row of
+	 * pixels can straddle the border.
+	 */
+	private CellKey gridKey(String folder, int width, int height, int side, int southFrom) {
+		List<String> lines = new ArrayList<>();
+		lines.add("X,Y,LPJ_cell_x,LPJ_cell_y,region");
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				lines.add(x + "," + y + "," + (x / side) * 0.5 + "," + (y / side) * 0.5 + ","
+						+ (y < southFrom ? "North" : "South"));
+			}
+		}
+		return CellKey.load(ReactToyData.write(dir, folder + "/cell_key.csv", lines.toArray(new String[0])));
+	}
+
+	/** The model's cells, as core holds them (a hash map): the key's cells that {@code inModel} accepts. */
+	private static Map<String, Cell> modelCells(CellKey key, Predicate<String> inModel) {
+		Map<String, Cell> model = new HashMap<>();
+		for (int pixel = 0; pixel < key.grid().size(); pixel++) {
+			for (String id : key.cellsIn(pixel)) {
+				if (inModel.test(id)) {
+					String[] xy = id.split(",");
+					model.put(id, new Cell(Integer.parseInt(xy[0]), Integer.parseInt(xy[1])));
+				}
+			}
+		}
+		return model;
+	}
+
+	/** A value for each unit that no other unit or column has. */
+	private static double[] byUnit(int units, int column) {
+		double[] values = new double[units];
+		for (int unit = 0; unit < units; unit++) {
+			values[unit] = column * 100_000.0 + unit + 0.5;
+		}
+		return values;
+	}
+
+	private static ReactHandover handoverFor(Map<String, Cell> model, DecisionUnits units) {
+		return ReactHandover.build(model, units, (aft, service) -> 1.0);
+	}
+
+	@Test
+	void aLargeGridMatchesAPlainLoopOverEveryCell() {
+		// 60 x 60 cells, 4 x 4 to a pixel: 15 x 15 pixels. Rows 0-29 are North and 30-59 South, so the pixels of
+		// rows 28-31 straddle the border and have two units each.
+		CellKey key = gridKey("grid", 60, 60, 4, 30);
+		DecisionUnits gridUnits = DecisionUnits.build(key, Set.of("North", "South"));
+		assertEquals(225 + 15, gridUnits.size());
+		Map<String, Cell> model = modelCells(key, id -> true);
+		// Three columns into each of the cell's five sets of values, one of each three scaled.
+		List<Column> columns = new ArrayList<>();
+		for (Target target : Target.values()) {
+			for (int c = 0; c < 3; c++) {
+				columns.add(new Column("Grid" + target + c, target, byUnit(gridUnits.size(), columns.size()),
+						c == 1 ? 0.5 : 1));
+			}
+		}
+
+		handoverFor(model, gridUnits).writeColumns(columns);
+
+		// The plain loop: every column, every cell, the value of the cell's own unit.
+		for (Map.Entry<String, Cell> entry : model.entrySet()) {
+			int unit = gridUnits.unitOf(entry.getKey());
+			for (Column column : columns) {
+				assertEquals(column.byUnit()[unit] * column.factor(),
+						column.target().of(entry.getValue()).get(column.name()), column.name() + " in " + entry.getKey());
+			}
+		}
+	}
+
+	@Test
+	void everyCellOfAUnitWithManyCellsTakesItsUnitsValues() {
+		// One pixel of 8 x 8 cells, all North: one unit with 64 cells.
+		CellKey key = gridKey("onePixel", 8, 8, 8, 8);
+		DecisionUnits oneUnit = DecisionUnits.build(key, Set.of("North", "South"));
+		assertEquals(1, oneUnit.size());
+		Map<String, Cell> model = modelCells(key, id -> true);
+		Column suit = new Column("ManyCells_suit", Target.CAPITALS, new double[] { 0.8 }, 1);
+		Column nitrogen = new Column("ManyCells", Target.NFERT, new double[] { 40 }, 0.5);
+
+		handoverFor(model, oneUnit).writeColumns(List.of(suit, nitrogen));
+
+		assertEquals(64, model.size());
+		for (Map.Entry<String, Cell> entry : model.entrySet()) {
+			assertEquals(0.8, entry.getValue().getCapitals().get("ManyCells_suit"), entry.getKey());
+			assertEquals(20.0, entry.getValue().getNfertCosts().get("ManyCells"), entry.getKey());
+		}
+	}
+
+	@Test
+	void aPixelSplitAcrossTwoRegionsGivesEachCellItsOwnRegionsValues() {
+		// One pixel whose cells the key lists North, South, North, South, ...: two units, their cells interleaved.
+		List<String> lines = new ArrayList<>(List.of("X,Y,LPJ_cell_x,LPJ_cell_y,region"));
+		for (int x = 0; x < 10; x++) {
+			lines.add(x + ",0,10.25,50.25," + (x % 2 == 0 ? "North" : "South"));
+		}
+		CellKey key = CellKey.load(ReactToyData.write(dir, "split/cell_key.csv", lines.toArray(new String[0])));
+		DecisionUnits splitUnits = DecisionUnits.build(key, Set.of("North", "South"));
+		assertEquals(2, splitUnits.size());
+		Map<String, Cell> model = modelCells(key, id -> true);
+		double[] byRegionUnit = new double[2];
+		byRegionUnit[splitUnits.unitOf("0,0")] = 10;
+		byRegionUnit[splitUnits.unitOf("1,0")] = 20;
+
+		handoverFor(model, splitUnits).writeColumns(List.of(new Column("Split", Target.INTENSITY, byRegionUnit, 1)));
+
+		for (int x = 0; x < 10; x++) {
+			assertEquals(x % 2 == 0 ? 10.0 : 20.0, model.get(x + ",0").getIntensityCosts().get("Split"), "cell " + x);
+		}
+	}
+
+	@Test
+	void unitsWithoutModelCellsAreSkipped() {
+		// The key covers three pixels in a row, but the model has cells in the middle one only, so the first and
+		// last units have no cells to write.
+		CellKey key = gridKey("partial", 12, 4, 4, 4);
+		DecisionUnits threeUnits = DecisionUnits.build(key, Set.of("North", "South"));
+		assertEquals(3, threeUnits.size());
+		Map<String, Cell> model = modelCells(key, id -> {
+			int x = Integer.parseInt(id.split(",")[0]);
+			return x >= 4 && x < 8;
+		});
+		assertEquals(16, model.size());
+
+		handoverFor(model, threeUnits).writeColumns(
+				List.of(new Column("Partial", Target.STOCKING, new double[] { 1, 2, 3 }, 1)));
+
+		for (Cell cell : model.values()) {
+			assertEquals(2.0, cell.getStockingCosts().get("Partial"));
+		}
+	}
+
+	@Test
+	void namesNewToTheModelTakeTheirPlacesInColumnOrder() {
+		// Names no other test uses, so they are new to the cells' shared index, listed in reverse alphabetical
+		// order so that column order is not also the natural order.
+		CellKey key = gridKey("order", 8, 8, 4, 4);
+		DecisionUnits orderUnits = DecisionUnits.build(key, Set.of("North", "South"));
+		Map<String, Cell> model = modelCells(key, id -> true);
+		List<String> names = new ArrayList<>();
+		List<Column> columns = new ArrayList<>();
+		for (char c = 'z'; c >= 'a'; c--) {
+			String name = "OrderTest_" + c;
+			names.add(name);
+			columns.add(new Column(name + ReactStartupCheck.SUIT, Target.CAPITALS, new double[orderUnits.size()], 1));
+			columns.add(new Column(name, Target.INTENSITY, new double[orderUnits.size()], 1));
+		}
+
+		handoverFor(model, orderUnits).writeColumns(columns);
+
+		List<String> suits = names.stream().map(name -> name + ReactStartupCheck.SUIT).toList();
+		for (Map.Entry<String, Cell> entry : model.entrySet()) {
+			assertEquals(suits, entry.getValue().getCapitals().keySet().stream()
+					.filter(name -> name.startsWith("OrderTest_")).toList(), entry.getKey());
+			assertEquals(names, entry.getValue().getIntensityCosts().keySet().stream()
+					.filter(name -> name.startsWith("OrderTest_")).toList(), entry.getKey());
+		}
 	}
 }

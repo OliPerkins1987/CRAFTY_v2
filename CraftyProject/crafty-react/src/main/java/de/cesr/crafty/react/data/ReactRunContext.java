@@ -66,8 +66,8 @@ public record ReactRunContext(Path projectPath, String scenario, int firstYear, 
 
 	/**
 	 * What a service is worth in a region in a year. In CRAFTY this is the service's utility weight,
-	 * which is what {@code Competitiveness} uses as the price signal. Phases 3 and 4 use it; nothing in
-	 * phase 1 does.
+	 * which is what {@code Competitiveness} uses as the price signal, times core's price-feedback
+	 * multiplier when {@code use_price_feedback} is on (see {@link CoreFacts}).
 	 */
 	@FunctionalInterface
 	public interface PriceSource {

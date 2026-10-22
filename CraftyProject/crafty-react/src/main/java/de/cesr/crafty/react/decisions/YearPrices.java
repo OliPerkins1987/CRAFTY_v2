@@ -15,7 +15,9 @@ import de.cesr.crafty.react.data.ReactRunContext;
  * per tonne for crops and pasture, per m³ for forestry.
  *
  * The price is the service's weight in the unit's region and year. In price-explicit utility the weight is a
- * price in $, and react uses it as it is, with no normalisation (phase 3 plan, Q1). It is looked up once
+ * price in $, and react uses it as it is, with no normalisation (phase 3 plan, Q1). With core's
+ * {@code use_price_feedback} on, it is that weight times the region's price multiplier, as core last
+ * refreshed it (see {@link de.cesr.crafty.react.data.CoreFacts}). It is looked up once
  * per region and copied into an array by unit, so the decision loop reads it like any other per-unit value.
  *
  * Only the services asked for are looked up (in phase 3, the services of Prospect AFTs when fertiliser is

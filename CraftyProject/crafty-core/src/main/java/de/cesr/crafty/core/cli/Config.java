@@ -72,6 +72,13 @@ public class Config {
     // two are compared.
     public boolean use_conversion_cost = false;
 
+    // Price feedback (explicit-price utility only): each service's price is its file price times
+    // max(0, 1 + price_feedback_strength x (demand - supply) / demand), so oversupply lowers the price
+    // and a shortage raises it. It is refreshed whenever marginal utility is. The default strength,
+    // 0.03, is the value used in PLUM.
+    public boolean use_price_feedback = false;
+    public double price_feedback_strength = 0.03;
+
     // CRAFTY-react: AFTs adjust their management endogenously (needs the crafty-react module).
     // reactive_afts is the master switch; each element below can only be on when it is.
     public boolean reactive_afts = false;
@@ -97,6 +104,10 @@ public class Config {
     // production x area. When false, every cell counts as 1 and the Area column is not read.
     public boolean use_cell_area = false;
     public boolean use_category_based_give_in = true;
+    // Matrix give-in: the give-in threshold is read from an owner x challenger matrix
+    // (Aft_give_in_matrix.csv, or Aft_give_in_matrix_<year>.csv for one year) instead of the
+    // owner's givingInDistributionMean/SD. Cannot be used with use_category_based_give_in.
+    public boolean use_matrix_give_in = false;
     public boolean use_cell_behaviour_model = true;
     // Neighbouring effects
     public boolean use_neighbour_priority = true;
@@ -186,6 +197,7 @@ public class Config {
                 + "|-> averaged_residual_demand_per_cell=" + averaged_residual_demand_per_cell + "\n"
                 + "|-> use_cell_area=" + use_cell_area + "\n"
                 + "|-> use_category_based_give_in=" + use_category_based_give_in + "\n"
+                + "|-> use_matrix_give_in=" + use_matrix_give_in + "\n"
                 + "|-> use_cell_behaviour_model=" + use_cell_behaviour_model + "\n" + "|-> use_neighbour_priority="
                 + use_neighbour_priority + "\n" + "|-> neighbour_priority_probability=" + neighbour_priority_probability
                 + "\n" + "|-> neighbour_radius=" + neighbour_radius + "\n" + "|-> cell_selection=" + cell_selection
@@ -213,6 +225,8 @@ public class Config {
                 + "|-> use_twinned_cost=" + use_twinned_cost + "\n"
                 + "|-> twinned_competition_rate=" + twinned_competition_rate + "\n"
                 + "|-> use_conversion_cost=" + use_conversion_cost + "\n"
+                + "|-> use_price_feedback=" + use_price_feedback + "\n"
+                + "|-> price_feedback_strength=" + price_feedback_strength + "\n"
                 + "|-> reactive_afts=" + reactive_afts + "\n"
                 + "|-> reactive_fertilizer=" + reactive_fertilizer + "\n"
                 + "|-> reactive_irrigation=" + reactive_irrigation + "\n"

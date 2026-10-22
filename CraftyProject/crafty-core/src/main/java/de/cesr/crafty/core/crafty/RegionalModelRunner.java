@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,6 +46,8 @@ import de.cesr.crafty.core.utils.general.Utils;
  * Key state held by this runner:
  * - {@link #regionalSupply}: region-wide total supply per service (aggregated from cells).
  * - {@link #marginal}: marginal utility signal per service derived from demand–supply gaps.
+ * - {@link #priceMultiplier}: with use_price_feedback, the factor on each service's file price, from the
+ *   same demand–supply gaps and refreshed with {@link #marginal}.
  * - {@link #distributionMean}: per-year map of mean utility per AFT (computed from cell utilities).
  * - {@link #maxUtility}/{@link #minUtility}: utility range used for normalised-utility behaviour modes.
  *
@@ -78,6 +81,9 @@ public class RegionalModelRunner {
     private static final CustomLogger LOGGER = new CustomLogger(RegionalModelRunner.class);
     private ConcurrentHashMap<String, Double> regionalSupply;
     private ConcurrentHashMap<String, Double> marginal = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, Double> priceMultiplier = new ConcurrentHashMap<>();
+    // Services already warned about having 0 demand, which leaves them at their file price.
+    private final Set<String> zeroDemandWarned = ConcurrentHashMap.newKeySet();
     private ConcurrentHashMap<Integer, ConcurrentHashMap<String, Double>> distributionMean = new ConcurrentHashMap<>();
 
     Map<String, Double> initial_service_gaps = new ConcurrentHashMap<>();
@@ -128,6 +134,10 @@ public class RegionalModelRunner {
                 computeMarginal();
                 utilitytyForAll();
             }
+        }
+        if (ConfigLoader.config.use_price_feedback) {
+            // The prices this year's utilities, and so giving up, were just computed with.
+            listner.exportPrices(getPriceMultiplier());
         }
         try (var t = profiler.section("compute DistributionMean")) {
             computeDistributionMean();
@@ -296,7 +306,38 @@ public class RegionalModelRunner {
                 marg = serviceDemand != 0 ? marg / serviceDemand : marg;
             }
             getMarginal().put(serviceName, marg);
+
+            if (ConfigLoader.config.use_price_feedback) {
+                if (serviceDemand == 0 && zeroDemandWarned.add(serviceName)) {
+                    LOGGER.warn("Region: [" + R.getName() + "]: demand for |" + serviceName + "| is 0 in "
+                            + Timestep.getCurrentYear() + ", so its price stays at the file price while it is 0");
+                }
+                getPriceMultiplier().put(serviceName, priceMultiplier(serviceDemand, serviceSupply,
+                        ConfigLoader.config.price_feedback_strength,
+                        ServiceSet.getPenalise_Oversupply().get(serviceName)));
+            }
         });
+    }
+
+    /**
+     * Price feedback: the factor on a service's file price, from the region's demand and supply. The
+     * relative gap (demand - supply) / demand moves the price by strength x gap, so oversupply lowers it
+     * and a shortage raises it. It is never below 0, and never above 1 + strength, which is where it is
+     * when there is no supply at all. A service that does not penalise oversupply keeps at least its file
+     * price. With no demand there is no gap to respond to, so the factor is 1.
+     *
+     * This is the classic marginal utility with the price as its weight: price x (1 + strength x gap) is
+     * price + strength x (price x gap).
+     */
+    static double priceMultiplier(double demand, double supply, double strength, boolean penaliseOversupply) {
+        if (demand == 0) {
+            return 1.0;
+        }
+        double gap = (demand - supply) / demand;
+        if (!penaliseOversupply) {
+            gap = Math.max(gap, 0);
+        }
+        return Math.max(0, 1 + strength * gap);
     }
 
     /**
@@ -600,6 +641,11 @@ public class RegionalModelRunner {
 
     public ConcurrentHashMap<String, Double> getMarginal() {
         return marginal;
+    }
+
+    /** With use_price_feedback, each service's price multiplier; empty when the switch is off. */
+    public ConcurrentHashMap<String, Double> getPriceMultiplier() {
+        return priceMultiplier;
     }
 
 }

@@ -12,8 +12,10 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
+import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.core.crafty.RegionalModelRunner;
 import de.cesr.crafty.core.crafty.Service;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
@@ -23,6 +25,7 @@ import de.cesr.crafty.core.modelRunner.ModelRunner;
 import de.cesr.crafty.core.output.Listener;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
 import de.cesr.crafty.core.updaters.ProductionCostUpdater;
+import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
 /**
@@ -35,6 +38,8 @@ import de.cesr.crafty.core.updaters.Timestep;
  * the Listener has worked out the years core writes its cell maps.
  */
 public final class CoreFacts {
+
+	private static final CustomLogger LOGGER = new CustomLogger(CoreFacts.class);
 
 	/** The service core charges a stocking cost for; core hard-codes this name. */
 	private static final String PASTURE_SERVICE = "Pasture";
@@ -61,6 +66,11 @@ public final class CoreFacts {
 
 		Map<String, Boolean> capitals = new LinkedHashMap<>();
 		CapitalUpdater.getCapitalsList().forEach(capital -> capitals.put(capital, CapitalUpdater.isSuitability(capital)));
+
+		if (ConfigLoader.config.use_price_feedback) {
+			LOGGER.info("CRAFTY-react prices include core's price feedback (the multiplier from the previous year's "
+					+ "last refresh)");
+		}
 
 		return new ReactRunContext(Path.of(ConfigLoader.config.project_path), ProjectLoader.getScenario(),
 				Timestep.getStartYear(), Timestep.getEndtYear(), ProjectLoader.getServiceMetadata(), afts,
@@ -174,8 +184,9 @@ public final class CoreFacts {
 	}
 
 	/**
-	 * What a service is worth in a region in a year: its utility weight, which is the price signal
-	 * {@code Competitiveness} uses. Phases 3 and 4 use this; nothing in phase 1 does.
+	 * What a service is worth in a region in a year: its utility weight (the price file's price), which is the
+	 * price signal {@code Competitiveness} uses, times core's price-feedback multiplier for the region (see
+	 * {@link #priceMultiplier}).
 	 */
 	static double price(String service, String region, int year) {
 		var craftyRegion = CellsLoader.regions.get(region);
@@ -191,6 +202,20 @@ public final class CoreFacts {
 			throw new ReactInputException("Service " + service + " has no weight for year " + year + " in region "
 					+ region);
 		}
-		return weight;
+		return weight * priceMultiplier(service, region);
+	}
+
+	/**
+	 * Core's price-feedback multiplier for a service in a region (use_price_feedback), as the region's runner
+	 * holds it now. React decides before the year's regional step, so this is the value left by the region's
+	 * last refresh: the previous year's last competition batch. It is 1 when use_price_feedback is off, before
+	 * the runners exist or have refreshed (react's year-zero decision), and for a service with no value yet.
+	 */
+	static double priceMultiplier(String service, String region) {
+		if (!ConfigLoader.config.use_price_feedback || RegionsModelRunnerUpdater.regionsModelRunner == null) {
+			return 1.0;
+		}
+		RegionalModelRunner runner = RegionsModelRunnerUpdater.regionsModelRunner.get(region);
+		return runner == null ? 1.0 : runner.getPriceMultiplier().getOrDefault(service, 1.0);
 	}
 }

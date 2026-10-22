@@ -22,6 +22,8 @@ import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.output.ListenerByRegion;
+import de.cesr.crafty.core.updaters.LandMaskUpdater;
+import de.cesr.crafty.core.updaters.SeedUpdater;
 import de.cesr.crafty.core.updaters.ServicesUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
@@ -65,6 +67,9 @@ class RegionalModelRunnerTest {
 			ConfigLoader.config.use_explicit_price_utility = false;
 			ConfigLoader.config.use_price_only_utility = false;
 			ConfigLoader.config.use_cell_area = false;
+			ConfigLoader.config.use_price_feedback = false;
+			ConfigLoader.config.price_feedback_strength = 0.03;
+			ConfigLoader.config.use_production_costs = false;
 		}
 
 		// restore ConfigLoader.config
@@ -442,6 +447,235 @@ class RegionalModelRunnerTest {
 			// 10/2 + 6/2 = 8
 			assertEquals(8.0, meanOwner, 1e-12);
 			assertEquals(0.0, meanOther, 1e-12);
+		}
+	}
+
+	// =========================================================
+	// Price feedback
+	// =========================================================
+
+	@Test
+	void priceMultiplier_followsTheWorkedExample() {
+		// Plan 39a §2: k = 1, demand 100.
+		assertEquals(1.1, RegionalModelRunner.priceMultiplier(100, 90, 1.0, true), 1e-12);
+		assertEquals(1.0, RegionalModelRunner.priceMultiplier(100, 100, 1.0, true), 1e-12);
+		assertEquals(0.8, RegionalModelRunner.priceMultiplier(100, 120, 1.0, true), 1e-12);
+		assertEquals(0.0, RegionalModelRunner.priceMultiplier(100, 200, 1.0, true), 1e-12);
+		assertEquals(2.0, RegionalModelRunner.priceMultiplier(100, 0, 1.0, true), 1e-12);
+	}
+
+	@Test
+	void priceMultiplier_neverGoesBelowZero() {
+		// 3 x demand: 1 + 1 x (-2) = -1 without the floor.
+		assertEquals(0.0, RegionalModelRunner.priceMultiplier(100, 300, 1.0, true), 1e-12);
+	}
+
+	@Test
+	void priceMultiplier_scalesTheGapByTheStrength() {
+		// 20 % oversupply: 1 - 0.5 x 0.2 and 1 - 2 x 0.2.
+		assertEquals(0.9, RegionalModelRunner.priceMultiplier(100, 120, 0.5, true), 1e-12);
+		assertEquals(0.6, RegionalModelRunner.priceMultiplier(100, 120, 2.0, true), 1e-12);
+	}
+
+	@Test
+	void priceMultiplier_staysBetweenZeroAndOnePlusStrength() {
+		for (double strength : new double[] { 0.5, 1.0, 3.0 }) {
+			for (double supply = 0; supply <= 500; supply += 5) {
+				double m = RegionalModelRunner.priceMultiplier(100, supply, strength, true);
+				assertTrue(m >= 0 && m <= 1 + strength, "k=" + strength + ", supply=" + supply + " gave " + m);
+			}
+		}
+	}
+
+	@Test
+	void priceMultiplier_withoutOversupplyPenalty_neverFallsBelowTheFilePrice() {
+		assertEquals(1.0, RegionalModelRunner.priceMultiplier(100, 200, 1.0, false), 1e-12);
+		assertEquals(1.0, RegionalModelRunner.priceMultiplier(100, 120, 1.0, false), 1e-12);
+		// A shortage is the same either way.
+		assertEquals(1.1, RegionalModelRunner.priceMultiplier(100, 90, 1.0, false), 1e-12);
+	}
+
+	@Test
+	void priceMultiplier_isOne_withNoDemandOrNoStrength() {
+		assertEquals(1.0, RegionalModelRunner.priceMultiplier(0, 50, 1.0, true), 1e-12);
+		assertEquals(1.0, RegionalModelRunner.priceMultiplier(100, 300, 0.0, true), 1e-12);
+		assertEquals(1.0, RegionalModelRunner.priceMultiplier(100, 0, 0.0, true), 1e-12);
+	}
+
+	/** Runs body with one region R1: S1 demand 100 (penalised) and S2 demand 50 (not penalised). */
+	private void withPriceFeedbackRegion(ThrowingConsumer<RegionalModelRunner> body) throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedStatic<ServicesUpdater> su = Mockito.mockStatic(ServicesUpdater.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ts.when(Timestep::getCurrentYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1", "S2"));
+			ss.when(ServiceSet::getPenalise_Oversupply)
+					.thenReturn(new ConcurrentHashMap<>(Map.of("S1", true, "S2", false)));
+			su.when(ServicesUpdater::getDemandByRegions).thenReturn(Map.of("R1", Map.of("S1", 100.0, "S2", 50.0)));
+			su.when(ServicesUpdater::getWeightByRegions).thenReturn(Map.of("R1", Map.of("S1", 1.0, "S2", 1.0)));
+
+			installRegion("R1", mockRegion("R1", new ConcurrentHashMap<>(), 1));
+			body.accept(new RegionalModelRunner("R1"));
+		}
+	}
+
+	@FunctionalInterface
+	private interface ThrowingConsumer<T> {
+		void accept(T t) throws Exception;
+	}
+
+	@Test
+	void computeMarginal_fillsThePriceMultiplier_andFollowsSupplyEachTime() throws Exception {
+		// At the default strength, 0.03.
+		ConfigLoader.config.use_price_feedback = true;
+		withPriceFeedbackRegion(r -> {
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 120.0, "S2", 80.0)));
+			invokePrivate(r, "computeMarginal");
+			assertEquals(0.994, r.getPriceMultiplier().get("S1"), 1e-12); // 1 - 0.03 x 0.2
+			assertEquals(1.0, r.getPriceMultiplier().get("S2"), 1e-12, "S2 does not penalise oversupply");
+
+			// The next refresh (as after a competition batch) sees the new supply.
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 90.0, "S2", 40.0)));
+			invokePrivate(r, "computeMarginal");
+			assertEquals(1.003, r.getPriceMultiplier().get("S1"), 1e-12); // 1 + 0.03 x 0.1
+			assertEquals(1.006, r.getPriceMultiplier().get("S2"), 1e-12); // 1 + 0.03 x 0.2
+		});
+	}
+
+	@Test
+	void computeMarginal_usesTheConfiguredStrength() throws Exception {
+		ConfigLoader.config.use_price_feedback = true;
+		ConfigLoader.config.price_feedback_strength = 2.0;
+		withPriceFeedbackRegion(r -> {
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 120.0, "S2", 50.0)));
+			invokePrivate(r, "computeMarginal");
+			assertEquals(0.6, r.getPriceMultiplier().get("S1"), 1e-12);
+		});
+	}
+
+	@Test
+	void computeMarginal_leavesThePriceMultiplierEmpty_whenTheSwitchIsOff() throws Exception {
+		withPriceFeedbackRegion(r -> {
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 120.0, "S2", 80.0)));
+			invokePrivate(r, "computeMarginal");
+			assertTrue(r.getPriceMultiplier().isEmpty());
+		});
+	}
+
+	/**
+	 * Runs one step() on a region with no cells (S1: demand 100, supply 120), with use_price_feedback as
+	 * given, then hands the runner and its listener to check.
+	 */
+	private void stepAnEmptyRegion(boolean priceFeedbackOn, ThrowingBiConsumer<RegionalModelRunner, ListenerByRegion> check)
+			throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedStatic<ServicesUpdater> su = Mockito.mockStatic(ServicesUpdater.class);
+				MockedStatic<LandMaskUpdater> lm = Mockito.mockStatic(LandMaskUpdater.class);
+				MockedStatic<SeedUpdater> sd = Mockito.mockStatic(SeedUpdater.class);
+				MockedStatic<AFTsLoader> al = Mockito.mockStatic(AFTsLoader.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ts.when(Timestep::getCurrentYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1"));
+			ss.when(ServiceSet::getPenalise_Oversupply).thenReturn(new ConcurrentHashMap<>(Map.of("S1", true)));
+			su.when(ServicesUpdater::getDemandByRegions).thenReturn(Map.of("R1", Map.of("S1", 100.0)));
+			su.when(ServicesUpdater::getWeightByRegions).thenReturn(Map.of("R1", Map.of("S1", 1.0)));
+			sd.when(() -> SeedUpdater.selectSeed(any(), any(), anyDouble(), anyBoolean(), anyInt()))
+					.thenReturn(new java.util.ArrayList<>());
+			al.when(AFTsLoader::getActivateAFTsHash).thenReturn(new ConcurrentHashMap<>());
+
+			ConfigLoader.config.use_explicit_price_utility = true;
+			ConfigLoader.config.use_price_feedback = priceFeedbackOn;
+			installRegion("R1", regionOf());
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 120.0)));
+
+			r.step();
+
+			check.accept(r, lb.constructed().get(0));
+		}
+	}
+
+	@FunctionalInterface
+	private interface ThrowingBiConsumer<T, U> {
+		void accept(T t, U u) throws Exception;
+	}
+
+	@Test
+	void step_writesTheYearsPrices_whenPriceFeedbackIsOn() throws Exception {
+		stepAnEmptyRegion(true, (r, listener) -> {
+			assertEquals(0.994, r.getPriceMultiplier().get("S1"), 1e-12); // 20 % oversupply at strength 0.03
+			verify(listener).exportPrices(same(r.getPriceMultiplier()));
+		});
+	}
+
+	@Test
+	void step_writesNoPrices_whenPriceFeedbackIsOff() throws Exception {
+		stepAnEmptyRegion(false, (r, listener) -> verify(listener, never()).exportPrices(any()));
+	}
+
+	@Test
+	void priceFeedback_reachesGivingUp_throughTheCurrentUtility() throws Exception {
+		// Plan 39a §2.4: an intensive AFT, 8 t/ha at 900 $/ha, at a file price of 200 $/t.
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedStatic<ServicesUpdater> su = Mockito.mockStatic(ServicesUpdater.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2020);
+			ts.when(Timestep::getEndtYear).thenReturn(2020);
+			ts.when(Timestep::getCurrentYear).thenReturn(2020);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1"));
+			ss.when(ServiceSet::getPenalise_Oversupply).thenReturn(new ConcurrentHashMap<>(Map.of("S1", true)));
+			su.when(ServicesUpdater::getDemandByRegions).thenReturn(Map.of("R1", Map.of("S1", 100.0)));
+			su.when(ServicesUpdater::getWeightByRegions).thenReturn(Map.of("R1", Map.of("S1", 200.0)));
+			de.cesr.crafty.core.output.Tracker.sankeydata.computeIfAbsent("Abandoned", k -> new ConcurrentHashMap<>())
+					.computeIfAbsent(2020, k -> new ConcurrentHashMap<>());
+
+			ConfigLoader.config.use_explicit_price_utility = true;
+			ConfigLoader.config.use_production_costs = true;
+			// A strength far above the 0.03 default, so one step shows the whole chain.
+			ConfigLoader.config.price_feedback_strength = 1.0;
+
+			Aft intensive = mock(Aft.class);
+			when(intensive.isInteract()).thenReturn(true);
+			when(intensive.getLabel()).thenReturn("INT");
+			when(intensive.getNfertCostPerHa()).thenReturn(900.0);
+			Cell c = spy(new Cell(0, 0));
+			c.setOwner(intensive);
+			doReturn(8.0).when(c).competitiveness(intensive, "S1");
+
+			Service s1 = mock(Service.class);
+			when(s1.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, 200.0)));
+			Region region = regionOf(c);
+			region.getServicesHash().put("S1", s1);
+			installRegion("R1", region);
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+			// 50 % oversupply.
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 150.0)));
+
+			// Switch off: the file price holds, 200 x 8 - 900 = 700, and the owner stays.
+			invokePrivate(r, "computeMarginal");
+			invokePrivate(r, "utilitytyForAll");
+			assertEquals(700.0, c.getCurrentUtility(), 1e-9);
+			c.priceExplicitGiveUp(r);
+			assertSame(intensive, c.getOwner());
+
+			// Switch on: the price halves, 100 x 8 - 900 = -100, and the owner gives up.
+			ConfigLoader.config.use_price_feedback = true;
+			invokePrivate(r, "computeMarginal");
+			invokePrivate(r, "utilitytyForAll");
+			assertEquals(-100.0, c.getCurrentUtility(), 1e-9);
+			c.priceExplicitGiveUp(r);
+			assertNull(c.getOwner(), "Oversupply must make the intensive owner give up");
+			assertTrue(region.getUnmanageCellsR().contains(c));
 		}
 	}
 

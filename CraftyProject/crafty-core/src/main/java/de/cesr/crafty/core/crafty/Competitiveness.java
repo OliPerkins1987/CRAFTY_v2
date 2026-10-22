@@ -46,8 +46,9 @@ import de.cesr.crafty.core.utils.general.DeterministicRandom;
  * - If a cell is unmanaged/abandoned, a competitor may take over when its utility meets the acceptance
  *   criterion (mean distribution threshold or positive normalised utility, depending on mode).
  * - If the cell has an interacting owner, the competitor must exceed the current owner by a threshold:
- *   either a simple give-in threshold (drawn from owner parameters or category-pair distributions) or,
- *   when enabled, a behaviour-based give-in value computed by {@link CellBehaviour}.
+ *   either a simple give-in threshold (drawn from owner parameters or category-pair distributions, or
+ *   read from the owner x challenger give-in matrix when use_matrix_give_in is on) or, when enabled, a
+ *   behaviour-based give-in value computed by {@link CellBehaviour}.
  *
  * Every successful land-use change increments {@link Listener#landUseChangeCounter}.
  */
@@ -102,7 +103,8 @@ public class Competitiveness {
     }
 
     private static double priceBasedUtility(Cell c, Aft a, RegionalModelRunner r,
-                                            boolean normaliseToBaseline, boolean subtractCosts) {
+                                            boolean normaliseToBaseline, boolean subtractCosts,
+                                            boolean applyPriceFeedback) {
         if (a == null || !a.isInteract()) {
             return 0;
         }
@@ -111,6 +113,10 @@ public class Competitiveness {
             double weight = service.getWeights().get(Timestep.getCurrentYear());
             if (normaliseToBaseline) {
                 weight = weight / service.getWeights().get(Timestep.getStartYear());
+            }
+            if (applyPriceFeedback) {
+                // The region's demand-supply multiplier, from the last marginal-utility refresh.
+                weight = weight * r.getPriceMultiplier().getOrDefault(serviceName, 1.0);
             }
             double result = weight * c.competitiveness(a, serviceName);
             if (Double.isNaN(result) || Double.isInfinite(result)) {
@@ -122,11 +128,12 @@ public class Competitiveness {
     }
 
     private static double utilityUseExplicitPrice(Cell c, Aft a, RegionalModelRunner r) {
-        return priceBasedUtility(c, a, r, false, true);
+        return priceBasedUtility(c, a, r, false, true, ConfigLoader.config.use_price_feedback);
     }
 
     private static double utilityUseOnlyPrice(Cell c, Aft a, RegionalModelRunner r) {
-        return priceBasedUtility(c, a, r, true, false);
+        // PLUM sets the price in this mode, so price feedback never applies.
+        return priceBasedUtility(c, a, r, true, false, false);
     }
 
     // ── Land-use change decision logic ──────────────────────────────────
@@ -293,6 +300,11 @@ public class Competitiveness {
     // ── Give-in threshold ───────────────────────────────────────────────
 
     private static double giveInThreshold(Cell cell, Aft owner, Aft competitor) {
+        // No random draw is skipped elsewhere by returning here: each draw is a hash of
+        // its own inputs, not the next number from a shared stream.
+        if (ConfigLoader.config.use_matrix_give_in) {
+            return matrixGiveIn(owner, competitor);
+        }
         long runSeed = ConfigLoader.config.random_seed;
         int year = Timestep.getCurrentYear();
 
@@ -312,6 +324,17 @@ public class Competitiveness {
             }
         }
         return owner.getGiveInMean() + owner.getGiveInSD() * gaussian;
+    }
+
+    /**
+     * Matrix give-in: the owner's row of the give-in matrix, at the challenger's column. A pair
+     * with no value (a blank cell, or an AFT missing from the matrix) falls back to the owner's
+     * givingInDistributionMean. There is no noise in this option.
+     */
+    static double matrixGiveIn(Aft owner, Aft competitor) {
+        IndexedValues row = owner.getGiveInRow();
+        Double value = row == null ? null : row.get(competitor.getLabel());
+        return value != null ? value : owner.getGiveInMean();
     }
 
     // ── Conversion cost ─────────────────────────────────────────────────

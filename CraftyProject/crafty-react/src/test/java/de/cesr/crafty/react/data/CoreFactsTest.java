@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,7 @@ import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.crafty.Cell;
 import de.cesr.crafty.core.crafty.Region;
+import de.cesr.crafty.core.crafty.RegionalModelRunner;
 import de.cesr.crafty.core.crafty.Service;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
@@ -34,6 +36,7 @@ import de.cesr.crafty.core.modelRunner.ModelRunner;
 import de.cesr.crafty.core.output.Listener;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
 import de.cesr.crafty.core.updaters.ProductionCostUpdater;
+import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
 /**
@@ -49,11 +52,13 @@ class CoreFactsTest {
 	private ProductionCostUpdater originalCostUpdater;
 	private int originalStartYear;
 	private int originalEndYear;
+	private ConcurrentHashMap<String, RegionalModelRunner> originalRunners;
 
 	@BeforeEach
 	void setUp() {
 		originalConfig = ConfigLoader.config;
 		originalCostUpdater = ModelRunner.productionCostUpdater;
+		originalRunners = RegionsModelRunnerUpdater.regionsModelRunner;
 		originalStartYear = Timestep.getStartYear();
 		originalEndYear = Timestep.getEndtYear();
 
@@ -89,6 +94,7 @@ class CoreFactsTest {
 	void restore() {
 		ConfigLoader.config = originalConfig;
 		ModelRunner.productionCostUpdater = originalCostUpdater;
+		RegionsModelRunnerUpdater.regionsModelRunner = originalRunners;
 		Timestep.setStartYear(originalStartYear);
 		Timestep.setEndtYear(originalEndYear);
 		AFTsLoader.getAftHash().clear();
@@ -241,6 +247,64 @@ class CoreFactsTest {
 		assertThrows(ReactInputException.class, () -> context.price("C3cereals", "East", 2020));
 		assertThrows(ReactInputException.class, () -> context.price("Pasture", "North", 2020));
 		assertThrows(ReactInputException.class, () -> context.price("C3cereals", "North", 2021));
+	}
+
+	/** Puts mock runners in core's runner map, one per region, each holding the given price multipliers. */
+	private static void runnersWith(Map<String, Map<String, Double>> multipliersByRegion) {
+		ConcurrentHashMap<String, RegionalModelRunner> runners = new ConcurrentHashMap<>();
+		multipliersByRegion.forEach((region, multipliers) -> {
+			RegionalModelRunner runner = mock(RegionalModelRunner.class);
+			when(runner.getPriceMultiplier()).thenReturn(new ConcurrentHashMap<>(multipliers));
+			runners.put(region, runner);
+		});
+		RegionsModelRunnerUpdater.regionsModelRunner = runners;
+	}
+
+	@Test
+	void withPriceFeedbackOff_thePriceIsTheFilePrice_evenWhenARunnerHoldsAMultiplier() {
+		runnersWith(Map.of("North", Map.of("C3cereals", 0.5)));
+		ReactRunContext context = CoreFacts.fromCore();
+
+		assertFalse(ConfigLoader.config.use_price_feedback, "core's default");
+		assertEquals(4.5, context.price("C3cereals", "North", 2020));
+	}
+
+	@Test
+	void withPriceFeedbackOn_eachRegionsOwnMultiplierScalesTheFilePrice() {
+		ConfigLoader.config.use_price_feedback = true;
+		runnersWith(Map.of("North", Map.of("C3cereals", 0.5), "South", Map.of("C3cereals", 1.2)));
+		ReactRunContext context = CoreFacts.fromCore();
+
+		assertEquals(2.25, context.price("C3cereals", "North", 2020), 1e-12); // 4.5 x 0.5
+		assertEquals(10.8, context.price("C3cereals", "South", 2020), 1e-12); // 9.0 x 1.2
+	}
+
+	@Test
+	void withPriceFeedbackOn_thePriceIsTheFilePrice_untilCoreHasAMultiplier() {
+		ConfigLoader.config.use_price_feedback = true;
+		ReactRunContext context = CoreFacts.fromCore();
+
+		// React's year-zero decision runs before core has made its runners.
+		RegionsModelRunnerUpdater.regionsModelRunner = null;
+		assertEquals(4.5, context.price("C3cereals", "North", 2020));
+
+		// No runner for the region.
+		runnersWith(Map.of("South", Map.of("C3cereals", 1.2)));
+		assertEquals(4.5, context.price("C3cereals", "North", 2020));
+
+		// A runner that has not refreshed yet.
+		runnersWith(Map.of("North", Map.of()));
+		assertEquals(4.5, context.price("C3cereals", "North", 2020));
+	}
+
+	@Test
+	void withPriceFeedbackOn_aMultiplierOfZeroGivesAPriceOfZero() {
+		ConfigLoader.config.use_price_feedback = true;
+		runnersWith(Map.of("North", Map.of("C3cereals", 0.0)));
+		ReactRunContext context = CoreFacts.fromCore();
+
+		// Finite, so YearPrices takes it: it refuses only prices that are not numbers or infinite.
+		assertEquals(0.0, context.price("C3cereals", "North", 2020));
 	}
 
 	@Test

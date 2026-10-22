@@ -3,6 +3,8 @@ package de.cesr.crafty.core.output;
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -29,7 +31,9 @@ import de.cesr.crafty.core.utils.general.Utils;
  * (cells/agents per AFT). - Regional service supply vs. demand time series. -
  * Service calibration factors / demand–supply equilibrium metadata (per
  * service). - Mean utilities per AFT for the region (based on the regional
- * model runner statistics).
+ * model runner statistics). - With use_price_feedback, each service's file
+ * price, price after feedback and the multiplier between them; this file is
+ * written for single-region runs too, since the price is set per region.
  *
  * Files are written under: {output_folder}/region_{RegionName}/
  *
@@ -49,6 +53,7 @@ public class ListenerByRegion {
 	private String[][] eqServicedemandListener;
 	public String[][] DSEquilibriumListener;
 	public String[][] averageUtilities;
+	private String[][] priceListener;
 
 	public ListenerByRegion(Region R) {
 		this.R = R;
@@ -84,6 +89,39 @@ public class ListenerByRegion {
 		DSEquilibriumListener[0][0] = "Service";
 		DSEquilibriumListener[0][1] = "Calibration_Factor";
 
+		List<String> services = ServiceSet.getServicesList();
+		priceListener = new String[Timestep.getSize() + 1][services.size() * 3 + 1];
+		priceListener[0][0] = "Year";
+		for (int i = 0; i < services.size(); i++) {
+			priceListener[0][i + 1] = "FilePrice:" + services.get(i);
+			priceListener[0][i + 1 + services.size()] = "Price:" + services.get(i);
+			priceListener[0][i + 1 + 2 * services.size()] = "Multiplier:" + services.get(i);
+		}
+	}
+
+	/**
+	 * Records and writes this year's prices under use_price_feedback: for each service, the price from
+	 * the price file, the price after feedback, and the multiplier between them. A service with no
+	 * multiplier yet is at its file price.
+	 */
+	public void exportPrices(Map<String, Double> priceMultiplier) {
+		if (!ConfigLoader.config.generate_output_files) {
+			return;
+		}
+		List<String> services = ServiceSet.getServicesList();
+		int y = Timestep.getTick() + 1;
+		priceListener[y][0] = String.valueOf(Timestep.getCurrentYear());
+		for (int i = 0; i < services.size(); i++) {
+			String serviceName = services.get(i);
+			double filePrice = R.getServicesHash().get(serviceName).getWeights().get(Timestep.getCurrentYear());
+			double multiplier = priceMultiplier.getOrDefault(serviceName, 1.0);
+			priceListener[y][i + 1] = String.valueOf(filePrice);
+			priceListener[y][i + 1 + services.size()] = String.valueOf(filePrice * multiplier);
+			priceListener[y][i + 1 + 2 * services.size()] = String.valueOf(multiplier);
+		}
+		String dir = PathTools.makeDirectory(
+				ConfigLoader.config.output_folder_name + File.separator + "region_" + R.getName() + File.separator);
+		CsvTools.writeCSVfile(priceListener, Paths.get(dir + "region_" + R.getName() + "-ServicePrices.csv"));
 	}
 
 	public void fillDSEquilibriumListener(ConcurrentHashMap<String, Service> ServiceHash) {

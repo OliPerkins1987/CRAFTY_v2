@@ -796,4 +796,188 @@ class ConfigLoaderTest {
 
         assertTrue(cfg.use_conversion_cost);
     }
+
+    // =========================================================
+    // Matrix give-in
+    // =========================================================
+
+    @Test
+    void matrixGiveInShouldBeOffByDefault() {
+        assertFalse(new Config().use_matrix_give_in, "Matrix give-in must be off by default");
+        assertNull(ConfigLoader.matrixGiveInConfigError(new Config()));
+        assertNull(ConfigLoader.matrixGiveInConfigWarning(new Config()), "No warning with the switch off");
+    }
+
+    @Test
+    void matrixGiveInShouldWarnThatBlankCellsHaveNoNoise() throws Exception {
+        Config c = configWithSwitchesOn("use_matrix_give_in");
+        c.use_category_based_give_in = false;
+
+        assertEquals("matrix give in is on: noise will not be used for NA values in the give in matrix",
+                ConfigLoader.matrixGiveInConfigWarning(c));
+    }
+
+    @Test
+    void matrixGiveInWithCategoryGiveInShouldStopTheRun() throws Exception {
+        // use_category_based_give_in defaults to true, so switching on the matrix alone hits this.
+        Config c = configWithSwitchesOn("use_matrix_give_in");
+
+        assertTrue(c.use_category_based_give_in);
+        String error = ConfigLoader.matrixGiveInConfigError(c);
+        assertNotNull(error, "The two give-in sources must not both be on");
+        assertTrue(error.contains("use_category_based_give_in: false"), "The message must say how to fix it. Got: " + error);
+    }
+
+    @Test
+    void matrixGiveInWithoutCategoryGiveInShouldNotStop() throws Exception {
+        Config c = configWithSwitchesOn("use_matrix_give_in");
+        c.use_category_based_give_in = false;
+
+        assertNull(ConfigLoader.matrixGiveInConfigError(c));
+    }
+
+    @Test
+    void categoryGiveInAloneShouldNotStop() {
+        Config c = new Config();
+        c.use_category_based_give_in = true;
+
+        assertNull(ConfigLoader.matrixGiveInConfigError(c));
+    }
+
+    @Test
+    void matrixGiveInShouldLoadFromYaml() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("matrix-give-in-config.yaml");
+        Files.writeString(configFile, "use_category_based_give_in: false\nuse_matrix_give_in: true\n");
+        ConfigLoader.configPath = configFile.toString();
+
+        Config cfg = invokeLoadConfig();
+
+        assertTrue(cfg.use_matrix_give_in);
+        assertFalse(cfg.use_category_based_give_in);
+    }
+
+    // =========================================================
+    // Price feedback
+    // =========================================================
+
+    /** Price feedback on in the set-up it assumes: explicit price, production costs, initial equilibrium. */
+    private static Config priceFeedbackConfig() throws Exception {
+        return configWithSwitchesOn("use_price_feedback", "use_explicit_price_utility", "use_production_costs");
+    }
+
+    @Test
+    void priceFeedbackShouldBeOffByDefault() {
+        Config c = new Config();
+
+        assertFalse(c.use_price_feedback, "Price feedback must be off by default");
+        assertEquals(0.03, c.price_feedback_strength, "The default strength is PLUM's value");
+        assertNull(ConfigLoader.priceFeedbackConfigError(c));
+        assertTrue(ConfigLoader.priceFeedbackConfigWarnings(c).isEmpty(), "No warning with the switch off");
+    }
+
+    @Test
+    void priceFeedbackSwitchedOffShouldNeverStopOrWarn() throws Exception {
+        // With the switch off, neither the utility mode nor the strength matters.
+        for (Config c : List.of(configWithSwitchesOn("use_price_only_utility"),
+                configWithSwitchesOn("use_explicit_price_utility"))) {
+            c.price_feedback_strength = -1.0;
+            c.initial_demand_supply_equilibrium = false;
+
+            assertNull(ConfigLoader.priceFeedbackConfigError(c));
+            assertTrue(ConfigLoader.priceFeedbackConfigWarnings(c).isEmpty());
+        }
+    }
+
+    @Test
+    void priceFeedbackInTheSetUpItAssumesShouldNeitherStopNorWarn() throws Exception {
+        Config c = priceFeedbackConfig();
+
+        assertTrue(c.initial_demand_supply_equilibrium);
+        assertNull(ConfigLoader.priceFeedbackConfigError(c));
+        assertTrue(ConfigLoader.priceFeedbackConfigWarnings(c).isEmpty());
+    }
+
+    @Test
+    void priceFeedbackWithoutExplicitPriceUtilityShouldStopTheRun() throws Exception {
+        // Only price-explicit utility uses a price, so there is nothing to scale in the marginal modes.
+        for (Config c : List.of(configWithSwitchesOn("use_price_feedback"),
+                configWithSwitchesOn("use_price_feedback", "use_production_costs", "use_cell_level_taxes"))) {
+            String error = ConfigLoader.priceFeedbackConfigError(c);
+
+            assertNotNull(error, "Price feedback without explicit-price utility must be rejected");
+            assertTrue(error.contains("use_explicit_price_utility: true"),
+                    "The message must say how to fix it. Got: " + error);
+        }
+    }
+
+    @Test
+    void priceFeedbackWithPriceOnlyUtilityShouldStopTheRun() throws Exception {
+        // In the PLUM price-ratio mode, PLUM is the market.
+        String error = ConfigLoader.priceFeedbackConfigError(
+                configWithSwitchesOn("use_price_feedback", "use_price_only_utility"));
+
+        assertNotNull(error, "Price feedback in the PLUM price-ratio mode must be rejected");
+        assertTrue(error.contains("use_price_only_utility"), "The message must name the mode. Got: " + error);
+    }
+
+    @Test
+    void priceFeedbackStrengthMustBeAFiniteNumberOfAtLeastZero() throws Exception {
+        for (double bad : new double[] { -0.1, Double.NaN, Double.POSITIVE_INFINITY }) {
+            Config c = priceFeedbackConfig();
+            c.price_feedback_strength = bad;
+
+            String error = ConfigLoader.priceFeedbackConfigError(c);
+            assertNotNull(error, "Strength " + bad + " must be rejected");
+            assertTrue(error.contains("price_feedback_strength"), "The message must name the option. Got: " + error);
+        }
+
+        // 0 is allowed: it switches the feedback off without switching the option off.
+        Config zero = priceFeedbackConfig();
+        zero.price_feedback_strength = 0.0;
+        assertNull(ConfigLoader.priceFeedbackConfigError(zero));
+    }
+
+    @Test
+    void priceFeedbackWithoutProductionCostsShouldWarnButNotStop() throws Exception {
+        Config c = configWithSwitchesOn("use_price_feedback", "use_explicit_price_utility");
+
+        assertNull(ConfigLoader.priceFeedbackConfigError(c), "This set-up must not stop the run");
+        List<String> warnings = ConfigLoader.priceFeedbackConfigWarnings(c);
+        assertEquals(1, warnings.size(), "Got: " + warnings);
+        assertTrue(warnings.get(0).contains("use_production_costs"), "The warning must name the switch. Got: " + warnings);
+        assertTrue(warnings.get(0).contains("give up"), "The warning must say what is lost. Got: " + warnings);
+    }
+
+    @Test
+    void priceFeedbackWithoutInitialEquilibriumShouldWarnButNotStop() throws Exception {
+        Config c = priceFeedbackConfig();
+        c.initial_demand_supply_equilibrium = false;
+
+        assertNull(ConfigLoader.priceFeedbackConfigError(c), "This set-up must not stop the run");
+        List<String> warnings = ConfigLoader.priceFeedbackConfigWarnings(c);
+        assertEquals(1, warnings.size(), "Got: " + warnings);
+        assertTrue(warnings.get(0).contains("initial_demand_supply_equilibrium"),
+                "The warning must name the switch. Got: " + warnings);
+    }
+
+    @Test
+    void priceFeedbackShouldLoadFromYaml() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("price-feedback-config.yaml");
+        Files.writeString(configFile,
+                "use_explicit_price_utility: true\nuse_price_feedback: true\nprice_feedback_strength: 0.5\n");
+        ConfigLoader.configPath = configFile.toString();
+
+        Config cfg = invokeLoadConfig();
+
+        assertTrue(cfg.use_price_feedback);
+        assertEquals(0.5, cfg.price_feedback_strength);
+    }
 }

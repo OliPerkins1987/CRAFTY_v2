@@ -96,6 +96,7 @@ public class AFTsLoader extends HashSet<Aft> {
 		initializeAftList();
 		AftCategorised.CategoriesLoader();
 		AftCategorised.initializeBehaviourByCategories();
+		AftGiveInMatrix.initialize();
 		aft_production_paths.clear();
 		aft_behaviour_paths.clear();
 		aft_production_paths = production_paths();

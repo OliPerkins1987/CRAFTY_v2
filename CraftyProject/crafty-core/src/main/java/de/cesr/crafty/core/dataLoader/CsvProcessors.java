@@ -304,6 +304,17 @@ public class CsvProcessors {
 	}
 
 	public static HashMap<String, Double> readCsvToMatrixMap(Path csvFilePath) {
+		return readCsvToMatrixMap(csvFilePath, false);
+	}
+
+	/**
+	 * Reads a matrix CSV into a map keyed "rowLabel|columnName".
+	 *
+	 * @param skipBlankCells when true, a blank cell is left out of the map, so the
+	 *                       caller can tell "no value" from 0. When false, a blank
+	 *                       cell is read as 0, as it always has been.
+	 */
+	public static HashMap<String, Double> readCsvToMatrixMap(Path csvFilePath, boolean skipBlankCells) {
 		// Read the CSV with headers enabled
 		CsvReadOptions options = CsvReadOptions.builder(csvFilePath.toFile()).header(true).separator(',').build();
 		Table table = null;
@@ -323,6 +334,9 @@ public class CsvProcessors {
 			for (int colIndex = 1; colIndex < table.columnCount(); colIndex++) {
 				String colName = columnNames.get(colIndex);
 				String cellValue = table.getString(rowIndex, colIndex);
+				if (skipBlankCells && (cellValue == null || cellValue.isBlank())) {
+					continue;
+				}
 				String key = rowLabel + "|" + colName;
 				matrixMap.put(key, Utils.sToD(cellValue));
 			}

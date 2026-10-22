@@ -15,6 +15,11 @@ use_explicit_price_utility: false              # Utility = price * productivity 
 use_price_only_utility: false                  # Utility = (price_t / price_t0) * productivity (PLUM coupling price-ratio mode)
 use_normalised_price_competition: false        # Use normalised difference competition: (uC-uO)/(|uC|+|uO|) with uC<=0 guard
 
+# Price feedback (explicit-price utility only; assumes production costs are on)
+# Price = file price x max(0, 1 + price_feedback_strength x (demand - supply) / demand), refreshed with marginal utility.
+use_price_feedback: false                      # Requires use_explicit_price_utility; oversupply lowers the price, a shortage raises it
+price_feedback_strength: 0.03                  # >= 0 (0.03 is PLUM's value); 0 = no feedback; with no supply the price is at most (1 + strength) x file price
+
 # Giving up methods
 use_abandonment_threshold: true               # Abandon cell if agent competitiveness falls below threshold
 use_price_explicit_giving_up: false           # Deterministic give-up: agent abandons when utility + subsidy < 0 (mutually exclusive with use_abandonment_threshold)
@@ -53,6 +58,12 @@ twinned_competition_rate: 1.0                  # Fraction of eligible twin-owned
 # Owner's "Conversion_cost" (AFTsMetaData) is added to its utility when challenged by an AFT from another Category.
 # Needs Conversion_cost and Category columns in AFTsMetaData. Designed for use_normalised_price_competition.
 use_conversion_cost: false                     # Requires use_explicit_price_utility
+
+# Matrix give-in
+# The give-in threshold is read from an owner (row) x challenger (column) matrix: Aft_give_in_matrix.csv, or
+# Aft_give_in_matrix_<year>.csv for one year. Looked for in aft_behaviour_parameters_directory when set, otherwise
+# in AFTs/agents/default_behaviour/. A blank cell falls back to the owner's givingInDistributionMean.
+use_matrix_give_in: false                      # Requires use_category_based_give_in: false (it defaults to true)
 
 # Land-control directories can contain one or more mask inputs.
 

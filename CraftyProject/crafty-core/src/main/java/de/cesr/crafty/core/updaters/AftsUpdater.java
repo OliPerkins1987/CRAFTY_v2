@@ -15,6 +15,7 @@ import de.cesr.crafty.core.crafty.ManagerTypes;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
+import de.cesr.crafty.core.dataLoader.afts.AftGiveInMatrix;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.utils.file.CsvTools;
@@ -30,6 +31,7 @@ import tech.tablesaw.io.csv.CsvReadOptions;
  * changes defined in the input directories. It supports:
  * - Updating AFT production parameters (productivity levels and sensitivity matrix).
  * - Updating AFT behavioural parameters (give-in/give-up distributions, probabilities).
+ * - Switching each AFT's give-in matrix row to the year's matrix ({@link AftGiveInMatrix}).
  *
  * Update logic:
  * - Parameter file paths are pre-resolved by {@link AFTsLoader} into maps keyed by AFT label and
@@ -70,6 +72,7 @@ public class AftsUpdater extends AbstractUpdater {
 	public void step() {
 		updatePorB("production");
 		updatePorB("agents");
+		AftGiveInMatrix.updateForYear(Timestep.getCurrentYear());
 		updateAftCapitalAdjustmentValues();
 
 	}

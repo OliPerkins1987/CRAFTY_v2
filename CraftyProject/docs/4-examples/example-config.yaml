@@ -59,6 +59,21 @@ use_cell_behaviour_model: false
 # cell_behaviour_parameters_directory: "C:/.../worlds/behaviour/scenario"
 # cell_behaviour_logistic_steepness: 7
 
+# Matrix give-in (optional, needs use_category_based_give_in: false): the give-in threshold is
+# read from an owner (row) x challenger (column) matrix, Aft_give_in_matrix.csv, or
+# Aft_give_in_matrix_<year>.csv for one year. Looked for in aft_behaviour_parameters_directory
+# when set, otherwise in AFTs/agents/default_behaviour/. A blank cell falls back to the
+# owner's givingInDistributionMean.
+use_matrix_give_in: false
+
+# Price feedback (optional, needs use_explicit_price_utility: true and assumes production
+# costs are on): each service's price is its file price x
+# max(0, 1 + price_feedback_strength x (demand - supply) / demand), so oversupply lowers
+# the price and a shortage raises it. Prices are written to region_<R>-ServicePrices.csv.
+# The default strength, 0.03, is the value used in PLUM.
+use_price_feedback: false
+price_feedback_strength: 0.03
+
 # Neighbour effects (competition candidate filtering)
 use_neighbour_priority: true
 neighbour_priority_probability: 0.95

@@ -68,6 +68,11 @@ public abstract class AbstractAft {
 	// AFT from another category challenges it (use_conversion_cost)
 	private double conversionCost = 0.0;
 
+	// Matrix give-in (use_matrix_give_in): this AFT's row of the give-in matrix, i.e. its
+	// give-in threshold against each challenger, keyed by the challenger's label. A
+	// challenger with no value falls back to giveInMean. Null when the switch is off.
+	private IndexedValues giveInRow = null;
+
 	// Subsidy eligibility (0.0 = none, 1.0 = full, fractional = partial)
 	private double receivesSubsidy = 0.0;
 
@@ -165,6 +170,14 @@ public abstract class AbstractAft {
 
 	public void setGiveInSD(double giveInSD) {
 		this.giveInSD = giveInSD;
+	}
+
+	public IndexedValues getGiveInRow() {
+		return giveInRow;
+	}
+
+	public void setGiveInRow(IndexedValues giveInRow) {
+		this.giveInRow = giveInRow;
 	}
 
 	public double getGiveUpMean() {

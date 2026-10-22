@@ -145,6 +145,8 @@ public class ConfigLoader {
 		validateTwinnedAftConfig();
 		validatePriceUtilityConfig();
 		validateConversionCostConfig();
+		validateMatrixGiveInConfig();
+		validatePriceFeedbackConfig();
 		validateReactiveConfig();
 		try {
 			loadExternalRScriptRunnerConfig();
@@ -217,6 +219,106 @@ public class ConfigLoader {
 					+ "produce odd results.";
 		}
 		return null;
+	}
+
+	/**
+	 * Matrix give-in and category give-in are two sources for the same give-in
+	 * threshold, so the run stops if both are switched on. When the matrix is on,
+	 * the run warns that a blank (NA) cell falls back to the owner's
+	 * givingInDistributionMean without its noise.
+	 */
+	static void validateMatrixGiveInConfig() {
+		if (config == null) return;
+		String error = matrixGiveInConfigError(config);
+		if (error != null) {
+			LOGGER.fatal(error);
+			return;
+		}
+		String warning = matrixGiveInConfigWarning(config);
+		if (warning != null) {
+			LOGGER.warn(warning);
+		}
+	}
+
+	/**
+	 * The rule behind {@link #validateMatrixGiveInConfig()}, kept separate because
+	 * LOGGER.fatal exits the JVM and so cannot be exercised from a test.
+	 *
+	 * @return the message to stop the run with, or null if the settings are valid
+	 */
+	static String matrixGiveInConfigError(Config c) {
+		if (c.use_matrix_give_in && c.use_category_based_give_in) {
+			return "use_matrix_give_in and use_category_based_give_in are both on, but they are two sources for "
+					+ "the same give-in threshold. Set use_category_based_give_in: false to use the matrix "
+					+ "(it defaults to true, so it must be set explicitly).";
+		}
+		return null;
+	}
+
+	/** @return the warning to log, or null if there is nothing to warn about */
+	static String matrixGiveInConfigWarning(Config c) {
+		if (c.use_matrix_give_in) {
+			return "matrix give in is on: noise will not be used for NA values in the give in matrix";
+		}
+		return null;
+	}
+
+	/**
+	 * Price feedback scales the file price, so the run stops if it is switched on
+	 * without price-explicit utility, or with the PLUM price-ratio mode, where PLUM
+	 * sets the price. The strength must be a number of at least 0. With the switch
+	 * on, the run warns about set-ups it does not assume.
+	 */
+	static void validatePriceFeedbackConfig() {
+		if (config == null) return;
+		String error = priceFeedbackConfigError(config);
+		if (error != null) {
+			LOGGER.fatal(error);
+			return;
+		}
+		priceFeedbackConfigWarnings(config).forEach(LOGGER::warn);
+	}
+
+	/**
+	 * The rule behind {@link #validatePriceFeedbackConfig()}, kept separate because
+	 * LOGGER.fatal exits the JVM and so cannot be exercised from a test.
+	 *
+	 * @return the message to stop the run with, or null if the settings are valid
+	 */
+	static String priceFeedbackConfigError(Config c) {
+		if (!c.use_price_feedback) {
+			return null;
+		}
+		if (c.use_price_only_utility) {
+			return "use_price_feedback cannot be used with use_price_only_utility. In the PLUM price-ratio mode, "
+					+ "PLUM sets the price. Use use_explicit_price_utility: true instead.";
+		}
+		if (!c.use_explicit_price_utility) {
+			return "use_price_feedback needs use_explicit_price_utility: true. Price feedback scales the price "
+					+ "of each service, and only price-explicit utility uses a price.";
+		}
+		if (!Double.isFinite(c.price_feedback_strength) || c.price_feedback_strength < 0) {
+			return "price_feedback_strength must be a number of at least 0, got: " + c.price_feedback_strength;
+		}
+		return null;
+	}
+
+	/** @return the warnings to log, in a fixed order; empty if there is nothing to warn about */
+	static List<String> priceFeedbackConfigWarnings(Config c) {
+		List<String> warnings = new ArrayList<>();
+		if (!c.use_price_feedback) {
+			return warnings;
+		}
+		if (!c.use_production_costs) {
+			warnings.add("use_price_feedback is on but use_production_costs is off. Price feedback assumes "
+					+ "production costs: without them utility cannot fall below 0, so oversupply will never make "
+					+ "a cell give up under use_price_explicit_giving_up. It acts through competition only.");
+		}
+		if (!c.initial_demand_supply_equilibrium) {
+			warnings.add("use_price_feedback is on but initial_demand_supply_equilibrium is off. Even in the "
+					+ "first year, prices will differ from the price file wherever demand does not equal supply.");
+		}
+		return warnings;
 	}
 
 	/**

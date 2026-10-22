@@ -71,6 +71,8 @@ class CompetitivenessTest {
             ConfigLoader.config.use_explicit_price_utility = false;
             ConfigLoader.config.use_price_only_utility = false;
             ConfigLoader.config.use_conversion_cost = false;
+            ConfigLoader.config.use_matrix_give_in = false;
+            ConfigLoader.config.use_price_feedback = false;
         }
 
         // restore config
@@ -1226,6 +1228,174 @@ class CompetitivenessTest {
     }
 
     // -------------------------------------------------------
+    // Matrix give-in (use_matrix_give_in)
+    // -------------------------------------------------------
+    //
+    // The same cell as for conversion cost: the owner holds it at utility 20 and the challenger's
+    // utility is 130. The owner's givingInDistributionMean is 0.1 and its SD 0.5, so a threshold of
+    // exactly 0.1 shows the fallback has no noise.
+    //   normalised price: (130-20)/150 = 0.733, so matrix give-in 0.7 lets the challenger in, 0.8 does not
+    //   raw (meanY 200):  130-20 = 110, so 200 x 0.5 = 100 lets it in, 200 x 0.6 = 120 does not
+
+    /** A give-in matrix row: challenger label, threshold, challenger label, threshold, ... */
+    private static IndexedValues giveInRow(Object... labelsAndValues) {
+        IndexedValues row = new IndexedValues(new IndexedValues.Index());
+        for (int i = 0; i < labelsAndValues.length; i += 2) {
+            row.put((String) labelsAndValues[i], ((Number) labelsAndValues[i + 1]).doubleValue());
+        }
+        return row;
+    }
+
+    private static Aft matrixAft(String label) {
+        Aft a = conversionAft(label, "Nonex", 0.0);
+        a.setGiveInSD(0.5);
+        return a;
+    }
+
+    /** As withConversionCost(false, ...), with use_matrix_give_in as given. */
+    private void withMatrixGiveIn(boolean matrixOn, RunnerBody body) throws Throwable {
+        withConversionCost(false, r -> {
+            ConfigLoader.config.use_matrix_give_in = matrixOn;
+            try {
+                body.run(r);
+            } finally {
+                ConfigLoader.config.use_matrix_give_in = false;
+            }
+        });
+    }
+
+    private double callGiveInThreshold(Cell c, Aft owner, Aft competitor) {
+        try {
+            Method m = Competitiveness.class.getDeclaredMethod("giveInThreshold", Cell.class, Aft.class, Aft.class);
+            m.setAccessible(true);
+            return (double) m.invoke(null, c, owner, competitor);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void matrixGiveIn_readsTheOwnersRow_atTheChallengersColumn() {
+        Aft owner = matrixAft("OWN");
+        Aft challenger = matrixAft("COMP");
+        owner.setGiveInRow(giveInRow("COMP", 0.7, "OTHER", 0.2));
+        challenger.setGiveInRow(giveInRow("OWN", 0.9));
+
+        assertEquals(0.7, Competitiveness.matrixGiveIn(owner, challenger), 0.0);
+        assertEquals(0.9, Competitiveness.matrixGiveIn(challenger, owner), 0.0);
+    }
+
+    @Test
+    void matrixGiveIn_fallsBackToTheOwnersMean_withoutNoise() {
+        Aft owner = matrixAft("OWN");
+        Aft challenger = matrixAft("COMP");
+
+        owner.setGiveInRow(giveInRow("OTHER", 0.2)); // a blank cell: no value for COMP
+        assertEquals(0.1, Competitiveness.matrixGiveIn(owner, challenger), 0.0,
+                "A pair with no value uses givingInDistributionMean, without its SD");
+
+        owner.setGiveInRow(null);
+        assertEquals(0.1, Competitiveness.matrixGiveIn(owner, challenger), 0.0,
+                "An owner with no row uses givingInDistributionMean, without its SD");
+    }
+
+    @Test
+    void matrixGiveIn_decidesTheNormalisedPricePath() throws Throwable {
+        for (double value : new double[] { 0.7, 0.8 }) {
+            withMatrixGiveIn(true, r -> {
+                Aft owner = matrixAft("OWN");
+                Aft challenger = matrixAft("COMP");
+                owner.setGiveInRow(giveInRow("COMP", value));
+                Cell c = challengedCell(owner, challenger);
+
+                assertEquals(value == 0.7, callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r),
+                        "normDiff 0.733 against matrix give-in " + value);
+            });
+        }
+    }
+
+    @Test
+    void matrixGiveIn_isTheOwnersRow_notTheChallengers() throws Throwable {
+        withMatrixGiveIn(true, r -> {
+            Aft owner = matrixAft("OWN");
+            Aft challenger = matrixAft("COMP");
+            owner.setGiveInRow(giveInRow("COMP", 0.8));
+            challenger.setGiveInRow(giveInRow("OWN", 0.0));
+            Cell c = challengedCell(owner, challenger);
+
+            assertFalse(callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r),
+                    "The owner's 0.8 must keep the challenger out; the challenger's own row must not count");
+        });
+    }
+
+    @Test
+    void matrixGiveIn_isScaledByTheOwnersMeanUtility_inTheRawPath() throws Throwable {
+        for (double value : new double[] { 0.5, 0.6 }) {
+            withMatrixGiveIn(true, r -> {
+                when(r.getDistributionMeanY()).thenReturn(new ConcurrentHashMap<>(Map.of("OWN", 200.0)));
+                Aft owner = matrixAft("OWN");
+                Aft challenger = matrixAft("COMP");
+                owner.setGiveInRow(giveInRow("COMP", value));
+                Cell c = challengedCell(owner, challenger);
+
+                assertEquals(value == 0.5, callLandUseChange("landUsechange", c, owner, challenger, r),
+                        "130-20 = 110 against 200 x " + value);
+            });
+        }
+    }
+
+    @Test
+    void matrixGiveIn_isTheSameInEveryCellAndYear() throws Throwable {
+        // With the switch off, give-in is the owner's mean plus SD x a draw that differs by cell and year.
+        ensureConfigInstance();
+        AftCategorised.useCategorisationGivIn = false;
+        Aft owner = matrixAft("OWN");
+        Aft challenger = matrixAft("COMP");
+        owner.setGiveInRow(giveInRow("COMP", 0.7));
+
+        for (boolean on : new boolean[] { true, false }) {
+            Set<Double> thresholds = new HashSet<>();
+            ConfigLoader.config.use_matrix_give_in = on;
+            try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class)) {
+                for (int year : new int[] { 2020, 2021 }) {
+                    ts.when(Timestep::getCurrentYear).thenReturn(year);
+                    for (int x = 0; x < 3; x++) {
+                        thresholds.add(callGiveInThreshold(new Cell(x, 0), owner, challenger));
+                    }
+                }
+            } finally {
+                ConfigLoader.config.use_matrix_give_in = false;
+            }
+            if (on) {
+                assertEquals(Set.of(0.7), thresholds, "Matrix give-in has no noise");
+            } else {
+                assertTrue(thresholds.size() > 1, "Switch off: the noisy threshold is unchanged");
+            }
+        }
+    }
+
+    @Test
+    void matrixGiveIn_stacksWithConversionCost() throws Throwable {
+        withConversionCost(true, r -> {
+            ConfigLoader.config.use_matrix_give_in = true;
+            try {
+                Aft owner = conversionAft("OWN", "Nonex", OWNER_CONVERSION_COST);
+                Aft challenger = conversionAft("COMP", "Agri_Crops", 0.0);
+                Cell c = challengedCell(owner, challenger);
+
+                // With the cost, normDiff = (130-120)/250 = 0.04 (0.733 without it).
+                owner.setGiveInRow(giveInRow("COMP", 0.0));
+                assertTrue(callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r), "0.04 > 0.0");
+                owner.setGiveInRow(giveInRow("COMP", 0.05));
+                assertFalse(callLandUsechangeNormalisedPriceUtility(c, owner, challenger, r),
+                        "0.04 < 0.05: the conversion cost must still count");
+            } finally {
+                ConfigLoader.config.use_matrix_give_in = false;
+            }
+        });
+    }
+
+    // -------------------------------------------------------
     // utility(...) — PLUM price-ratio path (use_price_only_utility)
     // -------------------------------------------------------
 
@@ -1352,6 +1522,147 @@ class CompetitivenessTest {
 
                 // S1: (200/100)*2 = 4.0;  S2: (75/50)*3 = 4.5;  total = 8.5
                 assertEquals(8.5, callUtility(c, a, r), 1e-12);
+            }
+        });
+    }
+
+    // -------------------------------------------------------
+    // Price feedback (use_price_feedback)
+    // -------------------------------------------------------
+    //
+    // Plan 39a §2.4: file price 200 $/t; intensive 8 t/ha at 900 $/ha, extensive 4 t/ha at 200 $/ha.
+    //   M = 1:    intensive 700, extensive 600   -> intensive wins
+    //   M = 0.75: intensive 300, extensive 400   -> extensive wins
+    //   M = 0.5:  intensive -100, extensive 200  -> intensive gives up, extensive does not
+
+    private static Aft costedAft(String label, double costPerHa) {
+        Aft a = mock(Aft.class);
+        when(a.isInteract()).thenReturn(true);
+        when(a.getLabel()).thenReturn(label);
+        when(a.getNfertCostPerHa()).thenReturn(costPerHa);
+        return a;
+    }
+
+    /**
+     * Explicit-price utility with production costs, at the given file prices in 2020, on a mock runner
+     * whose price multipliers are the given ones. use_price_feedback is set as given.
+     */
+    private void withFeedbackPrices(boolean feedbackOn, Map<String, Double> filePrices,
+                                    Map<String, Double> multipliers, RunnerBody body) throws Throwable {
+        withServices(new ArrayList<>(new TreeSet<>(filePrices.keySet())), () -> {
+            Object cfg = ensureConfigInstance();
+            setConfig(cfg, Map.of("use_explicit_price_utility", true, "use_production_costs", true,
+                    "spatial_production_costs", false, "use_price_feedback", feedbackOn));
+
+            ConcurrentHashMap<String, Service> services = new ConcurrentHashMap<>();
+            filePrices.forEach((serviceName, price) -> {
+                Service s = mock(Service.class);
+                when(s.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, price)));
+                services.put(serviceName, s);
+            });
+            Region region = mock(Region.class);
+            when(region.getServicesHash()).thenReturn(services);
+            RegionalModelRunner r = mock(RegionalModelRunner.class);
+            r.R = region;
+            when(r.getPriceMultiplier()).thenReturn(new ConcurrentHashMap<>(multipliers));
+
+            try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class)) {
+                ts.when(Timestep::getCurrentYear).thenReturn(2020);
+                ts.when(Timestep::getStartYear).thenReturn(2020);
+                body.run(r);
+            } finally {
+                ConfigLoader.config.use_price_feedback = false;
+                ConfigLoader.config.use_production_costs = false;
+            }
+        });
+    }
+
+    @Test
+    void priceFeedback_scalesTheFilePrice_inExplicitPriceUtility() throws Throwable {
+        withFeedbackPrices(true, Map.of("S1", 200.0), Map.of("S1", 0.75), r -> {
+            Aft intensive = costedAft("INT", 900.0);
+            Cell c = Mockito.spy(new Cell(0, 0));
+            doReturn(8.0).when(c).competitiveness(intensive, "S1");
+
+            // 200 x 0.75 x 8 - 900 = 300
+            assertEquals(300.0, callUtility(c, intensive, r), 1e-9);
+        });
+    }
+
+    @Test
+    void priceFeedback_isIgnored_whenTheSwitchIsOff() throws Throwable {
+        withFeedbackPrices(false, Map.of("S1", 200.0), Map.of("S1", 0.75), r -> {
+            Aft intensive = costedAft("INT", 900.0);
+            Cell c = Mockito.spy(new Cell(0, 0));
+            doReturn(8.0).when(c).competitiveness(intensive, "S1");
+
+            // The file price: 200 x 8 - 900 = 700
+            assertEquals(700.0, callUtility(c, intensive, r), 1e-9);
+        });
+    }
+
+    @Test
+    void priceFeedback_leavesAServiceWithNoMultiplier_atItsFilePrice() throws Throwable {
+        withFeedbackPrices(true, Map.of("S1", 200.0, "S2", 50.0), Map.of("S1", 0.5), r -> {
+            Aft mixed = costedAft("MIX", 0.0);
+            Cell c = Mockito.spy(new Cell(0, 0));
+            doReturn(1.0).when(c).competitiveness(mixed, "S1");
+            doReturn(2.0).when(c).competitiveness(mixed, "S2");
+
+            // S1: 200 x 0.5 x 1 = 100; S2: 50 x 1 x 2 = 100
+            assertEquals(200.0, callUtility(c, mixed, r), 1e-9);
+        });
+    }
+
+    @Test
+    void priceFeedback_turnsTheContestFromIntensiveToExtensive_asOversupplyGrows() throws Throwable {
+        for (double[] row : new double[][] { { 1.0, 700, 600 }, { 0.75, 300, 400 }, { 0.5, -100, 200 } }) {
+            double m = row[0];
+            withFeedbackPrices(true, Map.of("S1", 200.0), Map.of("S1", m), r -> {
+                Aft intensive = costedAft("INT", 900.0);
+                Aft extensive = costedAft("EXT", 200.0);
+                Cell c = Mockito.spy(new Cell(0, 0));
+                doReturn(8.0).when(c).competitiveness(intensive, "S1");
+                doReturn(4.0).when(c).competitiveness(extensive, "S1");
+
+                assertEquals(row[1], callUtility(c, intensive, r), 1e-9, "intensive at M=" + m);
+                assertEquals(row[2], callUtility(c, extensive, r), 1e-9, "extensive at M=" + m);
+                Aft best = Competitiveness.mostCompetitiveAgent(c, List.of(intensive, extensive), r);
+                assertSame(m == 1.0 ? intensive : extensive, best, "most competitive at M=" + m);
+            });
+        }
+    }
+
+    @Test
+    void priceFeedback_neverAppliesInThePriceRatioMode() throws Throwable {
+        withServices(List.of("S1"), () -> {
+            Object cfg = ensureConfigInstance();
+            // Startup stops this combination; the utility must still ignore the multiplier.
+            setConfig(cfg, Map.of("use_price_only_utility", true, "use_explicit_price_utility", false,
+                    "use_price_feedback", true));
+
+            Aft a = mock(Aft.class);
+            when(a.isInteract()).thenReturn(true);
+            when(a.getLabel()).thenReturn("AFT1");
+            Cell c = Mockito.spy(new Cell(0, 0));
+            doReturn(0.8).when(c).competitiveness(a, "S1");
+
+            Service s1 = mock(Service.class);
+            when(s1.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, 100.0, 2025, 150.0)));
+            Region region = mock(Region.class);
+            when(region.getServicesHash()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", s1)));
+            RegionalModelRunner r = mock(RegionalModelRunner.class);
+            r.R = region;
+            when(r.getPriceMultiplier()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 0.5)));
+
+            try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class)) {
+                ts.when(Timestep::getCurrentYear).thenReturn(2025);
+                ts.when(Timestep::getStartYear).thenReturn(2020);
+
+                // U = (150/100) x 0.8 = 1.2, as without feedback
+                assertEquals(1.2, callUtility(c, a, r), 1e-12);
+            } finally {
+                ConfigLoader.config.use_price_feedback = false;
             }
         });
     }
