@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
@@ -21,6 +22,7 @@ import de.cesr.crafty.core.crafty.ManagerTypes;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
+import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.updaters.AftsUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 import de.cesr.crafty.core.utils.file.PathTools;
@@ -353,6 +355,15 @@ public class AFTsLoader extends HashSet<Aft> {
 			if (csv.containsKey("Conversion_cost")) {
 				a.setConversionCost(Utils.sToD(csv.get("Conversion_cost").get(i)));
 			}
+			if (ConfigLoader.config.use_self_consumption && csv.containsKey("self_consumption")) {
+				String raw = csv.get("self_consumption").get(i);
+				double share = parseSelfConsumption(raw);
+				if (Double.isNaN(share)) {
+					LOGGER.fatal("AFT '" + label + "' has self_consumption '" + raw.trim()
+							+ "' in AFTsMetaData; it must be blank or a number from 0 to 1");
+				}
+				a.setSelfConsumption(share);
+			}
 			if (csv.containsKey("Receives_subsidy")) {
 				String val = csv.get("Receives_subsidy").get(i).trim();
 				try {
@@ -388,6 +399,19 @@ public class AFTsLoader extends HashSet<Aft> {
 		if (ConfigLoader.config.use_conversion_cost && !csv.containsKey("Category")) {
 			LOGGER.fatal("use_conversion_cost is true but 'Category' column is missing from AFTsMetaData");
 		}
+		if (ConfigLoader.config.use_self_consumption && !csv.containsKey("self_consumption")) {
+			LOGGER.fatal("use_self_consumption is true but 'self_consumption' column is missing from AFTsMetaData");
+		}
+		if (ConfigLoader.config.use_self_consumption) {
+			// Services are loaded before AFTs, so the market goods are known here.
+			List<String> marketGoods = ServiceSet.getServicesList().stream().filter(ServiceSet::isMarketGood).toList();
+			String summary = selfConsumptionSummary(hashAFTs.values(), marketGoods);
+			if (marketGoods.isEmpty()) {
+				LOGGER.warn(summary + " (no service has Market_good Yes, so self-consumption changes nothing)");
+			} else {
+				LOGGER.info(summary);
+			}
+		}
 		if (ConfigLoader.config.use_price_explicit_giving_up && !csv.containsKey("Receives_subsidy")) {
 			LOGGER.warn("use_price_explicit_giving_up is true but 'Receives_subsidy' column is missing "
 					+ "from AFTsMetaData — all AFTs will default to not receiving subsidies; "
@@ -415,6 +439,38 @@ public class AFTsLoader extends HashSet<Aft> {
 				a.setTwinLabel(null);
 			}
 		}
+	}
+
+	/**
+	 * One AFTsMetaData self_consumption cell. Blank, or "NaN" (which Tablesaw gives for an empty
+	 * numeric cell), is 0. Kept separate because LOGGER.fatal exits the JVM and so cannot be reached
+	 * from a test.
+	 *
+	 * @return the share, or NaN when the cell is not a number from 0 to 1
+	 */
+	static double parseSelfConsumption(String raw) {
+		String val = raw == null ? "" : raw.trim();
+		if (val.isEmpty() || val.equalsIgnoreCase("NaN")) {
+			return 0.0;
+		}
+		try {
+			double share = Double.parseDouble(val);
+			return share >= 0.0 && share <= 1.0 ? share : Double.NaN;
+		} catch (NumberFormatException e) {
+			return Double.NaN;
+		}
+	}
+
+	/**
+	 * The startup line for use_self_consumption: the market goods, in Services.csv order, and each AFT
+	 * with a share above 0, in label order.
+	 */
+	static String selfConsumptionSummary(Collection<Aft> afts, List<String> marketGoods) {
+		StringJoiner shares = new StringJoiner(", ");
+		afts.stream().filter(a -> a.getSelfConsumption() > 0).sorted(Comparator.comparing(Aft::getLabel))
+				.forEach(a -> shares.add(a.getLabel() + " " + a.getSelfConsumption()));
+		return "self consumption is on for market goods " + marketGoods + ": "
+				+ (shares.length() == 0 ? "no AFT has self_consumption above 0" : shares);
 	}
 
 	public static void hashAgentNbr() {

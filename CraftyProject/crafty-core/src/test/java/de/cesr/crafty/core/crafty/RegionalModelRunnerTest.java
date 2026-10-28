@@ -67,6 +67,7 @@ class RegionalModelRunnerTest {
 			ConfigLoader.config.use_explicit_price_utility = false;
 			ConfigLoader.config.use_price_only_utility = false;
 			ConfigLoader.config.use_cell_area = false;
+			ConfigLoader.config.use_self_consumption = false;
 			ConfigLoader.config.use_price_feedback = false;
 			ConfigLoader.config.price_feedback_strength = 0.03;
 			ConfigLoader.config.use_production_costs = false;
@@ -231,6 +232,82 @@ class RegionalModelRunnerTest {
 			invokePrivate(r, "computeRegionsSupply");
 			assertEquals(r.getRegionalSupply().get("S1"), s1AfterBatch, 1e-12);
 			assertEquals(r.getRegionalSupply().get("S2"), s2AfterBatch, 1e-12);
+		}
+	}
+
+	@Test
+	void regionalSupply_takesSelfConsumptionOffMarketGoodsOnly() throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1", "S2"));
+			// S1 is a market good, S2 is not.
+			ss.when(() -> ServiceSet.isMarketGood("S1")).thenReturn(true);
+			ConfigLoader.config.use_cell_area = true;
+
+			Cell c1 = grownCell(0, grower(2, 1, 0.5), 10.0);
+			Cell c2 = grownCell(1, grower(4, 3, 0.0), 0.5);
+			installRegion("R1", regionOf(c1, c2));
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+
+			// Off: 2 x 10 + 4 x 0.5 and 1 x 10 + 3 x 0.5.
+			r.regionalSupply();
+			assertEquals(22.0, r.getRegionalSupply().get("S1"), 1e-12);
+			assertEquals(11.5, r.getRegionalSupply().get("S2"), 1e-12);
+
+			// On: c1's owner uses half of its S1 itself; S2, not a market good, is unchanged.
+			ConfigLoader.config.use_self_consumption = true;
+			r.regionalSupply();
+			assertEquals(2 * 10 * 0.5 + 4 * 0.5, r.getRegionalSupply().get("S1"), 1e-12);
+			assertEquals(11.5, r.getRegionalSupply().get("S2"), 1e-12);
+		}
+	}
+
+	@Test
+	void supplyUpdatedAfterACompetitionBatch_matchesAFullRecount_whenOwnersSelfConsumeDifferently()
+			throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1", "S2"));
+			ss.when(() -> ServiceSet.isMarketGood("S1")).thenReturn(true);
+			ConfigLoader.config.use_cell_area = true;
+			ConfigLoader.config.use_self_consumption = true;
+
+			Aft selfConsumer = grower(2, 1, 0.5);
+			Aft seller = grower(4, 3, 0.0);
+			Cell c1 = grownCell(0, selfConsumer, 10.0);
+			Cell c2 = grownCell(1, seller, 0.5);
+			installRegion("R1", regionOf(c1, c2));
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+
+			r.regionalSupply();
+			assertEquals(12.0, r.getRegionalSupply().get("S1"), 1e-12);
+			assertEquals(11.5, r.getRegionalSupply().get("S2"), 1e-12);
+
+			// The batch swaps the owners. As in competition, the owners change before production is recalculated.
+			c1.setOwner(seller);
+			c2.setOwner(selfConsumer);
+			Method batch = RegionalModelRunner.class.getDeclaredMethod("applyProductivityChangeToRegionalSupply",
+					java.util.List.class);
+			batch.setAccessible(true);
+			batch.invoke(r, java.util.List.of(c1, c2));
+			// c1: 4 x 10 and 3 x 10; c2: 2 x 0.5 x 0.5 and 1 x 0.5.
+			double s1AfterBatch = r.getRegionalSupply().get("S1");
+			double s2AfterBatch = r.getRegionalSupply().get("S2");
+			assertEquals(40.5, s1AfterBatch, 1e-12);
+			assertEquals(30.5, s2AfterBatch, 1e-12);
+
+			// A full recount from the cells gives the same totals.
+			invokePrivate(r, "computeRegionsSupply");
+			assertEquals(s1AfterBatch, r.getRegionalSupply().get("S1"), 1e-12);
+			assertEquals(s2AfterBatch, r.getRegionalSupply().get("S2"), 1e-12);
 		}
 	}
 
@@ -689,6 +766,25 @@ class RegionalModelRunnerTest {
 		when(c.getCurrentProd()).thenReturn(production);
 		when(c.getArea()).thenReturn(area);
 		when(c.currentSupply(anyInt())).thenCallRealMethod();
+		return c;
+	}
+
+	/** An AFT growing the given amounts of S1 and S2 on a cell with capA = 1, self-consuming the given share. */
+	private static Aft grower(double s1, double s2, double selfConsumption) {
+		Aft a = mock(Aft.class);
+		when(a.isInteract()).thenReturn(true);
+		when(a.getSensByService()).thenReturn(Map.of("S1", Map.of("capA", 1.0), "S2", Map.of("capA", 1.0)));
+		when(a.getProductivityLevel()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", s1, "S2", s2)));
+		when(a.getSelfConsumption()).thenReturn(selfConsumption);
+		return a;
+	}
+
+	/** A real cell with capA = 1 and the given owner and area; its production is calculated by the runner. */
+	private static Cell grownCell(int x, Aft owner, double area) {
+		Cell c = new Cell(x, 0);
+		c.getCapitals().put("capA", 1.0);
+		c.setArea(area);
+		c.setOwner(owner);
 		return c;
 	}
 

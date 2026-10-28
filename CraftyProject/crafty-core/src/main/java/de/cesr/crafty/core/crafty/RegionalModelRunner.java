@@ -35,7 +35,8 @@ import de.cesr.crafty.core.utils.general.Utils;
  *
  * {@code RegionalModelRunner} encapsulates all region level calculations required to:
  * - Compute supply (per service) from cell-level productivity ({@link Cell#currentSupply(int)}: times
- *   each cell's area when use_cell_area is on).
+ *   each cell's area when use_cell_area is on, less the owner's self-consumption of market goods when
+ *   use_self_consumption is on).
  * - Derive marginal utilities from demand–supply gaps (optionally averaged per cell).
  * - Apply region-level service taxes/subsidies and AFT-level land taxes/subsidies (cached on each AFT).
  * - Compute cell utilities, distribution statistics (mean utility per AFT), and utility ranges.

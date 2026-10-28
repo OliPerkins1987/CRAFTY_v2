@@ -1,7 +1,11 @@
 package de.cesr.crafty.core.dataLoader.afts;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,9 +17,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import de.cesr.crafty.core.ToyData;
+import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.crafty.ManagerTypes;
+import de.cesr.crafty.core.dataLoader.ProjectLoader;
 
 class AFTsLoaderTest {
 
@@ -92,5 +98,76 @@ class AFTsLoaderTest {
         Aft random = AFTsLoader.getDeterministicRandomAFT(new ArrayList<>(), 123L, 2030, 77L, 1L, 0);
 
         assertNull(random, "Random AFT from an empty collection should be null");
+    }
+
+    // -----------------------------
+    // self_consumption (use_self_consumption)
+    // -----------------------------
+
+    @Test
+    void parseSelfConsumption_readsBlankAsZero_andOnlyAcceptsZeroToOne() {
+        assertEquals(0.0, AFTsLoader.parseSelfConsumption(""), 0.0);
+        assertEquals(0.0, AFTsLoader.parseSelfConsumption("  "), 0.0);
+        assertEquals(0.0, AFTsLoader.parseSelfConsumption("NaN"), 0.0);
+        assertEquals(0.0, AFTsLoader.parseSelfConsumption(null), 0.0);
+        assertEquals(0.0, AFTsLoader.parseSelfConsumption("0"), 0.0);
+        assertEquals(0.5, AFTsLoader.parseSelfConsumption(" 0.5 "), 0.0);
+        assertEquals(1.0, AFTsLoader.parseSelfConsumption("1.0"), 0.0);
+
+        assertTrue(Double.isNaN(AFTsLoader.parseSelfConsumption("1.5")));
+        assertTrue(Double.isNaN(AFTsLoader.parseSelfConsumption("-0.1")));
+        assertTrue(Double.isNaN(AFTsLoader.parseSelfConsumption("abc")));
+    }
+
+    @Test
+    void selfConsumptionSummary_listsTheMarketGoods_andTheSelfConsumingAftsInLabelOrder() {
+        Aft swidden = new Aft("Swidden");
+        swidden.setSelfConsumption(0.5);
+        Aft logger = new Aft("Logger");
+        logger.setSelfConsumption(1.0);
+        Aft agri = new Aft("Agri");
+
+        assertEquals("self consumption is on for market goods [Crops, Wood]: Logger 1.0, Swidden 0.5",
+                AFTsLoader.selfConsumptionSummary(List.of(swidden, agri, logger), List.of("Crops", "Wood")));
+        assertEquals("self consumption is on for market goods [Crops]: no AFT has self_consumption above 0",
+                AFTsLoader.selfConsumptionSummary(List.of(agri), List.of("Crops")));
+    }
+
+    @Test
+    void initializeAftList_readsSelfConsumption_onlyWhenTheSwitchIsOn() throws Exception {
+        Path metaData = tempDir.resolve("AFTsMetaData_self_consumption.csv");
+        Files.write(metaData, List.of("Label,Type,Color,self_consumption", "Swidden,AFT,#cc6300,0.5",
+                "Agri,AFT,#cc6300,0", "Urban,Mask,#ff0000,"));
+        Field path = ProjectLoader.class.getDeclaredField("aftMetaData");
+        path.setAccessible(true);
+        Object pathBackup = path.get(null);
+        boolean switchBackup = ConfigLoader.config.use_self_consumption;
+        try {
+            path.set(null, metaData);
+
+            ConfigLoader.config.use_self_consumption = true;
+            initializeAftList();
+            assertEquals(0.5, AFTsLoader.getAftHash().get("Swidden").getSelfConsumption(), 0.0);
+            assertEquals(0.0, AFTsLoader.getAftHash().get("Agri").getSelfConsumption(), 0.0);
+            assertEquals(0.0, AFTsLoader.getAftHash().get("Urban").getSelfConsumption(), 0.0, "blank is 0");
+
+            // Off: the column is not read at all.
+            ConfigLoader.config.use_self_consumption = false;
+            initializeAftList();
+            assertEquals(0.0, AFTsLoader.getAftHash().get("Swidden").getSelfConsumption(), 0.0);
+        } finally {
+            path.set(null, pathBackup);
+            ConfigLoader.config.use_self_consumption = switchBackup;
+        }
+    }
+
+    /**
+     * Runs AFTsLoader's private initializeAftList() on its own, without the rest of the constructor,
+     * which needs a whole project. It reads and writes only static state, so a mock instance will do.
+     */
+    private static void initializeAftList() throws Exception {
+        Method m = AFTsLoader.class.getDeclaredMethod("initializeAftList");
+        m.setAccessible(true);
+        m.invoke(mock(AFTsLoader.class));
     }
 }

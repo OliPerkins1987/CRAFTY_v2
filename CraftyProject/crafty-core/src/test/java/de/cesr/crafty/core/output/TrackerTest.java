@@ -35,7 +35,7 @@ import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
  * Focus: - writeCSV: header creation, numeric values, and filling missing
  * values with "0" - trackSupply: early exit when track_changes is false (no
  * file created); supply weighted by cell area and the AggregateArea column
- * only when use_cell_area is on
+ * only when use_cell_area is on; market supply (less self-consumption) per AFT
  */
 class TrackerTest {
 
@@ -231,6 +231,69 @@ class TrackerTest {
 			setConfigField("output_folder_name", folderBackup);
 			setConfigField("track_changes", trackBackup);
 			setConfigField("use_cell_area", areaBackup);
+		}
+	}
+
+	@Test
+	void trackSupply_showsMarketSupplyPerAft_whenSelfConsumptionIsOn() throws Exception {
+		ensureConfigNotNull();
+		List<String> servicesBackup = new ArrayList<>(ServiceSet.getServicesList());
+		Map<String, Boolean> marketGoodBackup = new HashMap<>(ServiceSet.getMarketGood());
+		Map<String, Aft> aftsBackup = new HashMap<>(AFTsLoader.getAftHash());
+		Map<String, Region> regionsBackup = new HashMap<>(CellsLoader.regions);
+		String folderBackup = ConfigLoader.config.output_folder_name;
+		boolean trackBackup = ConfigLoader.config.track_changes;
+		boolean areaBackup = ConfigLoader.config.use_cell_area;
+		boolean selfConsumptionBackup = ConfigLoader.config.use_self_consumption;
+		try {
+			ServiceSet.getServicesList().clear();
+			ServiceSet.getServicesList().addAll(List.of("ser1", "ser2"));
+			// ser1 is a market good, ser2 is not.
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().put("ser1", true);
+			ServiceSet.getMarketGood().put("ser2", false);
+			Aft selfConsumer = new Aft("AFT1");
+			Aft seller = new Aft("AFT2");
+			AFTsLoader.getAftHash().clear();
+			AFTsLoader.getAftHash().put("AFT1", selfConsumer);
+			AFTsLoader.getAftHash().put("AFT2", seller);
+			AFTsLoader.getAftHash().put("Abandoned", new Aft("Abandoned"));
+
+			// The self-consumer's cell uses half of what it produces of market goods itself.
+			Cell c1 = cell(0, selfConsumer, 1.0, 2, 4);
+			c1.setCurrentSelfConsumption(0.5);
+			Cell c2 = cell(1, seller, 1.0, 3, 5);
+			Region region = new Region("R1");
+			ConcurrentHashMap<String, Cell> cells = new ConcurrentHashMap<>();
+			for (Cell c : List.of(c1, c2)) {
+				cells.put(c.getX() + "," + c.getY(), c);
+			}
+			region.setCells(cells);
+			CellsLoader.regions.put("R1", region);
+			AFTsLoader.hashAgentNbr("R1");
+			setConfigField("track_changes", true);
+			setConfigField("use_cell_area", false);
+			setConfigField("use_self_consumption", true);
+
+			Map<String, Map<String, String>> table = trackSupplyInto(tempDir.resolve("selfConsumption"));
+			assertEquals(1.0, Double.parseDouble(table.get("AFT1").get("ser1")), 1e-12);
+			assertEquals(4.0, Double.parseDouble(table.get("AFT1").get("ser2")), 1e-12);
+			assertEquals(3.0, Double.parseDouble(table.get("AFT2").get("ser1")), 1e-12);
+			assertEquals(5.0, Double.parseDouble(table.get("AFT2").get("ser2")), 1e-12);
+		} finally {
+			ServiceSet.getServicesList().clear();
+			ServiceSet.getServicesList().addAll(servicesBackup);
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(marketGoodBackup);
+			AFTsLoader.getAftHash().clear();
+			AFTsLoader.getAftHash().putAll(aftsBackup);
+			CellsLoader.regions.clear();
+			CellsLoader.regions.putAll(regionsBackup);
+			AFTsLoader.hashAgentNbrRegions.remove("R1");
+			setConfigField("output_folder_name", folderBackup);
+			setConfigField("track_changes", trackBackup);
+			setConfigField("use_cell_area", areaBackup);
+			setConfigField("use_self_consumption", selfConsumptionBackup);
 		}
 	}
 

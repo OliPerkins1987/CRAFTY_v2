@@ -154,6 +154,7 @@ Typical columns:
 - `Label` or `Name` (used as the identifier)
 - optional: `Category`
 - optional: `Penalise_Oversupply` (boolean-like)
+- optional: `Market_good` (Yes/No; required with `use_self_consumption`, which self-consumes only market goods)
 
 ### Capitals metadata
 Defines the authoritative capital list (used by capital loading and by AFT sensitivity matrices).

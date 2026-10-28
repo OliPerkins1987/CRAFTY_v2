@@ -20,6 +20,7 @@ In the code, a `Service` stores *region-specific* time-varying drivers used duri
 Services also have optional **metadata**:
 - `Category` (for reporting/plotting)
 - `Penalise_Oversupply` flag (optional behaviour used by downstream calculations)
+- `Market_good` flag (only market goods are self-consumed, with `use_self_consumption`)
 
 ---
 
@@ -69,10 +70,11 @@ This CSV defines the canonical service list.
 **Optional columns**
 - `Category`
 - `Penalise_Oversupply` (boolean-like values {0,1})
+- `Market_good` (Yes or No; required, with a value for every service, when `use_self_consumption` is on)
 
 CRAFTY will:
 - build `servicesList` from `Label` if present, otherwise from `Name`
-- store `Category` and `Penalise_Oversupply` if provided
+- store `Category`, `Penalise_Oversupply` and `Market_good` if provided
 
 ---
 

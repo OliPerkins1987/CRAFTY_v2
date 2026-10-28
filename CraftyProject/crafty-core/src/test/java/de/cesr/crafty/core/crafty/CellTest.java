@@ -424,6 +424,98 @@ class CellTest {
 	}
 
 	// -----------------------------
+	// self-consumption (use_self_consumption)
+	// -----------------------------
+
+	@Test
+	void currentSupply_takesTheOwnersShareOffMarketGoodsOnly() throws Throwable {
+		withMarketGoods(true, () -> {
+			Cell c = producingCell(producer(0.5));
+			assertArrayEquals(new double[] { 2.0, 2.0 }, c.getCurrentProd(), 1e-12, "production counts all of it");
+			assertEquals(1.0, c.currentSupply(0), 1e-12, "S1 is a market good: half of it reaches supply");
+			assertEquals(2.0, c.currentSupply(1), 1e-12, "S2 is not: all of it does");
+
+			ConfigLoader.config.use_cell_area = true;
+			c.setArea(2500.0);
+			assertEquals(2500.0, c.currentSupply(0), 1e-9);
+			assertEquals(5000.0, c.currentSupply(1), 1e-9);
+		});
+	}
+
+	@Test
+	void currentSupply_isProductionExactly_whenSelfConsumptionIsOff() throws Throwable {
+		withMarketGoods(false, () -> {
+			Cell c = producingCell(producer(0.5));
+			assertEquals(0.0, c.getCurrentSelfConsumption(), 0.0);
+			assertEquals(2.0, c.currentSupply(0), 0.0);
+			assertEquals(2.0, c.currentSupply(1), 0.0);
+		});
+	}
+
+	@Test
+	void currentSupply_isZeroForAMarketGood_whenTheOwnerUsesAllOfIt() throws Throwable {
+		withMarketGoods(true, () -> {
+			Cell c = producingCell(producer(1.0));
+			assertEquals(0.0, c.currentSupply(0), 0.0);
+			assertEquals(2.0, c.currentSupply(1), 0.0);
+			assertArrayEquals(new double[] { 2.0, 2.0 }, c.getCurrentProd(), 1e-12, "production is unchanged");
+		});
+	}
+
+	@Test
+	void currentSupply_suppliesAServiceWithNoMarketGoodFlag_inFull() throws Throwable {
+		withMarketGoods(true, () -> {
+			ServiceSet.getMarketGood().remove("S1");
+			Cell c = producingCell(producer(0.5));
+			assertEquals(2.0, c.currentSupply(0), 0.0);
+		});
+	}
+
+	@Test
+	void currentSupply_usesTheShareRecordedWithTheProduction_notTheCurrentOwners() throws Throwable {
+		withMarketGoods(true, () -> {
+			Aft selfConsumer = producer(0.5);
+			Aft seller = producer(0.0);
+			Cell c = producingCell(selfConsumer);
+
+			// Competition sets the new owner before production is recalculated.
+			setOwner(c, seller);
+			assertEquals(1.0, c.currentSupply(0), 1e-12, "still the self-consumer's production, so its share");
+
+			c.calculateCurrentProductivity();
+			assertEquals(2.0, c.currentSupply(0), 1e-12, "now the seller's");
+		});
+	}
+
+	@Test
+	void selfConsumption_isZero_forNoOwnerOrAManagerThatDoesNotProduce() throws Throwable {
+		withMarketGoods(true, () -> {
+			assertEquals(0.0, Cell.selfConsumption(null), 0.0);
+			Aft mask = producer(0.5);
+			when(mask.isInteract()).thenReturn(false);
+			assertEquals(0.0, Cell.selfConsumption(mask), 0.0);
+			assertEquals(0.5, Cell.selfConsumption(producer(0.5)), 0.0);
+
+			Cell c = producingCell(producer(0.5));
+			setOwner(c, null);
+			c.calculateCurrentProductivity();
+			assertEquals(0.0, c.getCurrentSelfConsumption(), 0.0);
+		});
+	}
+
+	@Test
+	void calculateCurrentProductivity_withAServicesArray_recordsTheShareToo() throws Throwable {
+		withMarketGoods(true, () -> {
+			Cell c = new Cell(0, 0);
+			c.getCapitals().put("capA", 2.0);
+			setOwner(c, producer(0.5));
+			c.calculateCurrentProductivity(new String[] { "S1", "S2" });
+			assertEquals(0.5, c.getCurrentSelfConsumption(), 0.0);
+			assertEquals(1.0, c.currentSupply(0), 1e-12);
+		});
+	}
+
+	// -----------------------------
 	// giveUp(...)
 	// -----------------------------
 
@@ -529,6 +621,50 @@ class CellTest {
 				body.execute();
 			}
 		}
+	}
+
+	/**
+	 * Runs a self-consumption test body on services S1 (a market good) and S2 (not one), with
+	 * use_self_consumption as given. The switch, cell area and the Market_good flags are restored after.
+	 */
+	private void withMarketGoods(boolean selfConsumptionOn, Executable body) throws Throwable {
+		withServices(List.of("S1", "S2"), () -> {
+			Config cfg = (Config) ensureConfigInstance();
+			boolean switchBefore = cfg.use_self_consumption;
+			boolean areaBefore = cfg.use_cell_area;
+			Map<String, Boolean> flagsBefore = new HashMap<>(ServiceSet.getMarketGood());
+			try {
+				cfg.use_self_consumption = selfConsumptionOn;
+				ServiceSet.getMarketGood().clear();
+				ServiceSet.getMarketGood().put("S1", true);
+				ServiceSet.getMarketGood().put("S2", false);
+				body.execute();
+			} finally {
+				cfg.use_self_consumption = switchBefore;
+				cfg.use_cell_area = areaBefore;
+				ServiceSet.getMarketGood().clear();
+				ServiceSet.getMarketGood().putAll(flagsBefore);
+			}
+		});
+	}
+
+	/** An AFT that grows capA x 1 of both S1 and S2, and uses the given share of its market goods itself. */
+	private static Aft producer(double selfConsumption) {
+		Aft a = mock(Aft.class);
+		when(a.isInteract()).thenReturn(true);
+		when(a.getSensByService()).thenReturn(Map.of("S1", Map.of("capA", 1.0), "S2", Map.of("capA", 1.0)));
+		when(a.getProductivityLevel()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 1.0, "S2", 1.0)));
+		when(a.getSelfConsumption()).thenReturn(selfConsumption);
+		return a;
+	}
+
+	/** A cell with capA = 2 owned by the given AFT, its production calculated: 2 of S1 and 2 of S2. */
+	private static Cell producingCell(Aft owner) {
+		Cell c = new Cell(0, 0);
+		c.getCapitals().put("capA", 2.0);
+		setOwner(c, owner);
+		c.calculateCurrentProductivity();
+		return c;
 	}
 
 	private static void setOwner(Cell c, Aft owner) {

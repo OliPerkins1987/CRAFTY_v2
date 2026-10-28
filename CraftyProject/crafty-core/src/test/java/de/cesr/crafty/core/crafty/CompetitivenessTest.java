@@ -73,6 +73,7 @@ class CompetitivenessTest {
             ConfigLoader.config.use_conversion_cost = false;
             ConfigLoader.config.use_matrix_give_in = false;
             ConfigLoader.config.use_price_feedback = false;
+            ConfigLoader.config.use_self_consumption = false;
         }
 
         // restore config
@@ -1664,6 +1665,64 @@ class CompetitivenessTest {
             } finally {
                 ConfigLoader.config.use_price_feedback = false;
             }
+        });
+    }
+
+    // -------------------------------------------------------
+    // Self-consumption (use_self_consumption): utility counts all of the production
+    // -------------------------------------------------------
+
+    /** An AFT growing capA x 4 of S1, using the given share of it itself, with no costs. */
+    private static Aft selfConsumingGrower(double selfConsumption) {
+        Aft a = mock(Aft.class);
+        when(a.isInteract()).thenReturn(true);
+        when(a.getLabel()).thenReturn("SC");
+        when(a.getSensByService()).thenReturn(Map.of("S1", Map.of("capA", 1.0)));
+        when(a.getProductivityLevel()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 4.0)));
+        when(a.getSelfConsumption()).thenReturn(selfConsumption);
+        return a;
+    }
+
+    @Test
+    void selfConsumption_leavesExplicitPriceUtility_countingAllTheProduction() throws Throwable {
+        withFeedbackPrices(false, Map.of("S1", 200.0), Map.of(), r -> {
+            ConfigLoader.config.use_self_consumption = true;
+            Map<String, Boolean> flagsBefore = new HashMap<>(ServiceSet.getMarketGood());
+            try {
+                ServiceSet.getMarketGood().put("S1", true);
+                Cell c = new Cell(0, 0);
+                c.getCapitals().put("capA", 2.0);
+
+                // 200 x (2 x 4) = 1600, whatever share the AFT uses itself
+                assertEquals(1600.0, callUtility(c, selfConsumingGrower(0.5), r), 1e-9);
+                assertEquals(1600.0, callUtility(c, selfConsumingGrower(0.0), r), 1e-9);
+
+                // while only half of it reaches supply
+                c.setOwner(selfConsumingGrower(0.5));
+                c.calculateCurrentProductivity();
+                assertEquals(4.0, c.currentSupply(0), 1e-9);
+            } finally {
+                ServiceSet.getMarketGood().clear();
+                ServiceSet.getMarketGood().putAll(flagsBefore);
+            }
+        });
+    }
+
+    @Test
+    void selfConsumption_leavesMarginalUtility_countingAllTheProduction() throws Throwable {
+        withServices(List.of("S1"), () -> {
+            ensureConfigInstance();
+            // use_explicit_price_utility left false (default) so the marginal formula is used
+            ConfigLoader.config.use_self_consumption = true;
+
+            RegionalModelRunner r = mock(RegionalModelRunner.class);
+            when(r.getMarginal()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 3.0)));
+            Cell c = new Cell(0, 0);
+            c.getCapitals().put("capA", 2.0);
+
+            // 3 x (2 x 4) = 24, whatever share the AFT uses itself
+            assertEquals(24.0, callUtility(c, selfConsumingGrower(0.5), r), 1e-12);
+            assertEquals(24.0, callUtility(c, selfConsumingGrower(0.0), r), 1e-12);
         });
     }
 

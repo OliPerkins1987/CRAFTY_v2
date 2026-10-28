@@ -12,6 +12,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * - Capital used by production/utility calculations.
  * - Current service production vector ({@link #currentProd}) and the last computed utility value.
  *   Production is per unit area (e.g. t/ha), like the capitals it comes from.
+ * - The owner's self-consumption share ({@link #currentSelfConsumption}) recorded with that production, which
+ *   {@link Cell#currentSupply(int)} takes off market goods when {@code use_self_consumption} is on.
  * - The cell's land area ({@link #area}), 1 unless {@code use_cell_area} is on. It is used only where
  *   cells are added up into supply ({@link Cell#currentSupply(int)}); everything per cell stays per unit area.
  * - mask type used for masks and protected areas
@@ -60,6 +62,8 @@ public abstract class AbstractCell {
 	private double giveUpSubsidy = 0.0;
 
 	private double[] currentProd;
+	// The owner's self-consumption share when currentProd was last calculated (see Cell#currentSupply).
+	private double currentSelfConsumption = 0.0;
 	// Land area, in the unit production is per (ha for t/ha yields); set by CellAreaLoader from the GIS file.
 	private double area = 1.0;
 	private double currentUtility;
@@ -206,6 +210,14 @@ public abstract class AbstractCell {
 
 	public void setCurrentProd(double[] currentProd) {
 		this.currentProd = currentProd;
+	}
+
+	public double getCurrentSelfConsumption() {
+		return currentSelfConsumption;
+	}
+
+	public void setCurrentSelfConsumption(double currentSelfConsumption) {
+		this.currentSelfConsumption = currentSelfConsumption;
 	}
 
 	public double getArea() {

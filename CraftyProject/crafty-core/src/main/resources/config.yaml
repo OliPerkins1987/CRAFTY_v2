@@ -59,6 +59,12 @@ twinned_competition_rate: 1.0                  # Fraction of eligible twin-owned
 # Needs Conversion_cost and Category columns in AFTsMetaData. Designed for use_normalised_price_competition.
 use_conversion_cost: false                     # Requires use_explicit_price_utility
 
+# Self-consumption
+# Supply of each market good (Market_good = Yes in Services.csv) counts (1 - self_consumption) x production;
+# self_consumption (0-1, blank = 0) is per AFT in AFTsMetaData. Other services are supplied in full.
+# The AFT's own utility still counts all of its production.
+use_self_consumption: false                    # Needs self_consumption in AFTsMetaData and Market_good in Services.csv
+
 # Matrix give-in
 # The give-in threshold is read from an owner (row) x challenger (column) matrix: Aft_give_in_matrix.csv, or
 # Aft_give_in_matrix_<year>.csv for one year. Looked for in aft_behaviour_parameters_directory when set, otherwise

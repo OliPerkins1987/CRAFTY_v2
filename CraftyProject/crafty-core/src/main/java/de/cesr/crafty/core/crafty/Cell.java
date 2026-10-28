@@ -24,7 +24,8 @@ import de.cesr.crafty.core.utils.general.DeterministicRandom;
  *   multiplied by an AFT-specific productivity level for the service.
  *   {@link #calculateCurrentProductivity()} fills the full production vector for all services.
  *   {@link #currentSupply(int)} is what the cell adds to supply: production times its area when
- *   {@code use_cell_area} is on, production alone otherwise.
+ *   {@code use_cell_area} is on, production alone otherwise, less the owner's self-consumption of
+ *   market goods when {@code use_self_consumption} is on.
  *
  * - Behavioural land abandonment (give-up):
  *   {@link #giveUp(RegionalModelRunner, ConcurrentHashMap)} compares the cell utility to the mean utility
@@ -131,22 +132,46 @@ public class Cell extends AbstractCell {
 		for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
 			getCurrentProd()[i] = productivity(getOwner(), ServiceSet.getServicesList().get(i));
 		}
+		// Stored with the production it belongs to: competition sets a new owner before production is recalculated.
+		setCurrentSelfConsumption(selfConsumption(getOwner()));
 	}
 
 	public void calculateCurrentProductivity(String[] services) {
 		for (int i = 0; i < ServiceSet.getServicesList().size(); i++) {
 			getCurrentProd()[i] = productivity(getOwner(), services[i]);
 		}
+		setCurrentSelfConsumption(selfConsumption(getOwner()));
+	}
+
+	/**
+	 * The share of the market goods it produces that an owner uses itself: its self_consumption with
+	 * {@code use_self_consumption} on, 0 otherwise (and for no owner or a manager that does not produce).
+	 */
+	static double selfConsumption(Aft owner) {
+		if (owner == null || !owner.isInteract() || !ConfigLoader.config.use_self_consumption) {
+			return 0.0;
+		}
+		return owner.getSelfConsumption();
 	}
 
 	/**
 	 * What this cell adds to the supply of one service. Production is per unit area, so with
 	 * {@code use_cell_area} on this is production times the cell's area (e.g. t/ha x ha = t); with it off
 	 * it is production alone, as before cell areas existed. This is the only place area enters supply.
+	 *
+	 * With {@code use_self_consumption} on, a market good (Market_good = Yes) is supplied less the share
+	 * the owner uses itself, the share recorded when this production was calculated. Production itself
+	 * ({@link #getCurrentProd()}), and so utility and the cell outputs, still count all of it.
 	 */
 	public double currentSupply(int serviceIndex) {
 		double production = getCurrentProd()[serviceIndex];
-		return ConfigLoader.config.use_cell_area ? production * getArea() : production;
+		double supply = ConfigLoader.config.use_cell_area ? production * getArea() : production;
+		double share = getCurrentSelfConsumption();
+		// Only market goods are self-consumed. The share is 0 whenever use_self_consumption is off.
+		if (share == 0.0 || !ServiceSet.isMarketGood(ServiceSet.getServicesList().get(serviceIndex))) {
+			return supply;
+		}
+		return supply * (1 - share);
 	}
 
 	void giveUp(RegionalModelRunner r, ConcurrentHashMap<String, Double> distributionMean) {

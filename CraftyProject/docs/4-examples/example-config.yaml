@@ -74,6 +74,13 @@ use_matrix_give_in: false
 use_price_feedback: false
 price_feedback_strength: 0.03
 
+# Self-consumption (optional, needs a self_consumption column, 0-1 with blank = 0, in
+# AFTsMetaData and a Market_good column, Yes or No, in Services.csv): supply of each
+# market good counts (1 - self_consumption) x production, so the share an AFT uses itself
+# never reaches the market. Other services are supplied in full, and the AFT's own utility
+# still counts all of its production.
+use_self_consumption: false
+
 # Neighbour effects (competition candidate filtering)
 use_neighbour_priority: true
 neighbour_priority_probability: 0.95

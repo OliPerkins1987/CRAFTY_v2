@@ -68,6 +68,10 @@ public abstract class AbstractAft {
 	// AFT from another category challenges it (use_conversion_cost)
 	private double conversionCost = 0.0;
 
+	// Self-consumption (use_self_consumption): the share, 0-1, of each market good this AFT
+	// produces that it uses itself, so that never reaches supply
+	private double selfConsumption = 0.0;
+
 	// Matrix give-in (use_matrix_give_in): this AFT's row of the give-in matrix, i.e. its
 	// give-in threshold against each challenger, keyed by the challenger's label. A
 	// challenger with no value falls back to giveInMean. Null when the switch is off.
@@ -310,6 +314,14 @@ public abstract class AbstractAft {
 
 	public void setConversionCost(double conversionCost) {
 		this.conversionCost = conversionCost;
+	}
+
+	public double getSelfConsumption() {
+		return selfConsumption;
+	}
+
+	public void setSelfConsumption(double selfConsumption) {
+		this.selfConsumption = selfConsumption;
 	}
 
 	public double getReceivesSubsidy() {

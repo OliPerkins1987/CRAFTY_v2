@@ -72,6 +72,11 @@ public class Config {
     // two are compared.
     public boolean use_conversion_cost = false;
 
+    // Self-consumption: each AFT uses its self_consumption share (AFTsMetaData, 0-1) of what it produces of
+    // each market good (Market_good = Yes in Services.csv), so only (1 - self_consumption) x production of
+    // those services reaches supply. Other services are supplied in full. The AFT's utility counts all of it.
+    public boolean use_self_consumption = false;
+
     // Price feedback (explicit-price utility only): each service's price is its file price times
     // max(0, 1 + price_feedback_strength x (demand - supply) / demand), so oversupply lowers the price
     // and a shortage raises it. It is refreshed whenever marginal utility is. The default strength,
@@ -225,6 +230,7 @@ public class Config {
                 + "|-> use_twinned_cost=" + use_twinned_cost + "\n"
                 + "|-> twinned_competition_rate=" + twinned_competition_rate + "\n"
                 + "|-> use_conversion_cost=" + use_conversion_cost + "\n"
+                + "|-> use_self_consumption=" + use_self_consumption + "\n"
                 + "|-> use_price_feedback=" + use_price_feedback + "\n"
                 + "|-> price_feedback_strength=" + price_feedback_strength + "\n"
                 + "|-> reactive_afts=" + reactive_afts + "\n"
