@@ -20,7 +20,8 @@ In the code, a `Service` stores *region-specific* time-varying drivers used duri
 Services also have optional **metadata**:
 - `Category` (for reporting/plotting)
 - `Penalise_Oversupply` flag (optional behaviour used by downstream calculations)
-- `Market_good` flag (only market goods are self-consumed, with `use_self_consumption`)
+- `Market_good` flag (only market goods are self-consumed, with `use_self_consumption`, and only market goods
+  pay transport costs, with `use_transport_costs`; with no `Market_good` column every service pays transport)
 
 ---
 

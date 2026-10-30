@@ -17,6 +17,7 @@ import de.cesr.crafty.core.dataLoader.CsvProcessors;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.costs.GlobalCostData;
+import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.utils.file.PathTools;
 
 public class ProductionCostUpdater extends AbstractUpdater {
@@ -39,6 +40,9 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	private static List<String> irrigatedAftLabels = Collections.synchronizedList(new ArrayList<>());
 	private static List<String> intensityAftLabels = Collections.synchronizedList(new ArrayList<>());
 	private static List<String> stockingAftLabels = Collections.synchronizedList(new ArrayList<>());
+	// Transport cost per unit of production, indexed like ServiceSet.getServicesList(); 0 for a service
+	// that does not pay transport. Empty when production or transport costs are off, so none is charged.
+	private static double[] transportCosts = new double[0];
 
 	private Map<Integer, Path> nfertCostPaths = new TreeMap<>();
 	private Map<Integer, Path> irrigationCostPaths = new TreeMap<>();
@@ -46,6 +50,7 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	private Map<Integer, Path> stockingCostPaths = new TreeMap<>();
 
 	public ProductionCostUpdater() {
+		transportCosts = new double[0];
 		if (!ConfigLoader.isUseProductionCosts()) {
 			LOGGER.info("Production costs disabled");
 			return;
@@ -53,6 +58,11 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 		buildAftLists();
 		loadGlobalCosts();
+		if (ConfigLoader.isUseTransportCosts()) {
+			loadTransportCosts();
+		} else {
+			LOGGER.info("Transport costs disabled");
+		}
 
 		if (!ConfigLoader.isSpatialProductionCosts()) {
 			cacheGlobalNfertCosts();
@@ -111,6 +121,73 @@ public class ProductionCostUpdater extends AbstractUpdater {
 			return;
 		}
 		globalCostData = new GlobalCostData(globalCostsCsv);
+	}
+
+	/*
+	 * Transport costs per unit are global, in both cost modes: one <service>_transport row of
+	 * global_costs.csv per service that pays transport (see paysTransport), charged per unit produced and
+	 * scaled by each AFT's trade factor with global production costs, or by the region's export share with
+	 * spatial ones (see Cell.transportCost). Every such service needs a row, even one no AFT trades, so a
+	 * forgotten row cannot pass as free transport.
+	 */
+	private void loadTransportCosts() {
+		if (globalCostData == null) return;
+		List<String> services = ServiceSet.getServicesList();
+		boolean noMarketGoodColumn = ServiceSet.getMarketGood().isEmpty();
+		List<String> payers = services.stream().filter(ProductionCostUpdater::paysTransport).toList();
+		if (noMarketGoodColumn) {
+			LOGGER.info("Services.csv has no Market_good column, so every service pays transport");
+		} else if (payers.isEmpty()) {
+			LOGGER.info("No service is a market good (Market_good in Services.csv); no transport costs applied");
+			return;
+		}
+
+		Map<String, Double> rows = globalCostData.getTransportCosts();
+		List<String> missing = missingTransportCosts(payers, rows);
+		if (!missing.isEmpty()) {
+			LOGGER.fatal("global_costs.csv has no transport cost for " + (noMarketGoodColumn ? "service(s) " : "market good(s) ")
+					+ missing + "; add a row <service>" + GlobalCostData.TRANSPORT_SUFFIX + " for each");
+			return;
+		}
+		rows.keySet().stream().filter(s -> !payers.contains(s)).sorted().forEach(s -> LOGGER.warn("Ignoring "
+				+ s + GlobalCostData.TRANSPORT_SUFFIX + " in global_costs.csv: " + s + " is not a market good"
+				+ " or not a service"));
+
+		boolean byExportShare = ConfigLoader.isTransportByExportShare();
+		LOGGER.info(byExportShare
+				? "Transport costs: spatial production costs, so charged on each region's export share (its supply"
+						+ " above its demand), whatever the AFT's *_trade capitals"
+				: "Transport costs: global production costs, so charged on each AFT's *_trade factor");
+		double[] costs = new double[services.size()];
+		for (int i = 0; i < services.size(); i++) {
+			String service = services.get(i);
+			if (!paysTransport(service)) continue;
+			costs[i] = rows.get(service);
+			if (byExportShare) {
+				LOGGER.info("Transport cost for " + service + ": " + costs[i] + " per unit, paid on each region's"
+						+ " export share");
+				continue;
+			}
+			final int index = i;
+			List<String> traders = AFTsLoader.getAftHash().values().stream()
+					.filter(a -> a.isInteract() && a.getTradeFactor(index) != 0.0)
+					.map(Aft::getLabel).sorted().toList();
+			LOGGER.info("Transport cost for " + service + ": " + costs[i] + " per unit, paid by " + traders);
+		}
+		transportCosts = costs;
+	}
+
+	/**
+	 * Whether a service pays transport: a market good (Market_good = Yes), or any service at all when
+	 * Services.csv has no Market_good column.
+	 */
+	public static boolean paysTransport(String service) {
+		return ServiceSet.getMarketGood().isEmpty() || ServiceSet.isMarketGood(service);
+	}
+
+	/** The services that pay transport but have no transport cost row, in the order given. */
+	static List<String> missingTransportCosts(List<String> payers, Map<String, Double> transportCosts) {
+		return payers.stream().filter(s -> !transportCosts.containsKey(s)).toList();
 	}
 
 	private void cacheGlobalNfertCosts() {
@@ -340,5 +417,14 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 	public static List<String> getStockingAftLabels() {
 		return stockingAftLabels;
+	}
+
+	/** Transport cost per unit of production, indexed like ServiceSet.getServicesList(); empty when off. */
+	public static double[] getTransportCosts() {
+		return transportCosts;
+	}
+
+	public static void setTransportCosts(double[] costs) {
+		transportCosts = costs;
 	}
 }

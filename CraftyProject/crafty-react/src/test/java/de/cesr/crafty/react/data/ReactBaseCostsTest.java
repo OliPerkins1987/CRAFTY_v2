@@ -73,6 +73,19 @@ class ReactBaseCostsTest {
 	}
 
 	@Test
+	void coreTransportRowsLoad_andLeaveTheServiceCostsAlone() {
+		// Transport is core's alone: react reads the file, but nothing in react asks for a _transport item.
+		Path file = ReactToyData.write(dir, "g.csv", "Item,Cost", "Nfert,1.08", "C3cereals,50",
+				"C3cereals_transport,7.5", "Pasture_transport,0");
+
+		ReactBaseCosts costs = ReactBaseCosts.load(file);
+
+		assertEquals(50, costs.get("C3cereals"));
+		assertEquals(1.08, costs.get(ReactBaseCosts.NFERT));
+		assertEquals(List.of(), costs.missing(List.of("Nfert", "C3cereals")));
+	}
+
+	@Test
 	void theItemAndCostColumnsAreRequired() {
 		Path file = ReactToyData.write(dir, "g.csv", "Name,Value", "Water,0.5");
 

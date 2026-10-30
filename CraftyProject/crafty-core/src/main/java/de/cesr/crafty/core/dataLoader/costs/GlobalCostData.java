@@ -14,6 +14,11 @@ public class GlobalCostData {
 	private double nfertUnitCost = 0.0;
 	private double stockingUnitCost = 0.0;
 	private Map<String, Double> intensityCosts = new HashMap<>();
+	// Transport cost per unit of production, keyed by service: the <service>_transport rows
+	private Map<String, Double> transportCosts = new HashMap<>();
+
+	/** The suffix that marks a transport cost row: {@code <service>_transport}. */
+	public static final String TRANSPORT_SUFFIX = "_transport";
 
 	public GlobalCostData(Path globalCostsCsv) {
 		Map<String, List<String>> csv = CsvProcessors.ReadAsaHash(globalCostsCsv);
@@ -53,11 +58,16 @@ public class GlobalCostData {
 				 */
 				continue;
 			}
+			if (item.endsWith(TRANSPORT_SUFFIX)) {
+				// Kept out of the intensity map, where it would never match a service name.
+				transportCosts.put(item.substring(0, item.length() - TRANSPORT_SUFFIX.length()), cost);
+				continue;
+			}
 
 			intensityCosts.put(item, cost);
 		}
 		LOGGER.info("Loaded global costs: Nfert=" + nfertUnitCost + ", Stocking=" + stockingUnitCost
-				+ ", intensity items=" + intensityCosts.keySet());
+				+ ", intensity items=" + intensityCosts.keySet() + ", transport items=" + transportCosts.keySet());
 	}
 
 	public double getNfertUnitCost() {
@@ -70,5 +80,10 @@ public class GlobalCostData {
 
 	public Map<String, Double> getIntensityCosts() {
 		return intensityCosts;
+	}
+
+	/** Transport cost per unit of production, by service (the {@code <service>_transport} rows). */
+	public Map<String, Double> getTransportCosts() {
+		return transportCosts;
 	}
 }

@@ -29,6 +29,7 @@ prescribed_subsidies_path: ''                  # Used for historical calibration
 use_production_costs: false                    # Enable production cost subtraction from utility (explicit-price mode only)
 spatial_production_costs: false                 # When true, costs are read per-cell from spatial CSV; when false, global per-AFT costs apply
 costs_directory: ''                            # Directory containing production cost CSVs (required when use_production_costs is true)
+use_transport_costs: false                     # Needs use_production_costs; a <service>_transport row in global_costs.csv for every market good (every service if Services.csv has no Market_good column), x production x the region's export share (spatial_production_costs) or each AFT's *_trade value (global)
 
 most_competitive_aft_probability: 0.8         # Probability of selecting the highest-utility AFT for cell
 averaged_residual_demand_per_cell: false      # Averaged residual demand for each cell

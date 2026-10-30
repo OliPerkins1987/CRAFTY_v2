@@ -49,6 +49,8 @@ import de.cesr.crafty.core.utils.general.Utils;
  * - {@link #marginal}: marginal utility signal per service derived from demand–supply gaps.
  * - {@link #priceMultiplier}: with use_price_feedback, the factor on each service's file price, from the
  *   same demand–supply gaps and refreshed with {@link #marginal}.
+ * - {@link #exportShare}: with transport and spatial production costs, the share of each service's
+ *   supply above the region's demand, which transport is charged on; refreshed with {@link #marginal}.
  * - {@link #distributionMean}: per-year map of mean utility per AFT (computed from cell utilities).
  * - {@link #maxUtility}/{@link #minUtility}: utility range used for normalised-utility behaviour modes.
  *
@@ -83,6 +85,9 @@ public class RegionalModelRunner {
     private ConcurrentHashMap<String, Double> regionalSupply;
     private ConcurrentHashMap<String, Double> marginal = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, Double> priceMultiplier = new ConcurrentHashMap<>();
+    // Indexed like ServiceSet.getServicesList(); empty unless transport is charged by export share. Each
+    // refresh replaces the array rather than changing it, so utilities read in parallel see one whole set.
+    private double[] exportShare = new double[0];
     // Services already warned about having 0 demand, which leaves them at their file price.
     private final Set<String> zeroDemandWarned = ConcurrentHashMap.newKeySet();
     private ConcurrentHashMap<Integer, ConcurrentHashMap<String, Double>> distributionMean = new ConcurrentHashMap<>();
@@ -139,6 +144,10 @@ public class RegionalModelRunner {
         if (ConfigLoader.config.use_price_feedback) {
             // The prices this year's utilities, and so giving up, were just computed with.
             listner.exportPrices(getPriceMultiplier());
+        }
+        if (ConfigLoader.isTransportByExportShare()) {
+            // Likewise the export shares their transport costs were charged on.
+            listner.writeExportShares(getExportShare());
         }
         try (var t = profiler.section("compute DistributionMean")) {
             computeDistributionMean();
@@ -318,6 +327,33 @@ public class RegionalModelRunner {
                         ServiceSet.getPenalise_Oversupply().get(serviceName)));
             }
         });
+        if (ConfigLoader.isTransportByExportShare()) {
+            computeExportShares();
+        }
+    }
+
+    private void computeExportShares() {
+        List<String> services = ServiceSet.getServicesList();
+        Map<String, Double> demand = ServicesUpdater.getDemandByRegions().get(R.getName());
+        double[] shares = new double[services.size()];
+        for (int i = 0; i < services.size(); i++) {
+            String service = services.get(i);
+            shares[i] = exportShare(demand.get(service), getRegionalSupply().getOrDefault(service, 0.0));
+        }
+        exportShare = shares;
+    }
+
+    /**
+     * Spatial transport: the share of a region's supply of a service that it exports, which is the part
+     * above its own demand, (supply - demand) / supply. It is 0 when supply does not exceed demand, and 1
+     * when there is supply but no demand at all, since then everything supplied is exported. Charged on
+     * every producer's marketed production, it adds up to transport on exactly supply - demand.
+     */
+    static double exportShare(double demand, double supply) {
+        if (supply <= 0 || supply <= demand) {
+            return 0.0;
+        }
+        return (supply - demand) / supply;
     }
 
     /**
@@ -647,6 +683,14 @@ public class RegionalModelRunner {
     /** With use_price_feedback, each service's price multiplier; empty when the switch is off. */
     public ConcurrentHashMap<String, Double> getPriceMultiplier() {
         return priceMultiplier;
+    }
+
+    /**
+     * With transport and spatial production costs, each service's export share (see
+     * {@link #exportShare(double, double)}), indexed like ServiceSet.getServicesList(); empty otherwise.
+     */
+    public double[] getExportShare() {
+        return exportShare;
     }
 
 }

@@ -21,6 +21,7 @@ import de.cesr.crafty.core.output.Listener;
 import de.cesr.crafty.core.output.Tracker;
 import de.cesr.crafty.core.updaters.CellBehaviourUpdater;
 import de.cesr.crafty.core.updaters.LandMaskUpdater;
+import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
 class CompetitivenessTest {
@@ -1576,6 +1577,85 @@ class CompetitivenessTest {
                 ConfigLoader.config.use_production_costs = false;
             }
         });
+    }
+
+    // -------------------------------------------------------
+    // Transport costs (use_production_costs)
+    // -------------------------------------------------------
+
+    @Test
+    void transportCost_isSubtractedFromExplicitPriceUtility() throws Throwable {
+        withFeedbackPrices(false, Map.of("S1", 100.0), Map.of(), r -> {
+            Aft trader = tradingAft("TRADE", 1.0);
+            Cell c = Mockito.spy(new Cell(0, 0));
+            doReturn(10.0).when(c).competitiveness(trader, "S1");
+            try {
+                ProductionCostUpdater.setTransportCosts(new double[] { 30.0 });
+                // 100 x 10 - 10 x 1 x 30 = 700
+                assertEquals(700.0, callUtility(c, trader, r), 1e-9);
+            } finally {
+                ProductionCostUpdater.setTransportCosts(new double[0]);
+            }
+        });
+    }
+
+    @Test
+    void transportCost_letsANonTradingChallengerIn() throws Throwable {
+        for (boolean transport : new boolean[] { false, true }) {
+            withFeedbackPrices(false, Map.of("S1", 100.0), Map.of(), r -> {
+                // The mock owner's give-in mean and SD are 0, so the challenger only has to beat it.
+                AftCategorised.useCategorisationGivIn = false;
+                when(r.getDistributionMeanY()).thenReturn(new ConcurrentHashMap<>(Map.of("OWN", 100.0)));
+                Aft owner = tradingAft("OWN", 1.0);
+                Aft challenger = tradingAft("COMP", 0.0);
+                Cell c = Mockito.spy(new Cell(0, 0));
+                doReturn(10.0).when(c).competitiveness(owner, "S1");
+                doReturn(9.0).when(c).competitiveness(challenger, "S1");
+                try {
+                    ProductionCostUpdater.setTransportCosts(transport ? new double[] { 30.0 } : new double[0]);
+                    c.setCurrentUtility(callUtility(c, owner, r));
+
+                    assertEquals(transport, callLandUseChange("landUsechange", c, owner, challenger, r),
+                            "900 loses to 1000 without transport, but beats 1000 - 300 with it");
+                } finally {
+                    ProductionCostUpdater.setTransportCosts(new double[0]);
+                }
+            });
+        }
+    }
+
+    @Test
+    void transportBySurplus_isSubtractedFromExplicitPriceUtility_onlyInASurplusRegion() throws Throwable {
+        for (double share : new double[] { 0.5, 0.0 }) {
+            withFeedbackPrices(false, Map.of("S1", 100.0), Map.of(), r -> {
+                // No trade factor: with spatial production costs every producer pays on the export share.
+                Aft producer = tradingAft("PROD", 0.0);
+                Cell c = Mockito.spy(new Cell(0, 0));
+                doReturn(10.0).when(c).competitiveness(producer, "S1");
+                when(r.getExportShare()).thenReturn(new double[] { share });
+                try {
+                    ConfigLoader.config.use_transport_costs = true;
+                    ConfigLoader.config.spatial_production_costs = true;
+                    ProductionCostUpdater.setTransportCosts(new double[] { 30.0 });
+                    // Surplus: 100 x 10 - 10 x 0.5 x 30 = 850; deficit: 1000, no transport.
+                    assertEquals(share == 0.0 ? 1000.0 : 850.0, callUtility(c, producer, r), 1e-9,
+                            "export share " + share);
+                } finally {
+                    ConfigLoader.config.use_transport_costs = false;
+                    ConfigLoader.config.spatial_production_costs = false;
+                    ProductionCostUpdater.setTransportCosts(new double[0]);
+                }
+            });
+        }
+    }
+
+    /** An AFT with no other production costs and the given trade factor on the first service. */
+    private static Aft tradingAft(String label, double trade) {
+        Aft a = mock(Aft.class);
+        when(a.isInteract()).thenReturn(true);
+        when(a.getLabel()).thenReturn(label);
+        when(a.getTradeFactor(0)).thenReturn(trade);
+        return a;
     }
 
     @Test

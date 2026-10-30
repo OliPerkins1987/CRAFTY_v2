@@ -59,6 +59,10 @@ public abstract class AbstractAft {
 	 */
 	private double otherIntensity = 1.0;
 	private double stockingCostPerHa = 0.0;
+	// Transport cost multiplier per service, indexed like ServiceSet.getServicesList(): the value in
+	// the *_trade column on that service's row of the production file, 0 where there is none. Set
+	// whenever the production file is read; empty until then, which reads as 0 for every service.
+	private double[] tradeFactors = new double[0];
 
 	// Twinned AFT fields
 	private String twinLabel = null;
@@ -286,6 +290,15 @@ public abstract class AbstractAft {
 
 	public void setStockingCostPerHa(double stockingCostPerHa) {
 		this.stockingCostPerHa = stockingCostPerHa;
+	}
+
+	/** The transport cost multiplier for the service at this index of the services list; 0 if none. */
+	public double getTradeFactor(int serviceIndex) {
+		return serviceIndex < tradeFactors.length ? tradeFactors[serviceIndex] : 0.0;
+	}
+
+	public void setTradeFactors(double[] tradeFactors) {
+		this.tradeFactors = tradeFactors;
 	}
 
 	public String getTwinLabel() {

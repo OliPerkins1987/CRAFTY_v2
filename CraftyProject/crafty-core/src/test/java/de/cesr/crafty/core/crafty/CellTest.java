@@ -19,6 +19,7 @@ import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.output.Listener;
 import de.cesr.crafty.core.output.Tracker;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
+import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
 class CellTest {
@@ -516,6 +517,141 @@ class CellTest {
 	}
 
 	// -----------------------------
+	// transport costs (use_production_costs)
+	// -----------------------------
+
+	@Test
+	void transportCost_isProductionTimesTradeTimesUnitCost_onMarketGoodsOnly() throws Throwable {
+		withTransport(false, () -> {
+			Cell c = producingCell(trader(0.5, 0.0));
+			// S1: production 2 x trade 0.5 x 3 per unit; S2 is not a market good, so it has no unit cost.
+			assertEquals(3.0, c.transportCost(c.getOwner(), null), 1e-12);
+			assertEquals(3.0, c.productionCost(c.getOwner(), null), 1e-12, "global mode, no other costs");
+		});
+	}
+
+	@Test
+	void transportCost_isZero_forAnAftThatDoesNotTrade() throws Throwable {
+		withTransport(false, () -> {
+			Cell c = producingCell(trader(0.0, 0.0));
+			assertEquals(0.0, c.transportCost(c.getOwner(), null), 0.0);
+		});
+	}
+
+	@Test
+	void transportCost_skipsTheSelfConsumedShare() throws Throwable {
+		withTransport(true, () -> {
+			Cell c = producingCell(trader(0.5, 0.5));
+			assertEquals(1.5, c.transportCost(c.getOwner(), null), 1e-12);
+		});
+	}
+
+	@Test
+	void transportCost_isChargedOnProduction_notCompetitiveness() throws Throwable {
+		withTransport(false, () -> withTradeCapital(() -> {
+			Cell c = producingCell(tradeCapitalProducer());
+			c.getCapitals().put("s1_trade", 0.5);
+			// Production counts capA only (2); competitiveness also has s1_trade (2 x 0.5 = 1).
+			assertEquals(2.0, c.productivity(c.getOwner(), "S1"), 1e-12);
+			assertEquals(1.0, c.competitiveness(c.getOwner(), "S1"), 1e-12);
+			// 2 x trade 0.5 x 3, not 1 x 0.5 x 3.
+			assertEquals(3.0, c.transportCost(c.getOwner(), null), 1e-12);
+		}));
+	}
+
+	@Test
+	void transportCost_isNotCharged_whenProductionCostsAreOff() throws Throwable {
+		withTransport(false, () -> {
+			Cell c = producingCell(trader(0.5, 0.0));
+			ConfigLoader.config.use_production_costs = false;
+			assertEquals(0.0, c.productionCost(c.getOwner(), null), 0.0);
+		});
+	}
+
+	// transport with spatial production costs: charged on the region's export share
+
+	@Test
+	void transportCost_bySurplus_isProductionTimesExportShareTimesUnitCost() throws Throwable {
+		withSpatialTransport(false, () -> {
+			// S2 has an export share but no unit cost, since it is not a market good.
+			RegionalModelRunner r = regionWithExportShares(0.25, 0.9);
+			Cell c = producingCell(trader(0.0, 0.0));
+			// S1: production 2 x share 0.25 x 3 per unit, though the AFT has no trade factor.
+			assertEquals(1.5, c.transportCost(c.getOwner(), r), 1e-12);
+			assertEquals(1.5, c.productionCost(c.getOwner(), r), 1e-12, "spatial mode, no other costs");
+		});
+	}
+
+	@Test
+	void transportCost_bySurplus_ignoresTheTradeFactor() throws Throwable {
+		withSpatialTransport(false, () -> {
+			RegionalModelRunner r = regionWithExportShares(0.25, 0.0);
+			for (double trade : new double[] { 0.0, 0.5, 2.0 }) {
+				Cell c = producingCell(trader(trade, 0.0));
+				assertEquals(1.5, c.transportCost(c.getOwner(), r), 1e-12, "trade factor " + trade);
+			}
+		});
+	}
+
+	@Test
+	void transportCost_bySurplus_isZero_withoutASurplus() throws Throwable {
+		withSpatialTransport(false, () -> {
+			Cell c = producingCell(trader(0.5, 0.0));
+			assertEquals(0.0, c.transportCost(c.getOwner(), regionWithExportShares(0.0, 0.0)), 0.0);
+			assertEquals(0.0, c.transportCost(c.getOwner(), regionWithExportShares()), 0.0, "no shares yet");
+			assertEquals(0.0, c.transportCost(c.getOwner(), null), 0.0, "no region");
+		});
+	}
+
+	@Test
+	void transportCost_bySurplus_skipsTheSelfConsumedShare() throws Throwable {
+		withSpatialTransport(true, () -> {
+			Cell c = producingCell(trader(0.0, 0.5));
+			assertEquals(0.75, c.transportCost(c.getOwner(), regionWithExportShares(0.25, 0.0)), 1e-12);
+		});
+	}
+
+	@Test
+	void transportCost_bySurplus_chargesAChallengerOnItsOwnProduction() throws Throwable {
+		withSpatialTransport(false, () -> {
+			Cell c = producingCell(trader(0.0, 0.0));
+			Aft challenger = trader(0.0, 0.0);
+			when(challenger.getProductivityLevel()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 3.0, "S2", 1.0)));
+			// The challenger would produce 2 x 3 = 6 of S1 here; the owner's stored production is 2.
+			assertEquals(4.5, c.transportCost(challenger, regionWithExportShares(0.25, 0.0)), 1e-12);
+			assertEquals(2.0, c.getCurrentProd()[0], 1e-12);
+		});
+	}
+
+	@Test
+	void transportCost_bySurplus_isChargedOnProduction_notCompetitiveness() throws Throwable {
+		withSpatialTransport(false, () -> withTradeCapital(() -> {
+			Cell c = producingCell(tradeCapitalProducer());
+			c.getCapitals().put("s1_trade", 0.5);
+			// Production 2 x share 0.5 x 3, not competitiveness 1 x 0.5 x 3.
+			assertEquals(3.0, c.transportCost(c.getOwner(), regionWithExportShares(0.5, 0.0)), 1e-12);
+		}));
+	}
+
+	@Test
+	void transportCost_leavesProductionAndSupplyAlone() throws Throwable {
+		withTransport(false, () -> {
+			Cell c = producingCell(trader(0.5, 0.0));
+			assertArrayEquals(new double[] { 2.0, 2.0 }, c.getCurrentProd(), 1e-12);
+			assertEquals(2.0, c.currentSupply(0), 1e-12);
+		});
+	}
+
+	@Test
+	void transportCost_isZero_whenNoTransportCostsAreLoaded() throws Throwable {
+		withServices(List.of("S1", "S2"), () -> {
+			ProductionCostUpdater.setTransportCosts(new double[0]);
+			Cell c = producingCell(trader(0.5, 0.0));
+			assertEquals(0.0, c.transportCost(c.getOwner(), regionWithExportShares(0.25, 0.0)), 0.0);
+		});
+	}
+
+	// -----------------------------
 	// giveUp(...)
 	// -----------------------------
 
@@ -646,6 +782,91 @@ class CellTest {
 				ServiceSet.getMarketGood().putAll(flagsBefore);
 			}
 		});
+	}
+
+	/**
+	 * Runs a transport test body on S1 (a market good, transport 3 per unit) and S2 (not one), with
+	 * production costs on in global mode. Everything set here is restored after.
+	 */
+	private void withTransport(boolean selfConsumptionOn, Executable body) throws Throwable {
+		withMarketGoods(selfConsumptionOn, () -> {
+			Config cfg = (Config) ensureConfigInstance();
+			boolean costsBefore = cfg.use_production_costs;
+			boolean spatialBefore = cfg.spatial_production_costs;
+			try {
+				cfg.use_production_costs = true;
+				cfg.spatial_production_costs = false;
+				ProductionCostUpdater.setTransportCosts(new double[] { 3.0, 0.0 });
+				body.execute();
+			} finally {
+				cfg.use_production_costs = costsBefore;
+				cfg.spatial_production_costs = spatialBefore;
+				ProductionCostUpdater.setTransportCosts(new double[0]);
+			}
+		});
+	}
+
+	/**
+	 * {@link #withTransport(boolean, Executable)} with spatial production costs and use_transport_costs on,
+	 * so transport is charged on the region's export shares. Both switches are restored after.
+	 */
+	private void withSpatialTransport(boolean selfConsumptionOn, Executable body) throws Throwable {
+		withTransport(selfConsumptionOn, () -> {
+			Config cfg = (Config) ensureConfigInstance();
+			boolean transportBefore = cfg.use_transport_costs;
+			try {
+				cfg.use_transport_costs = true;
+				// withTransport restores this one.
+				cfg.spatial_production_costs = true;
+				body.execute();
+			} finally {
+				cfg.use_transport_costs = transportBefore;
+			}
+		});
+	}
+
+	/** A region runner whose export shares, indexed like the services, are the given ones. */
+	private static RegionalModelRunner regionWithExportShares(double... shares) {
+		RegionalModelRunner r = mock(RegionalModelRunner.class);
+		when(r.getExportShare()).thenReturn(shares);
+		return r;
+	}
+
+	/**
+	 * Runs a body with separate_production_competitiveness on, capA a suitability and s1_trade a
+	 * capital, so production counts capA only and competitiveness counts both. Restored after.
+	 */
+	private void withTradeCapital(Executable body) throws Throwable {
+		Config cfg = (Config) ensureConfigInstance();
+		boolean separateBefore = cfg.separate_production_competitiveness;
+		Map<String, String> typesBefore = new HashMap<>(CapitalUpdater.getCapitalTypes());
+		try {
+			cfg.separate_production_competitiveness = true;
+			CapitalUpdater.getCapitalTypes().clear();
+			CapitalUpdater.getCapitalTypes().put("capA", "Suitability");
+			CapitalUpdater.getCapitalTypes().put("s1_trade", "Capital");
+			body.execute();
+		} finally {
+			cfg.separate_production_competitiveness = separateBefore;
+			CapitalUpdater.getCapitalTypes().clear();
+			CapitalUpdater.getCapitalTypes().putAll(typesBefore);
+		}
+	}
+
+	/** {@link #trader(double, double)} (trade 0.5) whose S1 is also sensitive to the s1_trade capital. */
+	private static Aft tradeCapitalProducer() {
+		Aft a = trader(0.5, 0.0);
+		when(a.getSensByService()).thenReturn(
+				Map.of("S1", Map.of("capA", 1.0, "s1_trade", 1.0), "S2", Map.of("capA", 1.0)));
+		return a;
+	}
+
+	/** {@link #producer(double)} with the given trade factor on S1 and none on S2. */
+	private static Aft trader(double tradeOnS1, double selfConsumption) {
+		Aft a = producer(selfConsumption);
+		when(a.getLabel()).thenReturn("Trader");
+		when(a.getTradeFactor(0)).thenReturn(tradeOnS1);
+		return a;
 	}
 
 	/** An AFT that grows capA x 1 of both S1 and S2, and uses the given share of its market goods itself. */

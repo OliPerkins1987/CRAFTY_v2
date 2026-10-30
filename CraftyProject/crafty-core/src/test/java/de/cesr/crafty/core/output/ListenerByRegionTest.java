@@ -374,4 +374,76 @@ class ListenerByRegionTest {
 			setConfigField("generate_output_files", true);
 		}
 	}
+
+	// =========================================================
+	// Transport with spatial production costs: writeExportShares
+	// =========================================================
+
+	@Test
+	void writeExportShares_writesTheShare_ofEachServiceThatPaysTransport() {
+		setConfigField("generate_output_files", true);
+		setConfigField("output_folder_name", "baseOutputDir");
+		Region region = regionWithFilePrices(Map.of("S1", 200.0, "S2", 50.0, "S3", 10.0));
+
+		try (MockedStatic<Timestep> timestepMock = mockStatic(Timestep.class);
+				MockedStatic<AFTsLoader> aftsMock = mockStatic(AFTsLoader.class);
+				MockedStatic<ServiceSet> serviceSetMock = mockStatic(ServiceSet.class);
+				MockedStatic<PathTools> pathToolsMock = mockStatic(PathTools.class);
+				MockedStatic<CsvTools> csvToolsMock = mockStatic(CsvTools.class)) {
+
+			timestepMock.when(Timestep::getCurrentYear).thenReturn(2000);
+			timestepMock.when(Timestep::getTick).thenReturn(0);
+			timestepMock.when(Timestep::getSize).thenReturn(2);
+			serviceSetMock.when(ServiceSet::getServicesList).thenReturn(Arrays.asList("S1", "S2", "S3"));
+			// S1 and S3 are market goods, so they pay transport; S2 does not.
+			serviceSetMock.when(ServiceSet::getMarketGood)
+					.thenReturn(new ConcurrentHashMap<>(Map.of("S1", true, "S2", false, "S3", true)));
+			serviceSetMock.when(() -> ServiceSet.isMarketGood("S1")).thenReturn(true);
+			serviceSetMock.when(() -> ServiceSet.isMarketGood("S3")).thenReturn(true);
+			aftsMock.when(AFTsLoader::getAftHash).thenReturn(new ConcurrentHashMap<>());
+			pathToolsMock.when(() -> PathTools.makeDirectory(anyString()))
+					.thenAnswer(invocation -> invocation.getArgument(0));
+
+			ListenerByRegion listener = new ListenerByRegion(region);
+			listener.initializeListeners();
+			listener.writeExportShares(new double[] { 0.25, 0.9, 0.0 });
+
+			String[][] shares = getPrivateMatrix(listener, "exportShareListener");
+			assertEquals(Arrays.asList("Year", "ExportShare:S1", "ExportShare:S3"), Arrays.asList(shares[0]));
+			assertEquals(Arrays.asList("2000", "0.25", "0.0"), Arrays.asList(shares[1]));
+			csvToolsMock.verify(() -> CsvTools.writeCSVfile(Mockito.same(shares),
+					Mockito.eq(Path.of("baseOutputDir" + java.io.File.separator + "region_R1" + java.io.File.separator
+							+ "region_R1-ExportShare.csv"))));
+
+			// The next year goes in the next row; a service with no share yet is written as 0.
+			timestepMock.when(Timestep::getCurrentYear).thenReturn(2001);
+			timestepMock.when(Timestep::getTick).thenReturn(1);
+			listener.writeExportShares(new double[] { 0.5 });
+			assertEquals(Arrays.asList("2001", "0.5", "0.0"), Arrays.asList(shares[2]));
+		}
+	}
+
+	@Test
+	void writeExportShares_writesNothing_whenOutputFilesAreOff() {
+		setConfigField("generate_output_files", false);
+		Region region = regionWithFilePrices(Map.of("S1", 200.0));
+
+		try (MockedStatic<Timestep> timestepMock = mockStatic(Timestep.class);
+				MockedStatic<AFTsLoader> aftsMock = mockStatic(AFTsLoader.class);
+				MockedStatic<ServiceSet> serviceSetMock = mockStatic(ServiceSet.class);
+				MockedStatic<CsvTools> csvToolsMock = mockStatic(CsvTools.class)) {
+
+			timestepMock.when(Timestep::getSize).thenReturn(1);
+			serviceSetMock.when(ServiceSet::getServicesList).thenReturn(Collections.singletonList("S1"));
+			aftsMock.when(AFTsLoader::getAftHash).thenReturn(new ConcurrentHashMap<>());
+
+			ListenerByRegion listener = new ListenerByRegion(region);
+			listener.initializeListeners();
+			listener.writeExportShares(new double[] { 0.25 });
+
+			csvToolsMock.verifyNoInteractions();
+		} finally {
+			setConfigField("generate_output_files", true);
+		}
+	}
 }

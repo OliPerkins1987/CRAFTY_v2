@@ -160,6 +160,43 @@ public class ConfigLoader {
 		if (!config.use_production_costs && config.spatial_production_costs) {
 			LOGGER.fatal("Cannot use spatial production costs when use_production_costs is false");
 		}
+		String transportError = transportCostConfigError(config);
+		if (transportError != null) {
+			LOGGER.fatal(transportError);
+		}
+		String transportWarning = transportCostConfigWarning(config);
+		if (transportWarning != null) {
+			LOGGER.warn(transportWarning);
+		}
+	}
+
+	/**
+	 * The transport cost rule in {@link #validateProductionCostConfig()}, kept separate because
+	 * LOGGER.fatal exits the JVM and so cannot be exercised from a test.
+	 *
+	 * @return the message to stop the run with, or null if the settings are valid
+	 */
+	static String transportCostConfigError(Config c) {
+		if (c.use_transport_costs && !c.use_production_costs) {
+			return "use_transport_costs is on but use_production_costs is off. Transport is a production cost: "
+					+ "switch use_production_costs on, or use_transport_costs off.";
+		}
+		return null;
+	}
+
+	/**
+	 * With spatial production costs, transport is charged on each region's surplus over its demand. The
+	 * initial demand-supply equilibrium sets each region's demand to its baseline supply, so at the start
+	 * there is no surplus to charge.
+	 *
+	 * @return the message to warn with, or null if there is nothing to warn about
+	 */
+	static String transportCostConfigWarning(Config c) {
+		if (c.use_transport_costs && c.spatial_production_costs && c.initial_demand_supply_equilibrium) {
+			return "initial_demand_supply_equilibrium sets each region's demand to its baseline supply, so no region "
+					+ "has a surplus at the start and nobody pays transport costs until supply grows beyond demand.";
+		}
+		return null;
 	}
 
 	static void validateTwinnedAftConfig() {
@@ -401,6 +438,18 @@ public class ConfigLoader {
 
 	public static boolean isSpatialProductionCosts() {
 		return config != null && config.spatial_production_costs;
+	}
+
+	public static boolean isUseTransportCosts() {
+		return config != null && config.use_transport_costs;
+	}
+
+	/**
+	 * Whether transport is charged on each region's export share (transport with spatial production
+	 * costs), rather than on each AFT's trade factor (transport with global production costs).
+	 */
+	public static boolean isTransportByExportShare() {
+		return isUseTransportCosts() && isSpatialProductionCosts();
 	}
 
 	public static boolean isUsePriceExplicitGivingUp() {

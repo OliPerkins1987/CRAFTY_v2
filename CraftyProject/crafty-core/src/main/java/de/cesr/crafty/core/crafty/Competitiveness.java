@@ -124,7 +124,7 @@ public class Competitiveness {
             }
             return result;
         }).sum();
-        return subtractCosts ? revenue - c.productionCost(a) : revenue;
+        return subtractCosts ? revenue - c.productionCost(a, r) : revenue;
     }
 
     private static double utilityUseExplicitPrice(Cell c, Aft a, RegionalModelRunner r) {

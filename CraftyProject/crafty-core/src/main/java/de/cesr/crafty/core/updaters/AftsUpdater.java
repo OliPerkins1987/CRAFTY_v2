@@ -42,7 +42,8 @@ import tech.tablesaw.io.csv.CsvReadOptions;
  * Input formats:
  * - Production files are read as a simple table; rows are services, and the "Production" column defines
  *   the productivity level for each service. The sensitivity matrix is loaded from the same file and
- *   populates {@code service -> (capital -> exponent)} in {@link Aft#getSensByService()}.
+ *   populates {@code service -> (capital -> exponent)} in {@link Aft#getSensByService()}. The value in a
+ *   service's *_trade column is also the AFT's transport cost multiplier for that service.
  * - Behaviour files are read as a key/value style CSV and populate giving-in/up distribution parameters
  *   and noise ranges.
  *
@@ -170,6 +171,59 @@ public class AftsUpdater extends AbstractUpdater {
 			}
 		}
 		updateSensitivty(a, path);
+		updateTradeFactors(a);
+	}
+
+	/** The suffix that marks a trade capital, e.g. {@code c3_cereals_trade}. */
+	public static final String TRADE_SUFFIX = "_trade";
+
+	/*
+	 * Each AFT's transport cost multiplier per service, from the *_trade capital on that service's row.
+	 * The capital names don't follow the service names (c3_cereals_trade for C3cereals), so the factor
+	 * is whichever *_trade column is non-zero on the row. More than one is ambiguous, and stops the run
+	 * wherever the factor is charged on (see tradeFactorIsCharged).
+	 */
+	static void updateTradeFactors(Aft a) {
+		List<String> services = ServiceSet.getServicesList();
+		double[] factors = new double[services.size()];
+		for (int i = 0; i < services.size(); i++) {
+			String service = services.get(i);
+			Map<String, Double> exps = a.getSensByService().get(service);
+			List<String> trade = nonZeroTradeCapitals(exps);
+			if (trade.size() > 1 && tradeFactorIsCharged(service)) {
+				LOGGER.fatal("AFT '" + a.getLabel() + "' has more than one non-zero trade capital " + trade
+						+ " for '" + service + "' in its production file; transport costs need one");
+			}
+			for (String capital : trade) {
+				factors[i] += exps.get(capital);
+			}
+		}
+		a.setTradeFactors(factors);
+	}
+
+	/**
+	 * Whether a service's trade factor is charged on: with use_transport_costs on, global production costs
+	 * (with spatial ones, transport is charged on each region's export share instead) and a service that
+	 * pays transport.
+	 */
+	static boolean tradeFactorIsCharged(String service) {
+		return ConfigLoader.isUseTransportCosts() && !ConfigLoader.isTransportByExportShare()
+				&& ProductionCostUpdater.paysTransport(service);
+	}
+
+	/** The *_trade capitals with a non-zero value in one service's sensitivities, sorted; empty for none. */
+	static List<String> nonZeroTradeCapitals(Map<String, Double> exps) {
+		List<String> trade = new ArrayList<>();
+		if (exps == null) {
+			return trade;
+		}
+		exps.forEach((capital, value) -> {
+			if (capital.endsWith(TRADE_SUFFIX) && value != 0.0) {
+				trade.add(capital);
+			}
+		});
+		trade.sort(null);
+		return trade;
 	}
 
 	private static void updateSensitivty(Aft a, Path path) {

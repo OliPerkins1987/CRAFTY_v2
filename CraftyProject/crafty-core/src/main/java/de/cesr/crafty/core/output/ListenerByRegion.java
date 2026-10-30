@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.crafty.Region;
@@ -14,6 +15,7 @@ import de.cesr.crafty.core.crafty.Service;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
+import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 import de.cesr.crafty.core.utils.file.CsvTools;
@@ -33,7 +35,10 @@ import de.cesr.crafty.core.utils.general.Utils;
  * service). - Mean utilities per AFT for the region (based on the regional
  * model runner statistics). - With use_price_feedback, each service's file
  * price, price after feedback and the multiplier between them; this file is
- * written for single-region runs too, since the price is set per region.
+ * written for single-region runs too, since the price is set per region. -
+ * With transport and spatial production costs, each paying service's export
+ * share (the share of supply above demand, which transport is charged on);
+ * also written for single-region runs.
  *
  * Files are written under: {output_folder}/region_{RegionName}/
  *
@@ -54,6 +59,9 @@ public class ListenerByRegion {
 	public String[][] DSEquilibriumListener;
 	public String[][] averageUtilities;
 	private String[][] priceListener;
+	// Built at the first write, with a column for each service that pays transport (their indices here).
+	private String[][] exportShareListener;
+	private int[] exportShareServices;
 
 	public ListenerByRegion(Region R) {
 		this.R = R;
@@ -122,6 +130,38 @@ public class ListenerByRegion {
 		String dir = PathTools.makeDirectory(
 				ConfigLoader.config.output_folder_name + File.separator + "region_" + R.getName() + File.separator);
 		CsvTools.writeCSVfile(priceListener, Paths.get(dir + "region_" + R.getName() + "-ServicePrices.csv"));
+	}
+
+	/**
+	 * Records and writes this year's export shares under transport with spatial production costs: for
+	 * each service that pays transport, the share of the region's supply above its demand, which this
+	 * year's transport costs are charged on.
+	 *
+	 * @param exportShare indexed like ServiceSet.getServicesList(); a missing entry is written as 0
+	 */
+	public void writeExportShares(double[] exportShare) {
+		if (!ConfigLoader.config.generate_output_files) {
+			return;
+		}
+		List<String> services = ServiceSet.getServicesList();
+		if (exportShareListener == null) {
+			exportShareServices = IntStream.range(0, services.size())
+					.filter(i -> ProductionCostUpdater.paysTransport(services.get(i))).toArray();
+			exportShareListener = new String[Timestep.getSize() + 1][exportShareServices.length + 1];
+			exportShareListener[0][0] = "Year";
+			for (int j = 0; j < exportShareServices.length; j++) {
+				exportShareListener[0][j + 1] = "ExportShare:" + services.get(exportShareServices[j]);
+			}
+		}
+		int y = Timestep.getTick() + 1;
+		exportShareListener[y][0] = String.valueOf(Timestep.getCurrentYear());
+		for (int j = 0; j < exportShareServices.length; j++) {
+			int i = exportShareServices[j];
+			exportShareListener[y][j + 1] = String.valueOf(i < exportShare.length ? exportShare[i] : 0.0);
+		}
+		String dir = PathTools.makeDirectory(
+				ConfigLoader.config.output_folder_name + File.separator + "region_" + R.getName() + File.separator);
+		CsvTools.writeCSVfile(exportShareListener, Paths.get(dir + "region_" + R.getName() + "-ExportShare.csv"));
 	}
 
 	public void fillDSEquilibriumListener(ConcurrentHashMap<String, Service> ServiceHash) {

@@ -1,5 +1,6 @@
 package de.cesr.crafty.core.crafty;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -9,6 +10,7 @@ import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.updaters.CapitalUpdater;
 import de.cesr.crafty.core.output.Listener;
 import de.cesr.crafty.core.output.Tracker;
+import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 import de.cesr.crafty.core.utils.general.DeterministicRandom;
 
@@ -26,6 +28,11 @@ import de.cesr.crafty.core.utils.general.DeterministicRandom;
  *   {@link #currentSupply(int)} is what the cell adds to supply: production times its area when
  *   {@code use_cell_area} is on, production alone otherwise, less the owner's self-consumption of
  *   market goods when {@code use_self_consumption} is on.
+ *
+ * - Production costs:
+ *   {@link #productionCost(Aft, RegionalModelRunner)} is the $/ha subtracted from explicit-price utility:
+ *   fertiliser, irrigation, intensity and stocking costs, plus
+ *   {@link #transportCost(Aft, RegionalModelRunner)}.
  *
  * - Behavioural land abandonment (give-up):
  *   {@link #giveUp(RegionalModelRunner, ConcurrentHashMap)} compares the cell utility to the mean utility
@@ -108,7 +115,11 @@ public class Cell extends AbstractCell {
 		return product;
 	}
 
-	public double productionCost(Aft a) {
+	/**
+	 * @param r the cell's region, for the export shares that spatial-mode transport is charged on;
+	 *          null (tests only) charges no spatial-mode transport
+	 */
+	public double productionCost(Aft a, RegionalModelRunner r) {
 		if (a == null || !a.isInteract() || !ConfigLoader.isUseProductionCosts()) {
 			return 0.0;
 		}
@@ -125,7 +136,41 @@ public class Cell extends AbstractCell {
 		} else {
 			cost += a.getNfertCostPerHa() + a.getIntensityCostPerHa() + a.getStockingCostPerHa();
 		}
-		return cost;
+		return cost + transportCost(a, r);
+	}
+
+	/**
+	 * The cost of moving this cell's goods, $/ha: for each service that pays transport (every market
+	 * good, or every service when Services.csv has no Market_good column), the AFT's production x a
+	 * factor x the transport cost per unit, less the share the AFT uses itself (with
+	 * {@code use_self_consumption}), since that never travels. The factor is
+	 * - with spatial production costs, the region's export share of the service (the part of its supply
+	 *   above its demand, see {@link RegionalModelRunner#exportShare(double, double)}), whatever the AFT's
+	 *   capitals;
+	 * - with global production costs, the AFT's trade factor (its *_trade value on that service's row).
+	 * It is charged on production, the quantity supply is built from, though utility's revenue is built
+	 * on competitiveness. It is kept out of the cell cost maps, so CRAFTY-react never sees it.
+	 */
+	double transportCost(Aft a, RegionalModelRunner r) {
+		double[] unitCosts = ProductionCostUpdater.getTransportCosts();
+		if (unitCosts.length == 0) {
+			return 0.0;
+		}
+		final boolean bySurplus = ConfigLoader.isTransportByExportShare();
+		// Only tests pass no region; then no service has an export share.
+		final double[] exportShare = !bySurplus || r == null ? new double[0] : r.getExportShare();
+		List<String> services = ServiceSet.getServicesList();
+		double cost = 0.0;
+		for (int i = 0; i < Math.min(unitCosts.length, services.size()); i++) {
+			// Zero for every service that does not pay transport.
+			if (unitCosts[i] == 0.0)
+				continue;
+			final double factor = bySurplus ? (i < exportShare.length ? exportShare[i] : 0.0) : a.getTradeFactor(i);
+			if (factor == 0.0)
+				continue;
+			cost += productivity(a, services.get(i)) * factor * unitCosts[i];
+		}
+		return cost * (1 - selfConsumption(a));
 	}
 
 	public void calculateCurrentProductivity() {

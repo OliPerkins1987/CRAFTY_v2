@@ -26,6 +26,7 @@ import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
 import de.cesr.crafty.core.dataLoader.afts.AftCategorised;
 import de.cesr.crafty.core.dataLoader.costs.GlobalCostData;
 import de.cesr.crafty.core.dataLoader.land.CellsLoader;
+import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 
 import java.util.HashSet;
 
@@ -79,6 +80,9 @@ class ProductionCostUpdaterTest {
 
 	@AfterEach
 	void tearDown() {
+		// The config object is shared by every test in this JVM. Left on, transport would make any later
+		// updater with production costs on require transport rows, and stop the JVM without them.
+		ConfigLoader.config.use_transport_costs = false;
 		CustomLogger.shutdownRunFileLoggers();
 	}
 
@@ -786,5 +790,126 @@ class ProductionCostUpdaterTest {
 				"Only cost types with a file for the year are listed");
 		assertTrue(paths.get(ProductionCostUpdater.INTENSITY_COSTS).endsWith("Intensity_costs_" + year + ".csv"),
 				"Got: " + paths);
+	}
+
+	// =========================================================
+	// Transport costs
+	// =========================================================
+
+	@Test
+	void globalCostData_keepsTransportRowsOutOfIntensity() throws IOException {
+		Path csvPath = writeCsv(tempDir, "global_costs.csv",
+				"Item,Cost,Notes",
+				"C3cereals,50,service cost",
+				"C3cereals_transport,7.5,per tonne");
+
+		GlobalCostData data = new GlobalCostData(csvPath);
+
+		assertEquals(Map.of("C3cereals", 7.5), data.getTransportCosts());
+		assertEquals(Map.of("C3cereals", 50.0), data.getIntensityCosts());
+	}
+
+	@Test
+	void missingTransportCosts_listsMarketGoodsWithNoRow_inOrder() {
+		assertEquals(List.of("ser1", "ser3"),
+				ProductionCostUpdater.missingTransportCosts(List.of("ser1", "ser2", "ser3"), Map.of("ser2", 1.0)));
+		assertEquals(List.of(), ProductionCostUpdater.missingTransportCosts(List.of("ser2"), Map.of("ser2", 1.0)));
+	}
+
+	@Test
+	void transportCosts_areIndexedByService_forMarketGoodsOnly() throws IOException {
+		writeGlobalModeFiles("ser1_transport,4.0,", "ser2_transport,9.0,");
+		Map<String, Boolean> flagsBefore = new java.util.HashMap<>(ServiceSet.getMarketGood());
+		try {
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(Map.of("ser1", true, "ser2", false, "ser3", false));
+
+			new ProductionCostUpdater();
+
+			assertArrayEquals(new double[] { 4.0, 0.0, 0.0 }, ProductionCostUpdater.getTransportCosts(), 0.0,
+					"ser2 has a row but is not a market good, so it is ignored");
+		} finally {
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(flagsBefore);
+			ProductionCostUpdater.setTransportCosts(new double[0]);
+		}
+	}
+
+	@Test
+	void transportCosts_coverEveryService_whenServicesHasNoMarketGoodColumn() throws IOException {
+		writeGlobalModeFiles("ser1_transport,1.0,", "ser2_transport,2.0,", "ser3_transport,3.0,");
+		Map<String, Boolean> flagsBefore = new java.util.HashMap<>(ServiceSet.getMarketGood());
+		try {
+			ServiceSet.getMarketGood().clear();
+
+			new ProductionCostUpdater();
+
+			assertArrayEquals(new double[] { 1.0, 2.0, 3.0 }, ProductionCostUpdater.getTransportCosts(), 0.0);
+		} finally {
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(flagsBefore);
+			ProductionCostUpdater.setTransportCosts(new double[0]);
+		}
+	}
+
+	@Test
+	void paysTransport_isEveryMarketGood_orEveryServiceWithNoMarketGoodColumn() {
+		Map<String, Boolean> flagsBefore = new java.util.HashMap<>(ServiceSet.getMarketGood());
+		try {
+			ServiceSet.getMarketGood().clear();
+			assertTrue(ProductionCostUpdater.paysTransport("ser1"), "no Market_good column: every service pays");
+
+			ServiceSet.getMarketGood().putAll(Map.of("ser1", true, "ser2", false));
+			assertTrue(ProductionCostUpdater.paysTransport("ser1"));
+			assertFalse(ProductionCostUpdater.paysTransport("ser2"));
+		} finally {
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(flagsBefore);
+		}
+	}
+
+	@Test
+	void transportCosts_areEmpty_whenNoServiceIsAMarketGoodOrEitherSwitchIsOff() throws IOException {
+		writeGlobalModeFiles();
+		Map<String, Boolean> flagsBefore = new java.util.HashMap<>(ServiceSet.getMarketGood());
+		try {
+			// The column is there, but every service is No.
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(Map.of("ser1", false, "ser2", false, "ser3", false));
+			new ProductionCostUpdater();
+			assertEquals(0, ProductionCostUpdater.getTransportCosts().length, "no market goods");
+
+			// ser1 is a market good with no transport row, but the transport switch is off, so nothing is required.
+			ServiceSet.getMarketGood().put("ser1", true);
+			ProductionCostUpdater.setTransportCosts(new double[] { 1.0, 0.0, 0.0 });
+			ConfigLoader.config.use_transport_costs = false;
+			new ProductionCostUpdater();
+			assertEquals(0, ProductionCostUpdater.getTransportCosts().length, "transport costs off");
+
+			ProductionCostUpdater.setTransportCosts(new double[] { 1.0, 0.0, 0.0 });
+			ConfigLoader.config.use_production_costs = false;
+			new ProductionCostUpdater();
+			assertEquals(0, ProductionCostUpdater.getTransportCosts().length, "production costs off");
+		} finally {
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(flagsBefore);
+			ProductionCostUpdater.setTransportCosts(new double[0]);
+		}
+	}
+
+	/**
+	 * Global-mode cost files (global_costs.csv with the given extra rows, and the irrigation file), with
+	 * production and transport costs switched on. tearDown() switches transport off again.
+	 */
+	private void writeGlobalModeFiles(String... extraRows) throws IOException {
+		List<String> rows = new java.util.ArrayList<>(List.of("Item,Cost,Notes", "Nfert,1.08,", "Stocking,500,"));
+		rows.addAll(List.of(extraRows));
+		writeCsv(tempDir.resolve("costs").resolve("global"), "global_costs.csv", rows.toArray(new String[0]));
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("irrigation"), "irrigation_cost.csv",
+				"ID,X,Y,irrigation_cost", "0,0,0,0", "1,1,0,0", "2,0,1,0");
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = false;
+		ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+		ConfigLoader.config.use_transport_costs = true;
 	}
 }

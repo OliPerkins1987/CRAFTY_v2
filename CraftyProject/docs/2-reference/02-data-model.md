@@ -156,6 +156,29 @@ Typical columns:
 - optional: `Penalise_Oversupply` (boolean-like)
 - optional: `Market_good` (Yes/No; required with `use_self_consumption`, which self-consumes only market goods)
 
+With `use_transport_costs` on (it needs `use_production_costs`, or the run stops), every market good also needs a `<service>_transport` row in `global_costs.csv`
+(transport cost per unit produced; the run stops if one is missing). With no `Market_good` column, every
+service counts: each needs a row and pays transport. An AFT pays, per ha,
+production × a factor × that cost, on the share it does not self-consume. Production is what the AFT would
+produce on the cell, the quantity supply is built from (with `separate_production_competitiveness`, the
+suitability capitals only), not competitiveness. The factor depends on the cost mode:
+
+- **Spatial production costs** (`spatial_production_costs: true`): the region's export share of the service,
+  the part of its supply above its demand, `max(0, supply - demand) / supply` (1 when there is supply but no
+  demand). Supply is the region's market supply (area-weighted, less self-consumption) and demand that year's
+  regional demand, as for the marginal utility. Every producer pays on the share, whatever its capitals, so
+  over the region transport is paid on exactly `supply - demand`. The share is refreshed with the marginal
+  utility (start of the step, after forced masks, after each competition batch), and written each year to
+  `region_<R>/region_<R>-ExportShare.csv`. With `initial_demand_supply_equilibrium` on, each region's demand
+  starts equal to its baseline supply, so there is no surplus and nobody pays at the start; the run warns.
+  With one region (no `regionalisation`), the share is the world's.
+- **Global production costs**: the AFT's trade factor, the value in the `*_trade` capital column on that
+  service's row of its production file (0 if there is none; more than one non-zero `*_trade` column on such
+  a row stops the run).
+
+Transport is subtracted from explicit-price utility only, so it affects giving in and giving up; CRAFTY-react
+ignores it.
+
 ### Capitals metadata
 Defines the authoritative capital list (used by capital loading and by AFT sensitivity matrices).
 Typical columns:
