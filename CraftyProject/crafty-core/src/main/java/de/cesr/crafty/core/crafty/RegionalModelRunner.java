@@ -23,6 +23,7 @@ import de.cesr.crafty.core.output.Listener;
 import de.cesr.crafty.core.output.ListenerByRegion;
 import de.cesr.crafty.core.updaters.SeedUpdater;
 import de.cesr.crafty.core.updaters.LandMaskUpdater;
+import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.ServicesUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 import de.cesr.crafty.core.utils.analysis.StepProfiler;
@@ -48,7 +49,9 @@ import de.cesr.crafty.core.utils.general.Utils;
  * - {@link #regionalSupply}: region-wide total supply per service (aggregated from cells).
  * - {@link #marginal}: marginal utility signal per service derived from demand–supply gaps.
  * - {@link #priceMultiplier}: with use_price_feedback, the factor on each service's file price, from the
- *   same demand–supply gaps and refreshed with {@link #marginal}.
+ *   same demand–supply gaps and refreshed with {@link #marginal}. With global_price_feedback over 2 or
+ *   more regions, every region holds the same map, set from world demand and supply
+ *   ({@link #useGlobalPrice}).
  * - {@link #exportShare}: with transport and spatial production costs, the share of each service's
  *   supply above the region's demand, which transport is charged on; refreshed with {@link #marginal}.
  * - {@link #distributionMean}: per-year map of mean utility per AFT (computed from cell utilities).
@@ -89,7 +92,10 @@ public class RegionalModelRunner {
     // refresh replaces the array rather than changing it, so utilities read in parallel see one whole set.
     private double[] exportShare = new double[0];
     // Services already warned about having 0 demand, which leaves them at their file price.
-    private final Set<String> zeroDemandWarned = ConcurrentHashMap.newKeySet();
+    private Set<String> zeroDemandWarned = ConcurrentHashMap.newKeySet();
+    // global_price_feedback over 2 or more regions: priceMultiplier and zeroDemandWarned are shared by every
+    // region, and set from world demand and supply (see useGlobalPrice).
+    private boolean globalPrice = false;
     private ConcurrentHashMap<Integer, ConcurrentHashMap<String, Double>> distributionMean = new ConcurrentHashMap<>();
 
     Map<String, Double> initial_service_gaps = new ConcurrentHashMap<>();
@@ -317,7 +323,7 @@ public class RegionalModelRunner {
             }
             getMarginal().put(serviceName, marg);
 
-            if (ConfigLoader.config.use_price_feedback) {
+            if (ConfigLoader.config.use_price_feedback && !globalPrice) {
                 if (serviceDemand == 0 && zeroDemandWarned.add(serviceName)) {
                     LOGGER.warn("Region: [" + R.getName() + "]: demand for |" + serviceName + "| is 0 in "
                             + Timestep.getCurrentYear() + ", so its price stays at the file price while it is 0");
@@ -327,9 +333,52 @@ public class RegionalModelRunner {
                         ServiceSet.getPenalise_Oversupply().get(serviceName)));
             }
         });
+        if (globalPrice) {
+            computeGlobalPriceMultiplier();
+        }
         if (ConfigLoader.isTransportByExportShare()) {
             computeExportShares();
         }
+    }
+
+    /**
+     * global_price_feedback: each service's multiplier from demand and supply summed over every region, with
+     * each region's supply as it stands now. Regions step in name order, so those before this one are at
+     * this year's post-competition supply and the rest at their start-of-year supply. The map is shared, so
+     * every region reads the result.
+     */
+    private void computeGlobalPriceMultiplier() {
+        Map<String, Map<String, Double>> supplyByRegion = new LinkedHashMap<>();
+        RegionsModelRunnerUpdater.regionsModelRunner
+                .forEach((regionName, runner) -> supplyByRegion.put(regionName, runner.getRegionalSupply()));
+        Map<String, Map<String, Double>> demandByRegion = ServicesUpdater.getDemandByRegions();
+        for (String serviceName : ServiceSet.getServicesList()) {
+            double demand = worldTotal(demandByRegion, serviceName);
+            double supply = worldTotal(supplyByRegion, serviceName);
+            if (demand == 0 && zeroDemandWarned.add(serviceName)) {
+                LOGGER.warn("World demand for |" + serviceName + "| is 0 in " + Timestep.getCurrentYear()
+                        + ", so its price stays at the file price while it is 0");
+            }
+            getPriceMultiplier().put(serviceName, priceMultiplier(demand, supply,
+                    ConfigLoader.config.price_feedback_strength,
+                    ServiceSet.getPenalise_Oversupply().get(serviceName)));
+        }
+    }
+
+    /**
+     * A service's total over every region, summed in region-name order so the result does not depend on
+     * map order. A region with no values, or no value for the service, adds 0.
+     */
+    static double worldTotal(Map<String, ? extends Map<String, Double>> byRegion, String serviceName) {
+        double total = 0;
+        for (String regionName : byRegion.keySet().stream().sorted().toList()) {
+            Map<String, Double> values = byRegion.get(regionName);
+            Double value = values == null ? null : values.get(serviceName);
+            if (value != null) {
+                total += value;
+            }
+        }
+        return total;
     }
 
     private void computeExportShares() {
@@ -680,9 +729,25 @@ public class RegionalModelRunner {
         return marginal;
     }
 
-    /** With use_price_feedback, each service's price multiplier; empty when the switch is off. */
+    /**
+     * With use_price_feedback, each service's price multiplier; empty when the switch is off. With
+     * global_price_feedback over 2 or more regions, every region returns the same map.
+     */
     public ConcurrentHashMap<String, Double> getPriceMultiplier() {
         return priceMultiplier;
+    }
+
+    /**
+     * global_price_feedback over 2 or more regions: this region takes the price multiplier map and the set of
+     * services already warned about that every other region is given too, so each refresh, from whichever
+     * region, sets the one world price that every region reads. Called by RegionsModelRunnerUpdater once
+     * all the regions' runners exist.
+     */
+    public void useGlobalPrice(ConcurrentHashMap<String, Double> sharedPriceMultiplier,
+            Set<String> sharedZeroDemandWarned) {
+        priceMultiplier = sharedPriceMultiplier;
+        zeroDemandWarned = sharedZeroDemandWarned;
+        globalPrice = true;
     }
 
     /**

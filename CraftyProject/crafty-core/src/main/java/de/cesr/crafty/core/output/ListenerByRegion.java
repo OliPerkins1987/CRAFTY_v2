@@ -35,7 +35,9 @@ import de.cesr.crafty.core.utils.general.Utils;
  * service). - Mean utilities per AFT for the region (based on the regional
  * model runner statistics). - With use_price_feedback, each service's file
  * price, price after feedback and the multiplier between them; this file is
- * written for single-region runs too, since the price is set per region. -
+ * written for single-region runs too, since the price is set per region. With
+ * global_price_feedback, each region's file holds the world multiplier as it
+ * stood at that region's year start, times the region's own file price. -
  * With transport and spatial production costs, each paying service's export
  * share (the share of supply above demand, which transport is charged on);
  * also written for single-region runs.

@@ -24,6 +24,7 @@ import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.output.ListenerByRegion;
 import de.cesr.crafty.core.updaters.LandMaskUpdater;
 import de.cesr.crafty.core.updaters.ProductionCostUpdater;
+import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.SeedUpdater;
 import de.cesr.crafty.core.updaters.ServicesUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
@@ -34,6 +35,7 @@ class RegionalModelRunnerTest {
 	private Object cellsLoaderRegionsBackup;
 	private boolean cellsLoaderRegionalizationBackup;
 	private Object hashAgentNbrRegionsBackup;
+	private ConcurrentHashMap<String, RegionalModelRunner> regionsModelRunnerBackup;
 	@TempDir
 	private Path tempDir;
 	@BeforeEach
@@ -59,6 +61,9 @@ class RegionalModelRunnerTest {
 		Field hField = findField(AFTsLoader.class, "hashAgentNbrRegions");
 		hField.setAccessible(true);
 		hashAgentNbrRegionsBackup = hField.get(null);
+
+		// RegionsModelRunnerUpdater.regionsModelRunner backup (replaced by the global price tests)
+		regionsModelRunnerBackup = RegionsModelRunnerUpdater.regionsModelRunner;
 	}
 
 	@AfterEach
@@ -71,6 +76,7 @@ class RegionalModelRunnerTest {
 			ConfigLoader.config.use_self_consumption = false;
 			ConfigLoader.config.use_price_feedback = false;
 			ConfigLoader.config.price_feedback_strength = 0.03;
+			ConfigLoader.config.global_price_feedback = false;
 			ConfigLoader.config.use_production_costs = false;
 			ConfigLoader.config.spatial_production_costs = false;
 			ConfigLoader.config.use_transport_costs = false;
@@ -95,6 +101,9 @@ class RegionalModelRunnerTest {
 		Field hField = findField(AFTsLoader.class, "hashAgentNbrRegions");
 		hField.setAccessible(true);
 		hField.set(null, hashAgentNbrRegionsBackup);
+
+		// restore RegionsModelRunnerUpdater.regionsModelRunner
+		RegionsModelRunnerUpdater.regionsModelRunner = regionsModelRunnerBackup;
 	}
 	
     @AfterEach
@@ -702,6 +711,219 @@ class RegionalModelRunnerTest {
 	}
 
 	// =========================================================
+	// Global price feedback: one world multiplier over 2+ regions
+	// =========================================================
+
+	/**
+	 * Runs body with the named regions, which have no cells, built by RegionsModelRunnerUpdater as in a run.
+	 * Every region has the given demand for S1 (penalised) and S2 (not penalised). The mocks also let step()
+	 * run.
+	 */
+	private void withRegions(Map<String, Double> demand, ThrowingConsumer<Map<String, RegionalModelRunner>> body,
+			String... regionNames) throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedStatic<ServicesUpdater> su = Mockito.mockStatic(ServicesUpdater.class);
+				MockedStatic<LandMaskUpdater> lm = Mockito.mockStatic(LandMaskUpdater.class);
+				MockedStatic<SeedUpdater> sd = Mockito.mockStatic(SeedUpdater.class);
+				MockedStatic<AFTsLoader> al = Mockito.mockStatic(AFTsLoader.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ts.when(Timestep::getCurrentYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1", "S2"));
+			ss.when(ServiceSet::getPenalise_Oversupply)
+					.thenReturn(new ConcurrentHashMap<>(Map.of("S1", true, "S2", false)));
+			sd.when(() -> SeedUpdater.selectSeed(any(), any(), anyDouble(), anyBoolean(), anyInt()))
+					.thenReturn(new java.util.ArrayList<>());
+			al.when(AFTsLoader::getActivateAFTsHash).thenReturn(new ConcurrentHashMap<>());
+
+			ConcurrentHashMap<String, Region> regions = new ConcurrentHashMap<>();
+			Map<String, Map<String, Double>> demandByRegion = new java.util.HashMap<>();
+			Map<String, Map<String, Double>> weightByRegion = new java.util.HashMap<>();
+			for (String name : regionNames) {
+				Region region = new Region(name);
+				region.setCells(new ConcurrentHashMap<>());
+				regions.put(name, region);
+				demandByRegion.put(name, demand);
+				weightByRegion.put(name, Map.of("S1", 1.0, "S2", 1.0));
+			}
+			su.when(ServicesUpdater::getDemandByRegions).thenReturn(demandByRegion);
+			su.when(ServicesUpdater::getWeightByRegions).thenReturn(weightByRegion);
+			setStaticField(CellsLoader.class, "regions", regions);
+
+			new RegionsModelRunnerUpdater();
+			body.accept(RegionsModelRunnerUpdater.regionsModelRunner);
+		}
+	}
+
+	private static ConcurrentHashMap<String, Double> supply(double s1, double s2) {
+		return new ConcurrentHashMap<>(Map.of("S1", s1, "S2", s2));
+	}
+
+	private static void globalPriceFeedbackOn() {
+		ConfigLoader.config.use_price_feedback = true;
+		ConfigLoader.config.global_price_feedback = true;
+	}
+
+	@Test
+	void globalPriceFeedback_givesEveryRegionTheWorldMultiplier() throws Exception {
+		// A exports (supply 150 against demand 100) and B imports (70 against 100): the world is 10 % oversupplied.
+		globalPriceFeedbackOn();
+		withRegions(Map.of("S1", 100.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A"), b = runners.get("B");
+			a.setRegionalSupply(supply(150, 50));
+			b.setRegionalSupply(supply(70, 50));
+			invokePrivate(a, "computeMarginal");
+
+			assertSame(a.getPriceMultiplier(), b.getPriceMultiplier(), "one map for every region");
+			assertEquals(0.997, a.getPriceMultiplier().get("S1"), 1e-12, "1 - 0.03 x 0.1, not A's own 0.985");
+			assertEquals(0.997, b.getPriceMultiplier().get("S1"), 1e-12, "not B's own 1.009");
+			assertEquals(1.0, b.getPriceMultiplier().get("S2"), 1e-12, "world S2 supply equals world demand");
+		}, "A", "B");
+	}
+
+	@Test
+	void globalPriceFeedback_aBatchInOneRegionMovesThePriceEveryRegionReads() throws Exception {
+		globalPriceFeedbackOn();
+		withRegions(Map.of("S1", 100.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A"), b = runners.get("B");
+			a.setRegionalSupply(supply(150, 50));
+			b.setRegionalSupply(supply(70, 50));
+			invokePrivate(a, "computeMarginal");
+
+			// A batch in A cuts A's supply to 110, so the world is now 10 % short.
+			a.getRegionalSupply().put("S1", 110.0);
+			invokePrivate(a, "computeMarginal");
+			assertEquals(1.003, b.getPriceMultiplier().get("S1"), 1e-12); // 1 + 0.03 x 0.1
+
+			// B's own refresh sees A's new supply too.
+			invokePrivate(b, "computeMarginal");
+			assertEquals(1.003, a.getPriceMultiplier().get("S1"), 1e-12);
+		}, "A", "B");
+	}
+
+	@Test
+	void withoutGlobalPriceFeedback_eachRegionKeepsItsOwnMultiplier() throws Exception {
+		ConfigLoader.config.use_price_feedback = true;
+		withRegions(Map.of("S1", 100.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A"), b = runners.get("B");
+			a.setRegionalSupply(supply(150, 50));
+			b.setRegionalSupply(supply(70, 50));
+			invokePrivate(a, "computeMarginal");
+			invokePrivate(b, "computeMarginal");
+
+			assertNotSame(a.getPriceMultiplier(), b.getPriceMultiplier());
+			assertEquals(0.985, a.getPriceMultiplier().get("S1"), 1e-12); // 1 - 0.03 x 0.5
+			assertEquals(1.009, b.getPriceMultiplier().get("S1"), 1e-12); // 1 + 0.03 x 0.3
+		}, "A", "B");
+	}
+
+	@Test
+	void globalPriceFeedback_keepsTheFilePriceUnderWorldOversupply_forAServiceThatDoesNotPenaliseIt() throws Exception {
+		globalPriceFeedbackOn();
+		withRegions(Map.of("S1", 100.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A"), b = runners.get("B");
+			// S2: world supply 140 against world demand 100.
+			a.setRegionalSupply(supply(100, 80));
+			b.setRegionalSupply(supply(100, 60));
+			invokePrivate(a, "computeMarginal");
+			assertEquals(1.0, b.getPriceMultiplier().get("S2"), 1e-12);
+
+			// A world shortage still raises it: supply 50 against demand 100.
+			a.setRegionalSupply(supply(100, 20));
+			b.setRegionalSupply(supply(100, 30));
+			invokePrivate(b, "computeMarginal");
+			assertEquals(1.015, a.getPriceMultiplier().get("S2"), 1e-12); // 1 + 0.03 x 0.5
+		}, "A", "B");
+	}
+
+	@Test
+	void globalPriceFeedback_withNoWorldDemand_leavesTheFilePrice_andWarnsOncePerService() throws Exception {
+		globalPriceFeedbackOn();
+		withRegions(Map.of("S1", 0.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A"), b = runners.get("B");
+			a.setRegionalSupply(supply(30, 50));
+			b.setRegionalSupply(supply(20, 50));
+			invokePrivate(a, "computeMarginal");
+			invokePrivate(b, "computeMarginal");
+
+			assertEquals(1.0, b.getPriceMultiplier().get("S1"), 1e-12);
+			Object warnedA = getField(a, "zeroDemandWarned");
+			assertSame(warnedA, getField(b, "zeroDemandWarned"), "one warning per service for the run, not per region");
+			assertEquals(java.util.Set.of("S1"), warnedA);
+		}, "A", "B");
+	}
+
+	@Test
+	void globalPriceFeedback_withOneRegion_keepsTheRegionalRule() throws Exception {
+		globalPriceFeedbackOn();
+		withRegions(Map.of("S1", 100.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A");
+			assertFalse((boolean) getField(a, "globalPrice"), "nothing to share with one region");
+
+			a.setRegionalSupply(supply(150, 50));
+			invokePrivate(a, "computeMarginal");
+			assertEquals(0.985, a.getPriceMultiplier().get("S1"), 1e-12);
+		}, "A");
+	}
+
+	@Test
+	void globalPriceFeedback_withoutPriceFeedback_changesNothing() throws Exception {
+		ConfigLoader.config.global_price_feedback = true;
+		withRegions(Map.of("S1", 100.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A"), b = runners.get("B");
+			assertNotSame(a.getPriceMultiplier(), b.getPriceMultiplier());
+			assertFalse((boolean) getField(a, "globalPrice"));
+
+			a.setRegionalSupply(supply(150, 50));
+			b.setRegionalSupply(supply(70, 50));
+			invokePrivate(a, "computeMarginal");
+			assertTrue(a.getPriceMultiplier().isEmpty());
+		}, "A", "B");
+	}
+
+	@Test
+	void step_withGlobalPriceFeedback_writesTheWorldPrices() throws Exception {
+		globalPriceFeedbackOn();
+		ConfigLoader.config.use_explicit_price_utility = true;
+		withRegions(Map.of("S1", 100.0, "S2", 50.0), runners -> {
+			RegionalModelRunner a = runners.get("A"), b = runners.get("B");
+			a.setRegionalSupply(supply(150, 50));
+			b.setRegionalSupply(supply(70, 50));
+
+			a.step();
+
+			assertEquals(0.997, b.getPriceMultiplier().get("S1"), 1e-12);
+			verify(a.listner).exportPrices(same(b.getPriceMultiplier()));
+		}, "A", "B");
+	}
+
+	@Test
+	void worldTotal_addsEveryRegion_countingAMissingValueAs0() {
+		Map<String, Map<String, Double>> byRegion = new java.util.HashMap<>();
+		byRegion.put("A", Map.of("S1", 1.0, "S2", 2.0));
+		byRegion.put("B", Map.of("S1", 0.5));
+		byRegion.put("C", null); // a region with no supply yet
+
+		assertEquals(1.5, RegionalModelRunner.worldTotal(byRegion, "S1"), 0.0);
+		assertEquals(2.0, RegionalModelRunner.worldTotal(byRegion, "S2"), 0.0);
+		assertEquals(0.0, RegionalModelRunner.worldTotal(byRegion, "S3"), 0.0);
+	}
+
+	@Test
+	void worldTotal_addsInRegionNameOrder_whateverTheMapOrder() {
+		// In the order c, a, b the 1 is lost to rounding (1 + 1e16 == 1e16); in name order it is kept.
+		Map<String, Map<String, Double>> byRegion = new java.util.LinkedHashMap<>();
+		byRegion.put("c", Map.of("S1", 1.0));
+		byRegion.put("a", Map.of("S1", 1e16));
+		byRegion.put("b", Map.of("S1", -1e16));
+
+		assertEquals(1.0, RegionalModelRunner.worldTotal(byRegion, "S1"), 0.0);
+	}
+
+	// =========================================================
 	// Transport with spatial production costs: export shares
 	// =========================================================
 
@@ -1100,6 +1322,12 @@ class RegionalModelRunnerTest {
 		Field f = findField(cls, fieldName);
 		f.setAccessible(true);
 		f.set(null, value);
+	}
+
+	private static Object getField(Object target, String fieldName) throws Exception {
+		Field f = findField(target.getClass(), fieldName);
+		f.setAccessible(true);
+		return f.get(target);
 	}
 
 	private static void setField(Object target, String fieldName, Object value) {

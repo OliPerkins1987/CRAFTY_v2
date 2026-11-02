@@ -89,6 +89,11 @@ public class Config {
     // 0.03, is the value used in PLUM.
     public boolean use_price_feedback = false;
     public double price_feedback_strength = 0.03;
+    // With use_price_feedback and 2 or more regions: one multiplier per service, from world demand and
+    // supply (summed over every region), that every region's file price is scaled by. Everything else,
+    // export shares and transport included, stays regional. With one region it changes nothing. For one
+    // world price, service_utility_weights_path should be a single file; the run warns if it is not.
+    public boolean global_price_feedback = false;
 
     // CRAFTY-react: AFTs adjust their management endogenously (needs the crafty-react module).
     // reactive_afts is the master switch; each element below can only be on when it is.
@@ -240,6 +245,7 @@ public class Config {
                 + "|-> use_self_consumption=" + use_self_consumption + "\n"
                 + "|-> use_price_feedback=" + use_price_feedback + "\n"
                 + "|-> price_feedback_strength=" + price_feedback_strength + "\n"
+                + "|-> global_price_feedback=" + global_price_feedback + "\n"
                 + "|-> reactive_afts=" + reactive_afts + "\n"
                 + "|-> reactive_fertilizer=" + reactive_fertilizer + "\n"
                 + "|-> reactive_irrigation=" + reactive_irrigation + "\n"

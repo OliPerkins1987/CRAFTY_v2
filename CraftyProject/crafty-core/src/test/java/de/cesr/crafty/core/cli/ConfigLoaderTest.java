@@ -1020,6 +1020,59 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void globalPriceFeedbackShouldBeOffByDefault() {
+        assertFalse(new Config().global_price_feedback, "Global price feedback must be off by default");
+    }
+
+    @Test
+    void globalPriceFeedbackWithoutPriceFeedbackShouldWarnButNotStop() throws Exception {
+        Config c = configWithSwitchesOn("global_price_feedback", "use_explicit_price_utility");
+
+        assertNull(ConfigLoader.priceFeedbackConfigError(c), "This set-up must not stop the run");
+        List<String> warnings = ConfigLoader.priceFeedbackConfigWarnings(c);
+        assertEquals(1, warnings.size(), "Got: " + warnings);
+        assertTrue(warnings.get(0).contains("use_price_feedback") && warnings.get(0).contains("does nothing"),
+                "The warning must name the missing switch and the effect. Got: " + warnings);
+    }
+
+    @Test
+    void globalPriceFeedbackWithPriceFeedbackAndOnePriceFileShouldNeitherStopNorWarn() throws Exception {
+        Config c = priceFeedbackConfig();
+        c.global_price_feedback = true;
+        c.service_utility_weights_path = Files.writeString(tempDir.resolve("prices.csv"), "S1\n1\n").toString();
+
+        assertNull(ConfigLoader.priceFeedbackConfigError(c));
+        List<String> warnings = ConfigLoader.priceFeedbackConfigWarnings(c);
+        assertTrue(warnings.isEmpty(), "Got: " + warnings);
+    }
+
+    @Test
+    void globalPriceFeedbackShouldWarn_whenThePricesAreNotOneFile() throws Exception {
+        // An empty path, a folder, or a file that does not exist: each region looks for its own price file.
+        for (String path : new String[] { "", tempDir.toString(), tempDir.resolve("missing.csv").toString() }) {
+            Config c = priceFeedbackConfig();
+            c.global_price_feedback = true;
+            c.service_utility_weights_path = path;
+
+            assertNull(ConfigLoader.priceFeedbackConfigError(c), "This set-up must not stop the run");
+            List<String> warnings = ConfigLoader.priceFeedbackConfigWarnings(c);
+            assertEquals(1, warnings.size(), "Path '" + path + "'. Got: " + warnings);
+            assertTrue(warnings.get(0).contains("service_utility_weights_path")
+                    && warnings.get(0).contains("one world price"),
+                    "The warning must name the option and what to do. Got: " + warnings);
+        }
+    }
+
+    @Test
+    void priceFeedbackWithoutGlobalPriceShouldNotWarnAboutThePriceFile() throws Exception {
+        Config c = priceFeedbackConfig();
+        c.service_utility_weights_path = tempDir.toString(); // one price file per region is fine here
+
+        List<String> warnings = ConfigLoader.priceFeedbackConfigWarnings(c);
+        assertTrue(warnings.isEmpty(), "Got: " + warnings);
+    }
+
+    @Test
     void priceFeedbackShouldLoadFromYaml() throws Exception {
         originalConfigPath = ConfigLoader.configPath;
         originalConfig = ConfigLoader.config;
@@ -1027,12 +1080,14 @@ class ConfigLoaderTest {
 
         Path configFile = tempDir.resolve("price-feedback-config.yaml");
         Files.writeString(configFile,
-                "use_explicit_price_utility: true\nuse_price_feedback: true\nprice_feedback_strength: 0.5\n");
+                "use_explicit_price_utility: true\nuse_price_feedback: true\nprice_feedback_strength: 0.5\n"
+                        + "global_price_feedback: true\n");
         ConfigLoader.configPath = configFile.toString();
 
         Config cfg = invokeLoadConfig();
 
         assertTrue(cfg.use_price_feedback);
         assertEquals(0.5, cfg.price_feedback_strength);
+        assertTrue(cfg.global_price_feedback);
     }
 }

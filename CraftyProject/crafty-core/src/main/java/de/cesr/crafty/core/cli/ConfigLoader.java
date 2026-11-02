@@ -344,6 +344,10 @@ public class ConfigLoader {
 	static List<String> priceFeedbackConfigWarnings(Config c) {
 		List<String> warnings = new ArrayList<>();
 		if (!c.use_price_feedback) {
+			if (c.global_price_feedback) {
+				warnings.add("global_price_feedback is on but use_price_feedback is off, so it does nothing. "
+						+ "It only changes how price feedback is computed when there are 2 or more regions.");
+			}
 			return warnings;
 		}
 		if (!c.use_production_costs) {
@@ -355,7 +359,18 @@ public class ConfigLoader {
 			warnings.add("use_price_feedback is on but initial_demand_supply_equilibrium is off. Even in the "
 					+ "first year, prices will differ from the price file wherever demand does not equal supply.");
 		}
+		if (c.global_price_feedback && !isSingleFile(c.service_utility_weights_path)) {
+			warnings.add("global_price_feedback is on but service_utility_weights_path is not a single file. With "
+					+ "2 or more regions, each region then reads its own price file, and a region with no matching "
+					+ "file gets a price of 1 for every service. For one world price, point "
+					+ "service_utility_weights_path at one file.");
+		}
 		return warnings;
+	}
+
+	/** Whether a path names an existing file rather than a folder, as ServiceWeightLoader tells them apart. */
+	private static boolean isSingleFile(String path) {
+		return path != null && !path.isEmpty() && Paths.get(path).toFile().isFile();
 	}
 
 	/**

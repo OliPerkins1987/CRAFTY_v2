@@ -19,6 +19,7 @@ use_normalised_price_competition: false        # Use normalised difference compe
 # Price = file price x max(0, 1 + price_feedback_strength x (demand - supply) / demand), refreshed with marginal utility.
 use_price_feedback: false                      # Requires use_explicit_price_utility; oversupply lowers the price, a shortage raises it
 price_feedback_strength: 0.03                  # >= 0 (0.03 is PLUM's value); 0 = no feedback; with no supply the price is at most (1 + strength) x file price
+global_price_feedback: false                   # With use_price_feedback and 2+ regions: one multiplier per service from world demand and supply (summed over regions); export shares, transport and everything else stay regional. No effect with one region. Warns unless service_utility_weights_path is a single file
 
 # Giving up methods
 use_abandonment_threshold: true               # Abandon cell if agent competitiveness falls below threshold

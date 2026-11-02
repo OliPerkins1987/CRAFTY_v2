@@ -210,6 +210,8 @@ public final class CoreFacts {
 	 * holds it now. React decides before the year's regional step, so this is the value left by the region's
 	 * last refresh: the previous year's last competition batch. It is 1 when use_price_feedback is off, before
 	 * the runners exist or have refreshed (react's year-zero decision), and for a service with no value yet.
+	 * With global_price_feedback over 2 or more regions, every runner holds the same world multiplier, from
+	 * the latest refresh in any region.
 	 */
 	static double priceMultiplier(String service, String region) {
 		if (!ConfigLoader.config.use_price_feedback || RegionsModelRunnerUpdater.regionsModelRunner == null) {

@@ -1,8 +1,10 @@
 package de.cesr.crafty.core.updaters;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import de.cesr.crafty.core.cli.ConfigLoader;
 import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.RegionalModelRunner;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
@@ -14,7 +16,9 @@ import de.cesr.crafty.core.dataLoader.land.CellsLoader;
  *
  * This updater owns a {@code RegionalModelRunner} instance per {@link de.cesr.crafty.core.crafty.Region}.
  * At construction time, it creates and stores these runners in {@link #regionsModelRunner}, using the
- * region names currently available in {@link CellsLoader#regions}.
+ * region names currently available in {@link CellsLoader#regions}. With use_price_feedback and
+ * global_price_feedback over 2 or more regions, it then gives every runner the same price multiplier map,
+ * so there is one world price (see {@link RegionalModelRunner#useGlobalPrice}).
  *
  * On every tick/year ({@link #step()}):
  * - It calls {@link RegionalModelRunner#step(int)} for each region using the current simulation year
@@ -47,6 +51,30 @@ public class RegionsModelRunnerUpdater extends AbstractUpdater {
 		CellsLoader.regions.keySet().forEach(regionName -> {
 			regionsModelRunner.put(regionName, new RegionalModelRunner(regionName));
 		});
+		shareGlobalPrice();
+	}
+
+	/**
+	 * global_price_feedback: with 2 or more regions, every runner gets the same price multiplier map and the
+	 * same set of services already warned about, so price feedback sets one world price that every region
+	 * reads. With one region, that region's demand and supply are the world's, so it keeps its own.
+	 */
+	private static void shareGlobalPrice() {
+		if (ConfigLoader.config == null || !ConfigLoader.config.use_price_feedback
+				|| !ConfigLoader.config.global_price_feedback) {
+			return;
+		}
+		if (regionsModelRunner.size() < 2) {
+			LOGGER.info("global_price_feedback is on, but the model has one region, so price feedback uses that "
+					+ "region's demand and supply");
+			return;
+		}
+		ConcurrentHashMap<String, Double> sharedPriceMultiplier = new ConcurrentHashMap<>();
+		Set<String> sharedZeroDemandWarned = ConcurrentHashMap.newKeySet();
+		regionsModelRunner.values()
+				.forEach(runner -> runner.useGlobalPrice(sharedPriceMultiplier, sharedZeroDemandWarned));
+		LOGGER.info("Price feedback is global: one multiplier per service from world demand and supply over "
+				+ regionsModelRunner.size() + " regions");
 	}
 
 	@Override

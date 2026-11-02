@@ -73,6 +73,13 @@ use_matrix_give_in: false
 # The default strength, 0.03, is the value used in PLUM.
 use_price_feedback: false
 price_feedback_strength: 0.03
+# With 2 or more regions, global_price_feedback: true sets each service's multiplier from
+# world demand and supply (summed over every region) instead of each region's own, and
+# scales every region's file price by it. Export shares, transport costs and everything
+# else stay regional. With one region it changes nothing. For one world price, set
+# service_utility_weights_path to a single file; the run warns if it is a folder or empty,
+# since each region then reads its own price file (or prices of 1 where none matches).
+global_price_feedback: false
 
 # Self-consumption (optional, needs a self_consumption column, 0-1 with blank = 0, in
 # AFTsMetaData and a Market_good column, Yes or No, in Services.csv): supply of each
