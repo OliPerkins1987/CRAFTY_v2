@@ -10,6 +10,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -27,6 +29,8 @@ import de.cesr.crafty.core.dataLoader.ProjectLoader;
 	 * - Filtering a pre-built list of project files using simple substring conditions
 	 *   (see {@link #fileFilter(String...)} and overloads). This is primarily used to locate expected input
 	 *   files inside the project data tree provided by {@link ProjectLoader}.
+	 * - Picking one region's file (demand, utility weights) from those matches by the region name the file
+	 *   name ends with, via {@link #regionFile(List, String, Collection)}.
 	 * - Writing plain text to disk with optional append mode via {@link #writeFile(String, String, boolean)}.
 	 * - Detecting direct child folders and walking all nested folders under a root path
 	 *   ({@link #detectFolders(String)} and {@link #getAllFolders(String)}).
@@ -120,6 +124,64 @@ public class PathTools {
 		} else {
 			return turn;
 		}
+	}
+
+	/**
+	 * Picks one region's file (e.g. its demand or utility-weight file) from candidate paths.
+	 *
+	 * A file belongs to the region whose name its file name ends with: {@code <anything>_<region>.csv}. If it ends
+	 * with two region names, it belongs to the longer one, so {@code hist_demand_South_Sudan.csv} belongs to
+	 * {@code South_Sudan}, not {@code Sudan}.
+	 * - The region's own file is returned. If there are several (the same name in two folders), the first is
+	 *   returned, with a warning.
+	 * - If it has none, the first candidate that belongs to no region (e.g. {@code demand_regionA_v2.csv}) is
+	 *   returned, with a warning. A file that belongs to another region is never returned.
+	 * - Otherwise, and for null or empty candidates, null.
+	 *
+	 * @param candidates paths matched by the caller's substring rule (see {@link #fileFilter})
+	 * @param region     the region to find a file for
+	 * @param regions    all region names, used to tell whose file each candidate is
+	 * @return the region's file, or null
+	 */
+	public static Path regionFile(List<Path> candidates, String region, Collection<String> regions) {
+		if (candidates == null || candidates.isEmpty()) {
+			return null;
+		}
+		Set<String> names = new HashSet<>(regions);
+		names.add(region);
+
+		List<Path> own = new ArrayList<>();
+		Path unowned = null;
+		for (Path p : candidates) {
+			String owner = owner(p, names);
+			if (region.equals(owner)) {
+				own.add(p);
+			} else if (owner == null && unowned == null) {
+				unowned = p;
+			}
+		}
+		if (!own.isEmpty()) {
+			if (own.size() > 1) {
+				LOGGER.warn("Several files for region |" + region + "|, using the first: " + own);
+			}
+			return own.get(0);
+		}
+		if (unowned != null) {
+			LOGGER.warn("No file ends with _" + region + ".csv, so region |" + region + "| uses " + unowned);
+		}
+		return unowned;
+	}
+
+	/** The longest region name that the file name ends with as {@code _<region>.csv}, or null. */
+	static String owner(Path path, Collection<String> regions) {
+		String name = path.getFileName().toString();
+		String owner = null;
+		for (String r : regions) {
+			if (name.endsWith("_" + r + ".csv") && (owner == null || r.length() > owner.length())) {
+				owner = r;
+			}
+		}
+		return owner;
 	}
 
 	public static ArrayList<Path> findAllFilePaths(Path path) {

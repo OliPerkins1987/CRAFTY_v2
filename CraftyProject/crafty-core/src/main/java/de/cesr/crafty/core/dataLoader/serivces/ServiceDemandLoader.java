@@ -29,10 +29,11 @@ import de.cesr.crafty.core.utils.general.Utils;
  * Input resolution:
  * - If {@code ConfigLoader.config.service_demands_path} is provided:
  * - If it points to a file, it is used directly.
- * - If it points to a directory, the loader searches within it for a region-specific file containing
- *       the token "..;RegionName&gt;..".
+ * - If it points to a directory, the loader searches within it for the region's file.
  * - Otherwise, the loader falls back to the scenario folder structure and searches under the scenario's
- *   {@code demand/} directory for a file matching the region name.
+ *   {@code demand/} directory for the region's file.
+ * - The region's file is the one whose name ends with {@code _<region>.csv}; see
+ *   {@link PathTools#regionFile(List, String, java.util.Collection)}.
  *
  * Demand assignment:
  * - Each CSV column corresponds to a service name and contains a vector of yearly demand values.
@@ -68,19 +69,21 @@ public class ServiceDemandLoader {
 				path = Paths.get(dm);
 			} else {
 				ArrayList<Path> directory = PathTools.findAllFilePaths(Paths.get(dm));
-				path = PathTools.fileFilter(directory, "_" + R.getName()).get(0);
+				path = PathTools.regionFile(PathTools.fileFilter(directory, "_" + R.getName()), R.getName(),
+						CellsLoader.regions.keySet());
 			}
 		} else {
 			try {
-				path = PathTools
-						.fileFilter(ProjectLoader.getScenario(), PathTools.asFolder("demand"), "_" + R.getName())
-						.get(0);
+				path = PathTools.regionFile(
+						PathTools.fileFilter(ProjectLoader.getScenario(), PathTools.asFolder("demand"), "_" + R.getName()),
+						R.getName(), CellsLoader.regions.keySet());
 			} catch (NullPointerException e) {
-				LOGGER.warn("No demand file found for region: |" + R.getName() + "|");
-				return null;
+				path = null;
 			}
 		}
-
+		if (path == null) {
+			LOGGER.warn("No demand file found for region: |" + R.getName() + "|");
+		}
 		return path;
 	}
 

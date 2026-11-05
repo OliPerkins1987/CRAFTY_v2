@@ -28,10 +28,11 @@ import de.cesr.crafty.core.utils.general.Utils;
  * Input discovery:
  * If {@code ConfigLoader.config.service_utility_weights_path} is set and non-empty:
  * - If it points to a file, that file is used (typically a single file for all regions but could be by regions).
- * - If it points to a directory, the loader searches within it for a region-specific file containing
- *       the token "..;RegionName;..;".
+ * - If it points to a directory, the loader searches within it for the region's file.
  * Otherwise, it falls back to the scenario structure and searches under
- *   {@code Service_Utility_Weights/} for a file matching the region name.
+ *   {@code Service_Utility_Weights/} for the region's file.
+ * The region's file is the one whose name ends with {@code _<region>.csv}; see
+ *   {@link PathTools#regionFile(List, String, java.util.Collection)}.
  *
  * Update behaviour:
  * -{@link #updateRegionsWeight()} clears existing weight maps for all region services, then calls
@@ -70,17 +71,21 @@ public class ServiceWeightLoader {
 					path = Paths.get(uw);
 				} else {
 					ArrayList<Path> directory = PathTools.findAllFilePaths(Paths.get(uw));
-					path = PathTools.fileFilter(directory, "_" + R.getName()).get(0);
+					path = PathTools.regionFile(PathTools.fileFilter(directory, "_" + R.getName()), R.getName(),
+							CellsLoader.regions.keySet());
 				}
 			} else {
-				path = PathTools.fileFilter(ProjectLoader.getScenario(), PathTools.asFolder("Service_Utility_Weights"),
-						R.getName()).get(0);
+				path = PathTools.regionFile(PathTools.fileFilter(ProjectLoader.getScenario(),
+						PathTools.asFolder("Service_Utility_Weights"), R.getName()), R.getName(),
+						CellsLoader.regions.keySet());
 			}
 		} catch (NullPointerException e) {
+			path = null;
+		}
+		if (path == null) {
 			LOGGER.info("Utility Weight file not found for |" + R.getName()
 					+ "| default value will use: Utility_Weights = 1 for all services");
 			useDefaultUtilityW(R);
-			return null;
 		}
 		return path;
 	}

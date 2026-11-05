@@ -168,4 +168,136 @@ class PathToolsTest {
 	void makeDirectoryShouldReturnNullForNullInput() {
 		assertNull(PathTools.makeDirectory(null));
 	}
+
+	// ---------- regionFile ----------
+
+	private static ArrayList<Path> demandFiles(String... names) {
+		ArrayList<Path> files = new ArrayList<>();
+		for (String n : names) {
+			files.add(Paths.get("demand", n));
+		}
+		return files;
+	}
+
+	// what the demand loader does: candidates containing "_<region>", then regionFile
+	private static Path demandFile(ArrayList<Path> files, String region, Collection<String> regions) {
+		return PathTools.regionFile(PathTools.fileFilter(files, "_" + region), region, regions);
+	}
+
+	@Test
+	void regionFileGivesSudanAndSouthSudanTheirOwnFilesInEitherOrder() {
+		List<String> regions = List.of("Sudan", "South_Sudan");
+		ArrayList<Path> files = demandFiles("hist_demand_South_Sudan.csv", "hist_demand_Sudan.csv");
+
+		for (int i = 0; i < 2; i++) {
+			assertEquals(Paths.get("demand", "hist_demand_Sudan.csv"), demandFile(files, "Sudan", regions));
+			assertEquals(Paths.get("demand", "hist_demand_South_Sudan.csv"), demandFile(files, "South_Sudan", regions));
+			Collections.reverse(files);
+		}
+	}
+
+	@Test
+	void regionFileGivesEachGuineaItsOwnFile() {
+		List<String> regions = List.of("Guinea", "Equatorial_Guinea", "Guinea_Bissau", "Papua_New_Guinea");
+		ArrayList<Path> files = demandFiles("hist_demand_Equatorial_Guinea.csv", "hist_demand_Guinea.csv",
+				"hist_demand_Guinea_Bissau.csv", "hist_demand_Papua_New_Guinea.csv");
+
+		for (String r : regions) {
+			assertEquals(Paths.get("demand", "hist_demand_" + r + ".csv"), demandFile(files, r, regions));
+		}
+	}
+
+	@Test
+	void regionFileSeparatesNigerAndNigeriaWithBareNameCandidates() {
+		// the weight loader's scenario-folder lookup matches the bare region name
+		List<String> regions = List.of("Niger", "Nigeria");
+		ArrayList<Path> files = demandFiles("Utility_Weight_Nigeria.csv", "Utility_Weight_Niger.csv");
+
+		assertEquals(Paths.get("demand", "Utility_Weight_Niger.csv"),
+				PathTools.regionFile(PathTools.fileFilter(files, "Niger"), "Niger", regions));
+		assertEquals(Paths.get("demand", "Utility_Weight_Nigeria.csv"),
+				PathTools.regionFile(PathTools.fileFilter(files, "Nigeria"), "Nigeria", regions));
+	}
+
+	@Test
+	void regionFileNeverReturnsAnotherRegionsFile() {
+		// "_India" is inside Madagascar_and_Indian_Ocean's file name; "_Sudan" inside South_Sudan's
+		List<String> regions = List.of("India", "Madagascar_and_Indian_Ocean", "Sudan", "South_Sudan");
+		ArrayList<Path> files = demandFiles("hist_demand_Madagascar_and_Indian_Ocean.csv",
+				"hist_demand_South_Sudan.csv");
+
+		assertNull(demandFile(files, "India", regions));
+		assertNull(demandFile(files, "Sudan", regions));
+	}
+
+	@Test
+	void regionFileFallsBackToAFileNoRegionOwns() {
+		ArrayList<Path> files = demandFiles("demand_regionA_v2.csv", "demand_regionB.csv");
+
+		assertEquals(Paths.get("demand", "demand_regionA_v2.csv"),
+				demandFile(files, "regionA", List.of("regionA", "regionB")));
+		// once a region called regionA_v2 exists, the file is its own and regionA has none
+		assertNull(demandFile(files, "regionA", List.of("regionA", "regionB", "regionA_v2")));
+	}
+
+	@Test
+	void regionFilePrefersTheFileEndingInTheRegionName() {
+		List<String> regions = List.of("regionA");
+		ArrayList<Path> files = demandFiles("demand_regionA_old.csv", "demand_regionA.csv");
+
+		for (int i = 0; i < 2; i++) {
+			assertEquals(Paths.get("demand", "demand_regionA.csv"), demandFile(files, "regionA", regions));
+			Collections.reverse(files);
+		}
+	}
+
+	@Test
+	void regionFileTakesTheFirstOfSeveralOwnFiles() {
+		ArrayList<Path> files = new ArrayList<>(
+				List.of(Paths.get("ssp1", "demand_regionA.csv"), Paths.get("ssp2", "demand_regionA.csv")));
+
+		assertEquals(Paths.get("ssp1", "demand_regionA.csv"), demandFile(files, "regionA", List.of("regionA")));
+	}
+
+	@Test
+	void regionFileReturnsNullForNoCandidates() {
+		assertNull(PathTools.regionFile(null, "regionA", List.of("regionA")));
+		assertNull(PathTools.regionFile(new ArrayList<>(), "regionA", List.of("regionA")));
+	}
+
+	@Test
+	void regionFileGivesEveryPlumCountryItsOwnDemandFile() {
+		List<String> regions = List.of(
+			"Afghanistan", "Albania", "Algeria", "Angola", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan",
+			"Bahrain_and_Qatar", "Bangladesh", "Belarus", "Belgium_and_Luxembourg", "Benin", "Bhutan", "Bolivia",
+			"Bosnia_and_Herzegovina", "Botswana", "Brazil", "Bulgaria", "Burkina_Faso", "Burundi", "Cambodia",
+			"Cameroon", "Canada", "Caribbean_Other", "Central_African_Republic", "Chad", "Chile", "China", "Colombia",
+			"Congo", "Costa_Rica", "Cote_dIvoire", "Croatia", "Cuba", "Cyprus", "Czechia", "DR_Congo", "Denmark",
+			"Djibouti", "Dominican_Republic", "Ecuador", "Egypt", "El_Salvador", "Equatorial_Guinea", "Eritrea",
+			"Estonia", "Eswatini", "Ethiopia", "Finland", "France", "Gabon_and_Sao_Tome", "Georgia", "Germany", "Ghana",
+			"Greece", "Guatemala_and_Belize", "Guinea", "Guinea_Bissau", "Guyana", "Haiti", "Honduras", "Hungary",
+			"Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy_and_Malta", "Japan", "Jordan",
+			"Kazakhstan", "Kenya", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya",
+			"Lithuania", "Madagascar_and_Indian_Ocean", "Malawi", "Malaysia_Singapore_and_Brunei", "Mali", "Mauritania",
+			"Mexico", "Moldova", "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Namibia", "Nepal",
+			"Netherlands", "New_Zealand", "Nicaragua", "Niger", "Nigeria", "North_Korea", "North_Macedonia", "Norway",
+			"Oman", "Pacific_Other", "Pakistan", "Panama", "Papua_New_Guinea", "Paraguay", "Peru", "Philippines",
+			"Poland", "Portugal", "Romania", "Russia", "Rwanda", "Saudi_Arabia", "Senegal_Gambia_and_Cabo_Verde",
+			"Serbia", "Sierra_Leone", "Slovakia", "Slovenia", "Somalia", "South_Africa", "South_Korea", "South_Sudan",
+			"Spain", "Sri_Lanka_and_Maldives", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan",
+			"Tajikistan", "Tanzania", "Thailand", "Timor_Leste", "Togo", "Tunisia", "Turkiye", "Turkmenistan", "Uganda",
+			"Ukraine", "United_Arab_Emirates", "United_Kingdom", "United_States_of_America", "Uruguay", "Uzbekistan",
+			"Venezuela", "Viet_Nam", "Yemen", "Zambia", "Zimbabwe");
+		assertEquals(158, regions.size());
+
+		// as written by Make_country_demand.R, in reverse alphabetical order so listing order cannot help
+		ArrayList<Path> files = demandFiles("Make_country_demand.R", "demand_country_log.csv",
+				"hist_demand_global.csv");
+		regions.forEach(r -> files.add(Paths.get("demand", "hist_demand_" + r + ".csv")));
+		files.sort(Comparator.reverseOrder());
+
+		for (String r : regions) {
+			assertEquals(Paths.get("demand", "hist_demand_" + r + ".csv"), demandFile(files, r, regions), r);
+		}
+	}
 }

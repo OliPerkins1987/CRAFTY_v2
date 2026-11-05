@@ -145,10 +145,12 @@ public class ServiceSet {
 	public static boolean isRegionalServicesExisting() {
 		System.out.println("!-Regions-! " + CellsLoader.regions.keySet());
 		for (String r : CellsLoader.regions.keySet()) {
-			ArrayList<Path> paths = PathTools.fileFilter(ProjectLoader.getScenario(), PathTools.asFolder("demand"),
-					"_" + r + ".csv");
-			LOGGER.info("! " + r + " DEMAND PATH:--> " + paths);
-			if (paths == null) {
+			// the file the demand loader will use, so a region does not pass on another region's file
+			Path path = PathTools.regionFile(
+					PathTools.fileFilter(ProjectLoader.getScenario(), PathTools.asFolder("demand"), "_" + r), r,
+					CellsLoader.regions.keySet());
+			LOGGER.info("! " + r + " DEMAND PATH:--> " + path);
+			if (path == null) {
 				LOGGER.error("Demand file not fund, for Region |" + r + "|. Regionalisation Not Possible");
 				return false;
 			}

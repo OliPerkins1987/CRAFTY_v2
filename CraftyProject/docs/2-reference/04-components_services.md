@@ -114,8 +114,14 @@ If `service_demands_path` points to:
 - a **file**: that file is used directly
 - a **directory**: the loader searches inside it for region-specific files
 
-Region-specific discovery uses a *filename token* that includes the region name. In the current template,
-the search expects the scenario name, region name and should be in demand folder to appear as a semicolon-delimited token (e.g., `...;EU;...`).
+Without `service_demands_path`, the file must sit in a `demand/` folder under the scenario's folder.
+
+A region's file is the one whose name ends with `_<region>.csv` (e.g. `hist_demand_Sudan.csv` for `Sudan`).
+- If a file name ends with two region names, it belongs to the longer one: `hist_demand_South_Sudan.csv` is
+  `South_Sudan`'s file, not `Sudan`'s, and `hist_demand_Guinea_Bissau.csv` is not `Guinea`'s.
+- If no file ends with `_<region>.csv`, a file that only contains `_<region>` (e.g. `demand_regionA_v2.csv`) is
+  used, with a warning, as long as no other region owns it.
+- If several files end with `_<region>.csv` (the same name in two folders), the first is used, with a warning.
 
 ---
 
@@ -137,7 +143,8 @@ Resolved using:
 
 If the configured path is:
 - a **file**: used directly (often one file for all regions)
-- a **directory**: searched for region-specific files containing a region token (e.g., `scenarioName_RegionName;`)
+- a **directory**: searched for each region's file, found as for demand (§3.3): the file whose name ends with
+  `_<region>.csv` (e.g. `Utility_Weight_regionA.csv`)
 
 ---
 

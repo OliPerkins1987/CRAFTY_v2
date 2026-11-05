@@ -134,12 +134,17 @@ These keys let you *override* the dataset’s default scenario discovery and poi
 The service demand loader supports flexible inputs:
 
 - If `service_demands_path` points to a **file** → that file is used directly.
-- If it points to a **directory** → the loader searches inside it for region-specific demand files
-  (matching the region name by token).
+- If it points to a **directory** → the loader searches inside it for each region's demand file.
 - If not provided → CRAFTY falls back to the default scenario folder structure and searches under the
   scenario’s demand directory.
 
 This is the usual mechanism for **regional** demand discovery.
+
+A region's file is the one whose name ends with `_<region>.csv` (e.g. `hist_demand_Sudan.csv` for `Sudan`).
+If a file name ends with two region names, it belongs to the longer one, so `hist_demand_South_Sudan.csv` is
+`South_Sudan`'s file, not `Sudan`'s. If no file ends with `_<region>.csv`, a file that only contains `_<region>`
+(e.g. `demand_regionA_v2.csv`) is used, with a warning, as long as no other region owns it. Utility-weight files
+are found the same way.
 
 ---
 
