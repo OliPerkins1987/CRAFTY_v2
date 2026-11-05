@@ -39,7 +39,7 @@ import de.cesr.crafty.core.utils.general.Utils;
  * global_price_feedback, each region's file holds the world multiplier as it
  * stood at that region's year start, times the region's own file price. -
  * With transport and spatial production costs, each paying service's export
- * share (the share of supply above demand, which transport is charged on);
+ * share (the share of supply above consumption, which transport is charged on);
  * also written for single-region runs.
  *
  * Files are written under: {output_folder}/region_{RegionName}/
@@ -136,7 +136,7 @@ public class ListenerByRegion {
 
 	/**
 	 * Records and writes this year's export shares under transport with spatial production costs: for
-	 * each service that pays transport, the share of the region's supply above its demand, which this
+	 * each service that pays transport, the share of the region's supply above its consumption, which this
 	 * year's transport costs are charged on.
 	 *
 	 * @param exportShare indexed like ServiceSet.getServicesList(); a missing entry is written as 0

@@ -145,7 +145,7 @@ public class Cell extends AbstractCell {
 	 * factor x the transport cost per unit, less the share the AFT uses itself (with
 	 * {@code use_self_consumption}), since that never travels. The factor is
 	 * - with spatial production costs, the region's export share of the service (the part of its supply
-	 *   above its demand, see {@link RegionalModelRunner#exportShare(double, double)}), whatever the AFT's
+	 *   above its consumption, see {@link RegionalModelRunner#exportShare(double, double)}), whatever the AFT's
 	 *   capitals;
 	 * - with global production costs, the AFT's trade factor (its *_trade value on that service's row).
 	 * It is charged on production, the quantity supply is built from, though utility's revenue is built

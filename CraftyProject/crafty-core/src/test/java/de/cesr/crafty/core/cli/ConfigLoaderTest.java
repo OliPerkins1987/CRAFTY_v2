@@ -900,31 +900,6 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void transportBySurplusWithTheInitialEquilibriumShouldWarnThatNobodyPays() throws Exception {
-        Config c = configWithSwitchesOn("use_transport_costs", "use_production_costs", "spatial_production_costs",
-                "initial_demand_supply_equilibrium");
-
-        String warning = ConfigLoader.transportCostConfigWarning(c);
-
-        assertNotNull(warning, "The equilibrium leaves no surplus at the start, so nobody pays transport");
-        assertTrue(warning.contains("initial_demand_supply_equilibrium") && warning.contains("nobody pays"),
-                "The message must name the cause and the effect. Got: " + warning);
-    }
-
-    @Test
-    void transportCostsShouldNotWarn_withoutAllThreeSwitches() throws Exception {
-        Config noEquilibrium = configWithSwitchesOn("use_transport_costs", "use_production_costs",
-                "spatial_production_costs");
-        noEquilibrium.initial_demand_supply_equilibrium = false;
-        assertNull(ConfigLoader.transportCostConfigWarning(noEquilibrium), "no initial equilibrium");
-
-        assertNull(ConfigLoader.transportCostConfigWarning(configWithSwitchesOn("use_transport_costs",
-                "use_production_costs", "initial_demand_supply_equilibrium")), "global production costs");
-        assertNull(ConfigLoader.transportCostConfigWarning(configWithSwitchesOn("use_production_costs",
-                "spatial_production_costs", "initial_demand_supply_equilibrium")), "no transport");
-    }
-
-    @Test
     void priceFeedbackShouldBeOffByDefault() {
         Config c = new Config();
 

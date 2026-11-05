@@ -23,6 +23,7 @@ import de.cesr.crafty.core.output.Listener;
 import de.cesr.crafty.core.output.ListenerByRegion;
 import de.cesr.crafty.core.updaters.SeedUpdater;
 import de.cesr.crafty.core.updaters.LandMaskUpdater;
+import de.cesr.crafty.core.updaters.ProductionCostUpdater;
 import de.cesr.crafty.core.updaters.RegionsModelRunnerUpdater;
 import de.cesr.crafty.core.updaters.ServicesUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
@@ -53,7 +54,7 @@ import de.cesr.crafty.core.utils.general.Utils;
  *   more regions, every region holds the same map, set from world demand and supply
  *   ({@link #useGlobalPrice}).
  * - {@link #exportShare}: with transport and spatial production costs, the share of each service's
- *   supply above the region's demand, which transport is charged on; refreshed with {@link #marginal}.
+ *   supply above the region's consumption, which transport is charged on; refreshed with {@link #marginal}.
  * - {@link #distributionMean}: per-year map of mean utility per AFT (computed from cell utilities).
  * - {@link #maxUtility}/{@link #minUtility}: utility range used for normalised-utility behaviour modes.
  *
@@ -381,28 +382,47 @@ public class RegionalModelRunner {
         return total;
     }
 
+    /*
+     * Each service's export share this year, against the region's consumption from its consumption file
+     * (costs/spatial/export/<scenario>/). Consumption is divided by the service's calibration factor, as demand
+     * is by the initial demand-supply equilibrium, so the two stay on one scale: the equilibrium makes the
+     * starting supply the file demand / factor, so the starting share is the files' (demand - consumption) /
+     * demand. Without the equilibrium every factor is 1. With no consumption loaded, which happens only when no
+     * service pays transport, every share is 0.
+     */
     private void computeExportShares() {
         List<String> services = ServiceSet.getServicesList();
-        Map<String, Double> demand = ServicesUpdater.getDemandByRegions().get(R.getName());
+        double[] consumption = ProductionCostUpdater.getConsumption(R.getName(), Timestep.getCurrentYear());
         double[] shares = new double[services.size()];
-        for (int i = 0; i < services.size(); i++) {
-            String service = services.get(i);
-            shares[i] = exportShare(demand.get(service), getRegionalSupply().getOrDefault(service, 0.0));
+        if (consumption != null) {
+            for (int i = 0; i < Math.min(services.size(), consumption.length); i++) {
+                String service = services.get(i);
+                shares[i] = exportShare(consumption[i] / calibrationFactor(service),
+                        getRegionalSupply().getOrDefault(service, 0.0));
+            }
         }
         exportShare = shares;
     }
 
+    /** The service's initial demand-supply calibration factor in this region; 1 if the region has no such service. */
+    private double calibrationFactor(String service) {
+        Map<String, Service> services = R.getServicesHash();
+        Service s = services == null ? null : services.get(service);
+        return s == null ? 1.0 : s.getCalibration_Factor();
+    }
+
     /**
      * Spatial transport: the share of a region's supply of a service that it exports, which is the part
-     * above its own demand, (supply - demand) / supply. It is 0 when supply does not exceed demand, and 1
-     * when there is supply but no demand at all, since then everything supplied is exported. Charged on
-     * every producer's marketed production, it adds up to transport on exactly supply - demand.
+     * above its own consumption, (supply - consumption) / supply. It is 0 when supply does not exceed
+     * consumption, and 1 when there is supply but no consumption at all, since then everything supplied is
+     * exported. Charged on every producer's marketed production, it adds up to transport on exactly
+     * supply - consumption.
      */
-    static double exportShare(double demand, double supply) {
-        if (supply <= 0 || supply <= demand) {
+    static double exportShare(double consumption, double supply) {
+        if (supply <= 0 || supply <= consumption) {
             return 0.0;
         }
-        return (supply - demand) / supply;
+        return (supply - consumption) / supply;
     }
 
     /**

@@ -59,9 +59,9 @@ public class Config {
     public String costs_directory = "";
     // Transport costs (needs use_production_costs): for each market good (every service if Services.csv has
     // no Market_good column) an AFT pays, per ha, its marketed production x a factor x the <service>_transport
-    // cost in global_costs.csv. The factor is the region's export share (supply above demand, as a share of
-    // supply) with spatial_production_costs, and the AFT's *_trade value without. Explicit-price utility
-    // only; CRAFTY-react ignores it.
+    // cost in global_costs.csv. The factor is the region's export share (supply above consumption, as a share
+    // of supply; consumption from costs/spatial/export/<scenario>/) with spatial_production_costs, and the
+    // AFT's *_trade value without. Explicit-price utility only; CRAFTY-react ignores it.
     public boolean use_transport_costs = false;
 
     // Price-explicit giving up

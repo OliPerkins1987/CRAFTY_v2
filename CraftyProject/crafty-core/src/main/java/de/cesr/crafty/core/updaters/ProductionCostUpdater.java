@@ -3,7 +3,9 @@ package de.cesr.crafty.core.updaters;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +18,9 @@ import de.cesr.crafty.core.dataLoader.CsvKind;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
 import de.cesr.crafty.core.dataLoader.afts.AFTsLoader;
+import de.cesr.crafty.core.dataLoader.costs.ConsumptionData;
 import de.cesr.crafty.core.dataLoader.costs.GlobalCostData;
+import de.cesr.crafty.core.dataLoader.land.CellsLoader;
 import de.cesr.crafty.core.dataLoader.serivces.ServiceSet;
 import de.cesr.crafty.core.utils.file.PathTools;
 
@@ -43,6 +47,9 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	// Transport cost per unit of production, indexed like ServiceSet.getServicesList(); 0 for a service
 	// that does not pay transport. Empty when production or transport costs are off, so none is charged.
 	private static double[] transportCosts = new double[0];
+	// Domestic consumption by region, then year, then service (indexed like ServiceSet.getServicesList()), read
+	// from costs/spatial/export/<scenario>/. Empty unless transport is charged by export share.
+	private static Map<String, Map<Integer, double[]>> consumption = new HashMap<>();
 
 	private Map<Integer, Path> nfertCostPaths = new TreeMap<>();
 	private Map<Integer, Path> irrigationCostPaths = new TreeMap<>();
@@ -51,6 +58,7 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 	public ProductionCostUpdater() {
 		transportCosts = new double[0];
+		consumption = new HashMap<>();
 		if (!ConfigLoader.isUseProductionCosts()) {
 			LOGGER.info("Production costs disabled");
 			return;
@@ -128,7 +136,8 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	 * global_costs.csv per service that pays transport (see paysTransport), charged per unit produced and
 	 * scaled by each AFT's trade factor with global production costs, or by the region's export share with
 	 * spatial ones (see Cell.transportCost). Every such service needs a row, even one no AFT trades, so a
-	 * forgotten row cannot pass as free transport.
+	 * forgotten row cannot pass as free transport. The export share needs each region's consumption, which
+	 * is loaded here too (see loadConsumption).
 	 */
 	private void loadTransportCosts() {
 		if (globalCostData == null) return;
@@ -156,7 +165,7 @@ public class ProductionCostUpdater extends AbstractUpdater {
 		boolean byExportShare = ConfigLoader.isTransportByExportShare();
 		LOGGER.info(byExportShare
 				? "Transport costs: spatial production costs, so charged on each region's export share (its supply"
-						+ " above its demand), whatever the AFT's *_trade capitals"
+						+ " above its consumption), whatever the AFT's *_trade capitals"
 				: "Transport costs: global production costs, so charged on each AFT's *_trade factor");
 		double[] costs = new double[services.size()];
 		for (int i = 0; i < services.size(); i++) {
@@ -175,6 +184,65 @@ public class ProductionCostUpdater extends AbstractUpdater {
 			LOGGER.info("Transport cost for " + service + ": " + costs[i] + " per unit, paid by " + traders);
 		}
 		transportCosts = costs;
+		if (byExportShare) {
+			loadConsumption();
+		}
+	}
+
+	/** What {@link #readConsumption} found: each region's consumption by year, and every problem with the files. */
+	record Consumption(Map<String, Map<Integer, double[]>> byRegion, List<String> problems) {
+	}
+
+	/*
+	 * Transport by export share charges each region on the part of its supply above its consumption, so every
+	 * region needs a consumption file covering every service that pays transport and every year of the run.
+	 * Anything missing stops the run, listed in one message, so that a forgotten input cannot pass as a
+	 * consumption of 0 (everything exported) or as no transport at all.
+	 */
+	private void loadConsumption() {
+		String scenario = ProjectLoader.getScenario();
+		Consumption read = readConsumption(CellsLoader.regions.keySet(), scenario);
+		if (!read.problems().isEmpty()) {
+			LOGGER.fatal("Transport by export share needs each region's domestic consumption, in "
+					+ "spatial/export/" + scenario + "/consumption_<region>.csv under the costs folder: a "
+					+ ConsumptionData.YEAR_COLUMN + " column and one column per service that pays transport, "
+					+ "with a value for every year of the run. Found:\n  " + String.join("\n  ", read.problems()));
+			return;
+		}
+		consumption = read.byRegion();
+	}
+
+	/**
+	 * Reads every region's consumption file (see {@link ConsumptionData}). It does not stop the run: a region
+	 * with no file, and every problem in the files read, are listed in the result.
+	 */
+	static Consumption readConsumption(Collection<String> regions, String scenario) {
+		List<String> services = ServiceSet.getServicesList();
+		Map<String, Map<Integer, double[]>> byRegion = new HashMap<>();
+		List<String> problems = new ArrayList<>();
+		for (String region : regions.stream().sorted().toList()) {
+			Path file = consumptionFile(region, scenario, regions);
+			if (file == null) {
+				problems.add("|" + region + "|: no consumption file in spatial/export/" + scenario + "/");
+				continue;
+			}
+			LOGGER.info("Consumption for [" + region + "]: " + file);
+			ConsumptionData data = new ConsumptionData(file, region, services, ProductionCostUpdater::paysTransport,
+					Timestep.getStartYear(), Timestep.getEndtYear());
+			problems.addAll(data.problems());
+			byRegion.put(region, data.byYear());
+		}
+		return new Consumption(byRegion, problems);
+	}
+
+	/**
+	 * A region's consumption file: one whose path contains spatial, the folder export and the scenario, and
+	 * whose name ends with {@code _<region>.csv}. The region's own file is picked as for demand files (see
+	 * {@link PathTools#regionFile}), so Sudan does not get South_Sudan's file. Null if there is none.
+	 */
+	static Path consumptionFile(String region, String scenario, Collection<String> regions) {
+		return PathTools.regionFile(costFiles("spatial", PathTools.asFolder(ConsumptionData.FOLDER), scenario,
+				"_" + region, ".csv"), region, regions);
 	}
 
 	/**
@@ -385,18 +453,24 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	}
 
 	private Path findCostFile(String... conditions) {
-		String costsDir = ConfigLoader.config.costs_directory;
-		ArrayList<Path> results;
-		if (costsDir != null && !costsDir.isEmpty()) {
-			ArrayList<Path> ps = PathTools.findAllFilePaths(Paths.get(costsDir));
-			results = PathTools.fileFilter(ps, conditions);
-		} else {
-			results = PathTools.fileFilter(conditions);
-		}
+		ArrayList<Path> results = costFiles(conditions);
 		if (results == null || results.isEmpty()) {
 			return null;
 		}
 		return results.get(0);
+	}
+
+	/**
+	 * Every cost file whose path contains all the conditions: under costs_directory if it is set, otherwise
+	 * anywhere in the project. Null if there is none.
+	 */
+	private static ArrayList<Path> costFiles(String... conditions) {
+		String costsDir = ConfigLoader.config.costs_directory;
+		if (costsDir != null && !costsDir.isEmpty()) {
+			ArrayList<Path> ps = PathTools.findAllFilePaths(Paths.get(costsDir));
+			return PathTools.fileFilter(ps, conditions);
+		}
+		return PathTools.fileFilter(conditions);
 	}
 
 	public static GlobalCostData getGlobalCostData() {
@@ -426,5 +500,20 @@ public class ProductionCostUpdater extends AbstractUpdater {
 
 	public static void setTransportCosts(double[] costs) {
 		transportCosts = costs;
+	}
+
+	/**
+	 * A region's domestic consumption in a year, indexed like ServiceSet.getServicesList(), with 0 for a
+	 * service that does not pay transport. Null when none was loaded: transport is not charged by export
+	 * share, or no service pays transport.
+	 */
+	public static double[] getConsumption(String region, int year) {
+		Map<Integer, double[]> byYear = consumption.get(region);
+		return byYear == null ? null : byYear.get(year);
+	}
+
+	/** Region, then year, then service, as {@link #getConsumption} reads it. */
+	public static void setConsumption(Map<String, Map<Integer, double[]>> byRegion) {
+		consumption = byRegion;
 	}
 }

@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,7 @@ import de.cesr.crafty.core.cli.CustomLogger;
 import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.crafty.AftCategory;
 import de.cesr.crafty.core.crafty.Cell;
+import de.cesr.crafty.core.crafty.Region;
 import de.cesr.crafty.core.dataLoader.CsvKind;
 import de.cesr.crafty.core.dataLoader.CsvProcessors;
 import de.cesr.crafty.core.dataLoader.ProjectLoader;
@@ -83,6 +85,7 @@ class ProductionCostUpdaterTest {
 		// The config object is shared by every test in this JVM. Left on, transport would make any later
 		// updater with production costs on require transport rows, and stop the JVM without them.
 		ConfigLoader.config.use_transport_costs = false;
+		ProductionCostUpdater.setConsumption(new java.util.HashMap<>());
 		CustomLogger.shutdownRunFileLoggers();
 	}
 
@@ -895,6 +898,169 @@ class ProductionCostUpdaterTest {
 			ServiceSet.getMarketGood().putAll(flagsBefore);
 			ProductionCostUpdater.setTransportCosts(new double[0]);
 		}
+	}
+
+	// =========================================================
+	// Transport by export share: each region's domestic consumption
+	// =========================================================
+
+	@Test
+	void readConsumption_givesEachRegionItsOwnFile() throws IOException {
+		withSer1TheOnlyMarketGood(() -> {
+			ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+			writeConsumption("TestScenario", "South_Sudan", 500);
+			writeConsumption("TestScenario", "Sudan", 100);
+
+			ProductionCostUpdater.Consumption read = ProductionCostUpdater.readConsumption(
+					List.of("Sudan", "South_Sudan"), "TestScenario");
+
+			assertEquals(List.of(), read.problems());
+			assertArrayEquals(new double[] { 100.0, 0.0, 0.0 }, read.byRegion().get("Sudan").get(2000), 0.0,
+					"Sudan's own file; ser2's 7 is not read, since ser2 pays no transport");
+			assertArrayEquals(new double[] { 505.0, 0.0, 0.0 }, read.byRegion().get("South_Sudan").get(2005), 0.0);
+		});
+	}
+
+	@Test
+	void readConsumption_needsTheScenarioFolder() throws IOException {
+		withSer1TheOnlyMarketGood(() -> {
+			ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+			writeConsumption("", "R1", 100);
+			writeConsumption("OtherScenario", "R1", 100);
+
+			ProductionCostUpdater.Consumption read = ProductionCostUpdater.readConsumption(List.of("R1"),
+					"TestScenario");
+
+			assertEquals(List.of("|R1|: no consumption file in spatial/export/TestScenario/"), read.problems());
+			assertFalse(read.byRegion().containsKey("R1"));
+		});
+	}
+
+	@Test
+	void readConsumption_listsEveryRegionsProblems_inRegionOrder() throws IOException {
+		withSer1TheOnlyMarketGood(() -> {
+			ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+			writeConsumption("TestScenario", "R1", 100);
+			// R2's file has no column for ser1, the service that pays transport; R3 has no file.
+			writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("export").resolve("TestScenario"),
+					"consumption_R2.csv", "Year,ser2", "2000,1", "2001,1", "2002,1", "2003,1", "2004,1", "2005,1");
+
+			ProductionCostUpdater.Consumption read = ProductionCostUpdater.readConsumption(
+					List.of("R3", "R2", "R1"), "TestScenario");
+
+			assertEquals(List.of("|R2| consumption_R2.csv: has no column for ser1",
+					"|R3|: no consumption file in spatial/export/TestScenario/"), read.problems());
+			assertEquals(100.0, read.byRegion().get("R1").get(2000)[0], 0.0);
+		});
+	}
+
+	@Test
+	void transportByExportShare_loadsEveryRegionsConsumption() throws IOException {
+		ConcurrentHashMap<String, Region> regionsBefore = CellsLoader.regions;
+		withSer1TheOnlyMarketGood(() -> {
+			try {
+				CellsLoader.regions = new ConcurrentHashMap<>(Map.of("R1", new Region("R1"), "R2", new Region("R2")));
+				writeSpatialModeFiles("ser1_transport,4.0,");
+				writeConsumption("TestScenario", "R1", 100);
+				writeConsumption("TestScenario", "R2", 300);
+
+				new ProductionCostUpdater();
+
+				assertArrayEquals(new double[] { 4.0, 0.0, 0.0 }, ProductionCostUpdater.getTransportCosts(), 0.0);
+				assertArrayEquals(new double[] { 100.0, 0.0, 0.0 }, ProductionCostUpdater.getConsumption("R1", 2000),
+						0.0);
+				assertArrayEquals(new double[] { 305.0, 0.0, 0.0 }, ProductionCostUpdater.getConsumption("R2", 2005),
+						0.0);
+				assertNull(ProductionCostUpdater.getConsumption("R1", 2006), "not a run year");
+				assertNull(ProductionCostUpdater.getConsumption("R3", 2000), "not a region");
+			} finally {
+				CellsLoader.regions = regionsBefore;
+				ProductionCostUpdater.setTransportCosts(new double[0]);
+			}
+		});
+	}
+
+	@Test
+	void consumptionIsNotLoaded_withGlobalProductionCostsOrWithoutTransport() throws IOException {
+		ConcurrentHashMap<String, Region> regionsBefore = CellsLoader.regions;
+		withSer1TheOnlyMarketGood(() -> {
+			try {
+				// There are no consumption files: reading them would stop the run.
+				CellsLoader.regions = new ConcurrentHashMap<>(Map.of("R1", new Region("R1")));
+
+				ProductionCostUpdater.setConsumption(Map.of("R1", Map.of(2000, new double[] { 1, 0, 0 })));
+				writeGlobalModeFiles("ser1_transport,4.0,");
+				new ProductionCostUpdater();
+				assertNull(ProductionCostUpdater.getConsumption("R1", 2000), "global production costs");
+
+				ProductionCostUpdater.setConsumption(Map.of("R1", Map.of(2000, new double[] { 1, 0, 0 })));
+				writeSpatialModeFiles();
+				ConfigLoader.config.use_transport_costs = false;
+				new ProductionCostUpdater();
+				assertNull(ProductionCostUpdater.getConsumption("R1", 2000), "no transport");
+			} finally {
+				CellsLoader.regions = regionsBefore;
+				ProductionCostUpdater.setTransportCosts(new double[0]);
+			}
+		});
+	}
+
+	/**
+	 * Writes region's consumption file in costs/spatial/export/<folder>/ (in export/ itself if folder is
+	 * empty), for 2000-2005: ser1 is first + (year - 2000), ser2 is 7 and ser3 is 0.
+	 */
+	private void writeConsumption(String folder, String region, double first) throws IOException {
+		List<String> rows = new java.util.ArrayList<>(List.of("Year,ser1,ser2,ser3"));
+		for (int year = 2000; year <= 2005; year++) {
+			rows.add(year + "," + (first + year - 2000) + ",7,0");
+		}
+		Path dir = tempDir.resolve("costs").resolve("spatial").resolve("export");
+		writeCsv(folder.isEmpty() ? dir : dir.resolve(folder), "consumption_" + region + ".csv",
+				rows.toArray(new String[0]));
+	}
+
+	/**
+	 * Spatial-mode cost files (global_costs.csv with the given extra rows, and the intensity files, the only
+	 * spatial ones an AFT needs once none fertilises, irrigates or grazes), with production and transport costs
+	 * switched on. tearDown() switches transport off again.
+	 */
+	private void writeSpatialModeFiles(String... extraRows) throws IOException {
+		Path costs = tempDir.resolve("costs");
+		List<String> rows = new java.util.ArrayList<>(List.of("Item,Cost,Notes", "Nfert,1.08,"));
+		rows.addAll(List.of(extraRows));
+		writeCsv(costs.resolve("global"), "global_costs.csv", rows.toArray(new String[0]));
+		for (String label : List.of("AFT1", "AFT2", "AFT3")) {
+			Aft aft = AFTsLoader.getAftHash().get(label);
+			aft.setNfertRate(0.0);
+			aft.setIrrigated(false);
+			aft.getProductivityLevel().put("Pasture", 0.0);
+		}
+		Path intensityDir = costs.resolve("spatial").resolve("intensity").resolve("TestScenario");
+		for (int year = Timestep.getStartYear(); year <= Timestep.getEndtYear(); year++) {
+			writeCsv(intensityDir, "Intensity_costs_" + year + ".csv", "X,Y,AFT1,AFT2,AFT3", "0,0,0,0,0");
+		}
+		ConfigLoader.config.use_production_costs = true;
+		ConfigLoader.config.spatial_production_costs = true;
+		ConfigLoader.config.costs_directory = costs.toString();
+		ConfigLoader.config.use_transport_costs = true;
+	}
+
+	/** Runs body with ser1 the only market good, and so the only service that pays transport. */
+	private void withSer1TheOnlyMarketGood(IoRunnable body) throws IOException {
+		Map<String, Boolean> flagsBefore = new java.util.HashMap<>(ServiceSet.getMarketGood());
+		try {
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(Map.of("ser1", true, "ser2", false, "ser3", false));
+			body.run();
+		} finally {
+			ServiceSet.getMarketGood().clear();
+			ServiceSet.getMarketGood().putAll(flagsBefore);
+		}
+	}
+
+	@FunctionalInterface
+	private interface IoRunnable {
+		void run() throws IOException;
 	}
 
 	/**

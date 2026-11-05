@@ -164,14 +164,24 @@ produce on the cell, the quantity supply is built from (with `separate_productio
 suitability capitals only), not competitiveness. The factor depends on the cost mode:
 
 - **Spatial production costs** (`spatial_production_costs: true`): the region's export share of the service,
-  the part of its supply above its demand, `max(0, supply - demand) / supply` (1 when there is supply but no
-  demand). Supply is the region's market supply (area-weighted, less self-consumption) and demand that year's
-  regional demand, as for the marginal utility. Every producer pays on the share, whatever its capitals, so
-  over the region transport is paid on exactly `supply - demand`. The share is refreshed with the marginal
-  utility (start of the step, after forced masks, after each competition batch), and written each year to
-  `region_<R>/region_<R>-ExportShare.csv`. With `initial_demand_supply_equilibrium` on, each region's demand
-  starts equal to its baseline supply, so there is no surplus and nobody pays at the start; the run warns.
-  With one region (no `regionalisation`), the share is the world's.
+  the part of its supply above its domestic consumption, `max(0, supply - consumption) / supply` (1 when there
+  is supply but no consumption). Supply is the region's market supply (area-weighted, less self-consumption),
+  so consumption should leave out what producers use themselves. Every producer pays on the share, whatever
+  its capitals, so over the region transport is paid on exactly `supply - consumption`, the region's exports.
+  Demand plays no part here: offline, it is observed production, not consumption. The share is refreshed with
+  the marginal utility (start of the step, after forced masks, after each competition batch), and written
+  each year to `region_<R>/region_<R>-ExportShare.csv`. With one region (no `regionalisation`), the share is
+  the world's.
+
+  Consumption is read at startup from one file per region, `spatial/export/<scenario>/consumption_<region>.csv`
+  in the costs folder (`costs_directory`, or anywhere in the project when that is empty). Like a demand file,
+  it has a `Year` column and one column per service. Rows are matched by their year, in any order, and only
+  the services that pay transport are read. A region's file is the one whose name ends with `_<region>.csv`
+  (the longest region name wins, as for demand files). Each value is divided by the service's calibration
+  factor, as demand is by `initial_demand_supply_equilibrium`, so with the equilibrium on the starting share
+  is the files' `(demand - consumption) / demand`. The run stops, listing everything missing, if a region has
+  no file, a service that pays transport has no column, or a year of the run has no value, an empty one, or
+  one that is not a number of 0 or more.
 - **Global production costs**: the AFT's trade factor, the value in the `*_trade` capital column on that
   service's row of its production file (0 if there is none; more than one non-zero `*_trade` column on such
   a row stops the run).

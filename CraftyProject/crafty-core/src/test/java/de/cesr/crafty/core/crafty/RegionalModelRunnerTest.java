@@ -81,6 +81,7 @@ class RegionalModelRunnerTest {
 			ConfigLoader.config.spatial_production_costs = false;
 			ConfigLoader.config.use_transport_costs = false;
 		}
+		ProductionCostUpdater.setConsumption(new java.util.HashMap<>());
 
 		// restore ConfigLoader.config
 		Field cfgField = findField(ConfigLoader.class, "config");
@@ -934,16 +935,21 @@ class RegionalModelRunnerTest {
 		ConfigLoader.config.use_transport_costs = true;
 	}
 
+	/** Region R1's consumption in 2000 (as its consumption file gives it), one value per service. */
+	private static void consumptionOfR1In2000(double... consumption) {
+		ProductionCostUpdater.setConsumption(Map.of("R1", Map.of(2000, consumption)));
+	}
+
 	@Test
-	void exportShare_isTheShareOfSupplyAboveDemand() {
-		// Supply 50 % above demand: a third of it is exported.
+	void exportShare_isTheShareOfSupplyAboveConsumption() {
+		// Supply 50 % above consumption: a third of it is exported.
 		assertEquals(1.0 / 3, RegionalModelRunner.exportShare(100, 150), 1e-12);
 		assertEquals(0.5, RegionalModelRunner.exportShare(100, 200), 1e-12);
 		assertEquals(0.0, RegionalModelRunner.exportShare(100, 100), 0.0);
 		assertEquals(0.0, RegionalModelRunner.exportShare(100, 80), 0.0, "deficit");
 		assertEquals(0.0, RegionalModelRunner.exportShare(100, 0), 0.0, "no supply");
-		assertEquals(0.0, RegionalModelRunner.exportShare(0, 0), 0.0, "no supply or demand");
-		assertEquals(1.0, RegionalModelRunner.exportShare(0, 40), 0.0, "no demand: all of it is exported");
+		assertEquals(0.0, RegionalModelRunner.exportShare(0, 0), 0.0, "no supply or consumption");
+		assertEquals(1.0, RegionalModelRunner.exportShare(0, 40), 0.0, "no consumption: all of it is exported");
 	}
 
 	@Test
@@ -955,21 +961,73 @@ class RegionalModelRunnerTest {
 	}
 
 	@Test
-	void computeMarginal_fillsTheExportShares_andFollowsSupplyEachTime() throws Exception {
+	void computeMarginal_fillsTheExportShares_fromConsumption_andFollowsSupplyEachTime() throws Exception {
 		transportBySurplus();
-		// S1 demand 100, S2 demand 50; S2 does not penalise oversupply, which export shares ignore.
+		// S1 demand 100, S2 demand 50, which play no part; S2 does not penalise oversupply, which export shares
+		// ignore. Consumption is S1 80 and S2 20.
+		consumptionOfR1In2000(80, 20);
 		withPriceFeedbackRegion(r -> {
 			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 150.0, "S2", 40.0)));
 			invokePrivate(r, "computeMarginal");
 			double[] first = r.getExportShare();
-			assertArrayEquals(new double[] { 1.0 / 3, 0.0 }, first, 1e-12);
+			assertArrayEquals(new double[] { 70.0 / 150, 0.5 }, first, 1e-12);
 
 			// The next refresh (as after a competition batch) sees the new supply.
 			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 90.0, "S2", 100.0)));
 			invokePrivate(r, "computeMarginal");
-			assertArrayEquals(new double[] { 0.0, 0.5 }, r.getExportShare(), 1e-12);
-			assertArrayEquals(new double[] { 1.0 / 3, 0.0 }, first, 1e-12, "a refresh replaces the array");
+			assertArrayEquals(new double[] { 10.0 / 90, 0.8 }, r.getExportShare(), 1e-12);
+			assertArrayEquals(new double[] { 70.0 / 150, 0.5 }, first, 1e-12, "a refresh replaces the array");
 		});
+	}
+
+	@Test
+	void computeMarginal_givesExportSharesOf0_withNoConsumptionLoaded() throws Exception {
+		transportBySurplus();
+		withPriceFeedbackRegion(r -> {
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 150.0, "S2", 40.0)));
+			invokePrivate(r, "computeMarginal");
+			assertArrayEquals(new double[] { 0.0, 0.0 }, r.getExportShare(), 0.0);
+		});
+	}
+
+	@Test
+	void computeMarginal_dividesConsumptionByTheCalibrationFactor_asDemandIs() throws Exception {
+		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
+				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
+				MockedStatic<ServicesUpdater> su = Mockito.mockStatic(ServicesUpdater.class);
+				MockedConstruction<ListenerByRegion> lb = Mockito.mockConstruction(ListenerByRegion.class)) {
+
+			ts.when(Timestep::getStartYear).thenReturn(2000);
+			ts.when(Timestep::getEndtYear).thenReturn(2000);
+			ts.when(Timestep::getCurrentYear).thenReturn(2000);
+			ss.when(ServiceSet::getServicesList).thenReturn(java.util.List.of("S1", "S2"));
+			ss.when(ServiceSet::getPenalise_Oversupply)
+					.thenReturn(new ConcurrentHashMap<>(Map.of("S1", true, "S2", true)));
+			// The files: S1 demand (observed production) 100 and consumption 80, so 20 % is exported.
+			// The initial equilibrium found a starting supply of 50, a factor of 100 / 50 = 2, and divided the
+			// demand by it. S2 has no service in the region, so its factor is 1.
+			su.when(ServicesUpdater::getDemandByRegions).thenReturn(Map.of("R1", Map.of("S1", 50.0, "S2", 10.0)));
+			su.when(ServicesUpdater::getWeightByRegions).thenReturn(Map.of("R1", Map.of("S1", 1.0, "S2", 1.0)));
+			transportBySurplus();
+			consumptionOfR1In2000(80, 6);
+
+			Region region = regionOf();
+			Service s1 = new Service("S1");
+			s1.setCalibration_Factor(2.0);
+			region.getServicesHash().put("S1", s1);
+			installRegion("R1", region);
+			RegionalModelRunner r = new RegionalModelRunner("R1");
+
+			// At the start: supply 50 against consumption 80 / 2 = 40, the files' 20 % export.
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 50.0, "S2", 8.0)));
+			invokePrivate(r, "computeMarginal");
+			assertArrayEquals(new double[] { 0.2, 0.25 }, r.getExportShare(), 1e-12);
+
+			// Supply grows to 80: 40 of it is exported.
+			r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 80.0, "S2", 8.0)));
+			invokePrivate(r, "computeMarginal");
+			assertEquals(0.5, r.getExportShare()[0], 1e-12);
+		}
 	}
 
 	@Test
@@ -994,9 +1052,10 @@ class RegionalModelRunnerTest {
 	@Test
 	void step_writesTheYearsExportShares_withTransportBySurplus() throws Exception {
 		transportBySurplus();
+		consumptionOfR1In2000(90);
 		stepAnEmptyRegion(false, (r, listener) -> {
-			// S1: supply 120 against demand 100.
-			assertArrayEquals(new double[] { 20.0 / 120 }, r.getExportShare(), 1e-12);
+			// S1: supply 120 against consumption 90 (demand 100 plays no part).
+			assertArrayEquals(new double[] { 30.0 / 120 }, r.getExportShare(), 1e-12);
 			verify(listener).writeExportShares(same(r.getExportShare()));
 		});
 	}
@@ -1009,7 +1068,7 @@ class RegionalModelRunnerTest {
 	}
 
 	@Test
-	void transportBySurplus_addsUpOverTheRegion_toTransportOnSupplyAboveDemand() throws Exception {
+	void transportBySurplus_addsUpOverTheRegion_toTransportOnSupplyAboveConsumption() throws Exception {
 		try (MockedStatic<Timestep> ts = Mockito.mockStatic(Timestep.class);
 				MockedStatic<ServiceSet> ss = Mockito.mockStatic(ServiceSet.class);
 				MockedStatic<ServicesUpdater> su = Mockito.mockStatic(ServicesUpdater.class);
@@ -1026,10 +1085,11 @@ class RegionalModelRunnerTest {
 			su.when(ServicesUpdater::getDemandByRegions).thenReturn(Map.of("R1", Map.of("S1", 10.0, "S2", 100.0)));
 			su.when(ServicesUpdater::getWeightByRegions).thenReturn(Map.of("R1", Map.of("S1", 1.0, "S2", 1.0)));
 			transportBySurplus();
+			consumptionOfR1In2000(9, 100);
 			ConfigLoader.config.use_cell_area = true;
 			ConfigLoader.config.use_self_consumption = true;
 
-			// Market supply of S1: 2 x 10 x (1 - 0.5) + 4 x 0.5 = 12, against demand 10.
+			// Market supply of S1: 2 x 10 x (1 - 0.5) + 4 x 0.5 = 12, against consumption 9.
 			Cell c1 = grownCell(0, grower(2, 1, 0.5), 10.0);
 			Cell c2 = grownCell(1, grower(4, 3, 0.0), 0.5);
 			installRegion("R1", regionOf(c1, c2));
@@ -1039,11 +1099,11 @@ class RegionalModelRunnerTest {
 			try {
 				r.regionalSupply();
 				invokePrivate(r, "computeMarginal");
-				assertEquals(2.0 / 12, r.getExportShare()[0], 1e-12);
+				assertEquals(3.0 / 12, r.getExportShare()[0], 1e-12);
 
 				double paid = c1.transportCost(c1.getOwner(), r) * c1.getArea()
 						+ c2.transportCost(c2.getOwner(), r) * c2.getArea();
-				assertEquals(3.0 * (12 - 10), paid, 1e-9, "transport on exactly the 2 exported");
+				assertEquals(3.0 * (12 - 9), paid, 1e-9, "transport on exactly the 3 exported");
 			} finally {
 				ProductionCostUpdater.setTransportCosts(new double[0]);
 			}
@@ -1070,6 +1130,7 @@ class RegionalModelRunnerTest {
 
 			ConfigLoader.config.use_explicit_price_utility = true;
 			transportBySurplus();
+			ProductionCostUpdater.setConsumption(Map.of("R1", Map.of(2020, new double[] { 100.0 })));
 
 			// No trade factor: with spatial production costs it plays no part.
 			Aft grower = mock(Aft.class);
@@ -1081,6 +1142,8 @@ class RegionalModelRunnerTest {
 
 			Service s1 = mock(Service.class);
 			when(s1.getWeights()).thenReturn(new ConcurrentHashMap<>(Map.of(2020, 200.0)));
+			// No initial equilibrium, so consumption is used as read.
+			when(s1.getCalibration_Factor()).thenReturn(1.0);
 			Region region = regionOf(c);
 			region.getServicesHash().put("S1", s1);
 			installRegion("R1", region);
@@ -1088,7 +1151,7 @@ class RegionalModelRunnerTest {
 
 			ProductionCostUpdater.setTransportCosts(new double[] { 250.0 });
 			try {
-				// Supply meets demand, so nothing is exported: 200 x 8 = 1600, and the owner stays.
+				// Supply meets consumption, so nothing is exported: 200 x 8 = 1600, and the owner stays.
 				r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 100.0)));
 				invokePrivate(r, "computeMarginal");
 				invokePrivate(r, "utilitytyForAll");
@@ -1096,7 +1159,7 @@ class RegionalModelRunnerTest {
 				c.priceExplicitGiveUp(r);
 				assertSame(grower, c.getOwner());
 
-				// Supply ten times demand: 90 % is exported, 1600 - 8 x 0.9 x 250 = -200, and the owner gives up.
+				// Supply ten times consumption: 90 % is exported, 1600 - 8 x 0.9 x 250 = -200, and the owner gives up.
 				r.setRegionalSupply(new ConcurrentHashMap<>(Map.of("S1", 1000.0)));
 				invokePrivate(r, "computeMarginal");
 				invokePrivate(r, "utilitytyForAll");
