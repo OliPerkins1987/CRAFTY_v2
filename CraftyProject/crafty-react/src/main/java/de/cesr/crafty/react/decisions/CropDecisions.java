@@ -48,7 +48,8 @@ import de.cesr.crafty.react.science.ReactiveNitrogenStep;
  * required.</li>
  * <li><b>Fertiliser</b>, switched on: a Prospect AFT takes {@link ReactiveNitrogenStep#prospect} steps at
  * its service's price in the unit's region; a Capital AFT's N is
- * {@link IntensityFunctions#capitalNitrogen}, which needs no steps. Switched off: {@code Nfert_rate}.</li>
+ * {@link IntensityFunctions#capitalNitrogen}, from {@code react_N_min} up to {@code Nfert_rate} with its
+ * capital, which needs no steps. Switched off: {@code Nfert_rate}.</li>
  * <li><b>Everything reported</b> (water, level, yield, costs) is worked out at the final N (phase 3 plan,
  * Q3). The yield includes the technology term, with {@code ts} = years since the first model year; the
  * N step sees the same yields.</li>
@@ -219,7 +220,7 @@ public final class CropDecisions {
 							nitrogenPrice, aft.nPar(), nitrogenSettings);
 				}
 			} else if (mode == NitrogenMode.CAPITAL) {
-				n = IntensityFunctions.capitalNitrogen(anchor, nCapital[pixel], aft.nPar());
+				n = IntensityFunctions.capitalNitrogen(aft.nMin(), anchor, nCapital[pixel], aft.nPar());
 			} else {
 				n = anchor;
 			}

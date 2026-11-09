@@ -73,6 +73,7 @@ class ReactiveParametersTest {
 		assertEquals("CerealsC3", intensive.lpjgName());
 		assertEquals(NitrogenMode.PROSPECT, intensive.nMode());
 		assertEquals(0.0, intensive.nPar());
+		assertNull(intensive.nMin(), "react_N_min is a Capital AFT's");
 		assertEquals(0.9, intensive.iEff());
 		assertTrue(intensive.isIrrigated(), "Irrigated comes from core");
 		assertEquals(200, intensive.nitrogenBaseline(), "The N baseline is core's Nfert_rate");
@@ -83,6 +84,7 @@ class ReactiveParametersTest {
 		assertTrue(extensive.usesCapitalForN());
 		assertEquals("react_GDP_50", extensive.nCapital());
 		assertEquals(12.0, extensive.nPar());
+		assertEquals(0.0, extensive.nMin(), "a blank react_N_min is 0");
 		assertFalse(extensive.hasCapitalDrivenOtherIntensity(), "Both O columns blank: other intensity stays at baseline");
 
 		AftReactParameters pasture = parameters.get("IntP");
@@ -115,7 +117,7 @@ class ReactiveParametersTest {
 	@Test
 	void anUnknownReactColumnIsReported() {
 		ReactToyData.write(dir, "AFTs/react/Reactive_parameters.csv",
-				ReactToyData.PARAMETERS_HEADER + ",react_N_anchr", "IntFodder,AFT,0" + ",".repeat(12));
+				ReactToyData.PARAMETERS_HEADER + ",react_N_anchr", "IntFodder,AFT,0" + ",".repeat(13));
 		problems = new ArrayList<>();
 
 		ReactiveParameters.read(dir.resolve("AFTs/react/Reactive_parameters.csv"), services, context().build(), problems);
@@ -135,14 +137,26 @@ class ReactiveParametersTest {
 
 	@Test
 	void aSheetWithoutTheForestryColumnsStopsReadingNamingThem() {
-		// The sheet as it was before forestry: react_R_par was already there.
+		// The sheet as it was before forestry (react_R_par was already there), with react_N_min added.
 		Path sheet = ReactToyData.write(dir, "AFTs/react/Reactive_parameters.csv", "Label,react_isReactive,react_service,"
-				+ "react_N_type,react_N_capital,react_N_par,react_I_eff,react_O_capital,react_O_par,react_S_par,react_R_par");
+				+ "react_N_type,react_N_capital,react_N_min,react_N_par,react_I_eff,react_O_capital,react_O_par,"
+				+ "react_S_par,react_R_par");
 
 		ReactInputException e = assertThrows(ReactInputException.class,
 				() -> ReactiveParameters.read(sheet, services, context().build(), new ArrayList<>()));
 
 		assertTrue(e.getMessage().contains("[react_R_type, react_R_capital]"), e.getMessage());
+	}
+
+	@Test
+	void aSheetWithoutReactNMinStopsReadingNamingIt() {
+		Path sheet = ReactToyData.write(dir, "AFTs/react/Reactive_parameters.csv",
+				ReactToyData.PARAMETERS_HEADER.replace(",react_N_min", ""));
+
+		ReactInputException e = assertThrows(ReactInputException.class,
+				() -> ReactiveParameters.read(sheet, services, context().build(), new ArrayList<>()));
+
+		assertTrue(e.getMessage().contains("[react_N_min]"), e.getMessage());
 	}
 
 	@Test
@@ -278,6 +292,39 @@ class ReactiveParametersTest {
 		assertProblem("(Y)", "capital multiplier) must be above 0");
 	}
 
+	@Test
+	void aCapitalAftsNMinIsReadAndIsZeroWhenBlank() {
+		ReactiveParameters parameters = readRows(context().aft("Y", 60, 0.4, false, false),
+				ReactToyData.withNMin("X,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,", "20"),
+				"Y,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,");
+
+		assertNoProblems();
+		assertEquals(20.0, parameters.get("X").nMin());
+		assertEquals(0.0, parameters.get("Y").nMin());
+	}
+
+	@Test
+	void nMinMustBeFromZeroToNfertRate() {
+		// X's Nfert_rate is 200.
+		readRows(context(), ReactToyData.withNMin("X,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,", "200"));
+		assertNoProblems();
+
+		readRows(context(), ReactToyData.withNMin("X,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,", "-1"));
+		assertProblem("(X)", "react_N_min (a Capital AFT's N with no capital) must be 0 or more, not -1.0");
+
+		readRows(context().off(ReactElement.FERTILISER),
+				ReactToyData.withNMin("X,AFT,1,C3cereals,Capital,react_GDP_50,12,,,,,", "201"));
+		assertProblem("(X)", "react_N_min (201.0) must not be above Nfert_rate", "(200.0)");
+	}
+
+	@Test
+	void nMinOnAProspectAftIsAlwaysASlip() {
+		readRows(context().off(ReactElement.FERTILISER),
+				ReactToyData.withNMin("X,AFT,1,C3cereals,Prospect,,,,,,,", "20"));
+
+		assertProblem("(X)", "react_N_min does not apply to a Prospect AFT");
+	}
+
 	// ---- irrigation ----
 
 	@Test
@@ -348,9 +395,10 @@ class ReactiveParametersTest {
 
 	@Test
 	void nitrogenAndIrrigationColumnsDoNotApplyToPasture() {
-		readRows(context(), "IntP,AFT,1,Pasture,Prospect,,0,0.9,react_GDP_50,1,0,");
+		readRows(context(), ReactToyData.withNMin("IntP,AFT,1,Pasture,Prospect,,0,0.9,react_GDP_50,1,0,", "5"));
 
 		assertProblem("(IntP)", "react_N_type does not apply to a pasture AFT");
+		assertProblem("(IntP)", "react_N_min does not apply to a pasture AFT");
 		assertProblem("(IntP)", "react_N_par does not apply to a pasture AFT");
 		assertProblem("(IntP)", "react_I_eff does not apply to a pasture AFT");
 	}
@@ -388,7 +436,8 @@ class ReactiveParametersTest {
 	}
 
 	// ---- forestry ----
-	// Rows are written with all 14 fields; the last three are react_R_par, react_R_type, react_R_capital.
+	// Rows are written with 14 fields; the last three are react_R_par, react_R_type, react_R_capital
+	// (react_N_min is added after them, blank, unless a row gives all 15).
 
 	/** The standard context, plus the two toy forestry AFTs, with forestry on. */
 	private ReactToyData.Context forestryContext() {
@@ -484,10 +533,10 @@ class ReactiveParametersTest {
 	@Test
 	void cropAndPastureColumnsDoNotApplyToForestry() {
 		readRows(forestryContext(),
-				"IntBF,AFT,1,Hardwood,Prospect,react_GDP_50,1,0.9,react_GDP_50,0.2,0.1,,Prospect,");
+				"IntBF,AFT,1,Hardwood,Prospect,react_GDP_50,1,0.9,react_GDP_50,0.2,0.1,,Prospect,,5");
 
-		for (String column : List.of("react_N_type", "react_N_capital", "react_N_par", "react_I_eff", "react_O_capital",
-				"react_O_par", "react_S_par")) {
+		for (String column : List.of("react_N_type", "react_N_capital", "react_N_min", "react_N_par", "react_I_eff",
+				"react_O_capital", "react_O_par", "react_S_par")) {
 			assertProblem("(IntBF)", column + " does not apply to a forestry AFT; leave it blank");
 		}
 	}

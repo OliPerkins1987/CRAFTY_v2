@@ -31,14 +31,18 @@ public final class ReactToyData {
 
 	/**
 	 * The parameters sheet header, in the 27b layout (Type is kept, and ignored), with the forestry columns
-	 * {@code react_R_type} and {@code react_R_capital} last. The reader doesn't mind the order; putting them
-	 * last lets {@link #parameters} pad rows written before they existed.
+	 * {@code react_R_type} and {@code react_R_capital}, then {@code react_N_min}, last. The reader doesn't mind
+	 * the order; putting them last lets {@link #parameters} pad rows written before they existed.
 	 */
 	public static final String PARAMETERS_HEADER = "Label,Type,react_isReactive,react_service,react_N_type,react_N_capital,"
-			+ "react_N_par,react_I_eff,react_O_capital,react_O_par,react_S_par,react_R_par,react_R_type,react_R_capital";
+			+ "react_N_par,react_I_eff,react_O_capital,react_O_par,react_S_par,react_R_par,react_R_type,react_R_capital,"
+			+ "react_N_min";
 
-	/** How many fields a row had before the forestry columns: {@link #parameters} adds two blank ones to it. */
+	/** How many fields a row had before the forestry columns: {@link #parameters} adds three blank ones to it. */
 	private static final int FIELDS_BEFORE_FORESTRY = 12;
+
+	/** How many fields a row had before {@code react_N_min}: {@link #parameters} adds one blank one to it. */
+	private static final int FIELDS_BEFORE_N_MIN = 14;
 
 	/**
 	 * One AFT of each kind: an irrigated Prospect crop, an extensive Capital crop whose other intensity
@@ -154,16 +158,30 @@ public final class ReactToyData {
 
 	/**
 	 * The parameters sheet, with {@link #PARAMETERS_HEADER} and the given rows. A row written with the 12
-	 * fields of the sheet before the forestry columns gets them added, blank; other rows are written as given.
+	 * fields of the sheet before the forestry columns gets them and {@code react_N_min} added, blank; a row
+	 * written with the 14 fields before {@code react_N_min} gets it added, blank; other rows are written as
+	 * given.
 	 */
 	public static Path parameters(Path dir, String... rows) {
 		String[] lines = new String[rows.length + 1];
 		lines[0] = PARAMETERS_HEADER;
 		for (int i = 0; i < rows.length; i++) {
-			boolean beforeForestry = rows[i].split(",", -1).length == FIELDS_BEFORE_FORESTRY;
-			lines[i + 1] = beforeForestry ? rows[i] + ",," : rows[i];
+			int fields = rows[i].split(",", -1).length;
+			String padding = fields == FIELDS_BEFORE_FORESTRY ? ",,," : fields == FIELDS_BEFORE_N_MIN ? "," : "";
+			lines[i + 1] = rows[i] + padding;
 		}
 		return write(dir, "AFTs/react/Reactive_parameters.csv", lines);
+	}
+
+	/**
+	 * A row written with the 12 fields of the sheet before the forestry columns, with {@code react_N_min} set:
+	 * the forestry columns are added blank, then the minimum.
+	 */
+	public static String withNMin(String row, String nMin) {
+		if (row.split(",", -1).length != FIELDS_BEFORE_FORESTRY) {
+			throw new IllegalArgumentException("Expected a row with " + FIELDS_BEFORE_FORESTRY + " fields: " + row);
+		}
+		return row + ",,," + nMin;
 	}
 
 	/** {@link #STANDARD_ROWS} followed by {@link #FORESTRY_ROWS}. */

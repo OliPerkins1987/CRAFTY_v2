@@ -21,8 +21,9 @@ class IntensityFunctionsTest {
 
 	@Test
 	void capitalNitrogenMatchesR() {
+		// R has no minimum: its rule is the minimum-0 case.
 		GoldenCsv.check("capital_nitrogen", "N",
-				r -> IntensityFunctions.capitalNitrogen(r.get("baseline"), r.get("capital"), r.get("nPar")));
+				r -> IntensityFunctions.capitalNitrogen(0, r.get("baseline"), r.get("capital"), r.get("nPar")));
 	}
 
 	// ---- the rules, stated directly ----
@@ -46,9 +47,23 @@ class IntensityFunctionsTest {
 	}
 
 	@Test
-	void capitalNitrogenStaysBetweenZeroAndTheBaseline() {
-		assertEquals(200, IntensityFunctions.capitalNitrogen(200, 0.9, 2));
-		assertEquals(100, IntensityFunctions.capitalNitrogen(200, 0.25, 2), 1e-12);
-		assertEquals(0, IntensityFunctions.capitalNitrogen(200, -0.1, 2), "a negative capital gives 0, not less");
+	void capitalNitrogenWithNoMinimumStaysBetweenZeroAndTheMaximum() {
+		assertEquals(200, IntensityFunctions.capitalNitrogen(0, 200, 0.9, 2));
+		assertEquals(100, IntensityFunctions.capitalNitrogen(0, 200, 0.25, 2), 1e-12);
+		assertEquals(0, IntensityFunctions.capitalNitrogen(0, 200, -0.1, 2), "a negative capital gives 0, not less");
+	}
+
+	@Test
+	void capitalNitrogenRisesInAStraightLineFromTheMinimumToTheMaximum() {
+		assertEquals(20, IntensityFunctions.capitalNitrogen(20, 50, 0, 30), "no capital: the minimum");
+		assertEquals(27.5, IntensityFunctions.capitalNitrogen(20, 50, 0.25 / 30, 30), 1e-12,
+				"capital x nPar = 0.25: a quarter of the way from 20 to 50");
+		assertEquals(35, IntensityFunctions.capitalNitrogen(20, 50, 0.5 / 30, 30), 1e-12,
+				"capital x nPar = 0.5: half way from 20 to 50");
+		assertEquals(50, IntensityFunctions.capitalNitrogen(20, 50, 1.0 / 30, 30), 1e-12,
+				"capital x nPar = 1: the maximum, as with no minimum");
+		assertEquals(50, IntensityFunctions.capitalNitrogen(20, 50, 0.9, 30), "held at the maximum above that");
+		assertEquals(20, IntensityFunctions.capitalNitrogen(20, 50, -0.1, 30), "a negative capital gives the minimum");
+		assertEquals(50, IntensityFunctions.capitalNitrogen(50, 50, 0, 30), "a minimum at the maximum holds N there");
 	}
 }

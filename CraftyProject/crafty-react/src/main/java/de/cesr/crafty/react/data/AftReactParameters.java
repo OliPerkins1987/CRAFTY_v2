@@ -14,8 +14,8 @@ import java.util.Set;
  * whether the AFT irrigates is core's {@code Irrigated}.
  *
  * A {@code null} value means the cell was blank and nothing stands in for it. Where a blank has a
- * meaning, the default is already filled in: a Prospect AFT's {@code nPar} and {@code rPar}, and a pasture
- * AFT's {@code sPar}, are 0 when blank.
+ * meaning, the default is already filled in: a Prospect AFT's {@code nPar} and {@code rPar}, a Capital
+ * crops AFT's {@code nMin}, and a pasture AFT's {@code sPar}, are 0 when blank.
  *
  * @param label      the AFT
  * @param service    {@code react_service}
@@ -23,8 +23,10 @@ import java.util.Set;
  * @param lpjgName   the service's name in LPJ-GUESS column headers (not used for forestry)
  * @param nMode      {@code react_N_type}; null for pasture, or when blank
  * @param nCapital   {@code react_N_capital}: the capital a Capital AFT's N follows
+ * @param nMin       {@code react_N_min}: a Capital AFT's N with no capital, kg N/ha, from 0 to
+ *                   {@code Nfert_rate}; 0 when blank. Null for Prospect AFTs.
  * @param nPar       {@code react_N_par}: for Prospect, the inertia threshold per kg N (≥ 0); for
- *                   Capital, the multiplier (> 0)
+ *                   Capital, the multiplier (> 0): N reaches {@code Nfert_rate} where capital × nPar = 1
  * @param iEff       {@code react_I_eff}: irrigation efficiency (0, 1]
  * @param oCapital   {@code react_O_capital}: the capital other intensity follows
  * @param oPar       {@code react_O_par}: the {@code Eff_func} threshold (crops) or husbandry multiplier
@@ -37,7 +39,7 @@ import java.util.Set;
  * @param baseline   the AFT's baselines from core
  */
 public record AftReactParameters(String label, String service, LpjgType type, String lpjgName, NitrogenMode nMode,
-		String nCapital, Double nPar, Double iEff, String oCapital, Double oPar, Double sPar, RotationMode rMode,
+		String nCapital, Double nMin, Double nPar, Double iEff, String oCapital, Double oPar, Double sPar, RotationMode rMode,
 		String rCapital, Double rPar, ReactRunContext.AftBaseline baseline) {
 
 	/** The N baseline, kg N/ha: core's {@code Nfert_rate}. */

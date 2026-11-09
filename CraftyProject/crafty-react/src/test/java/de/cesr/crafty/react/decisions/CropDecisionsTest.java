@@ -246,6 +246,21 @@ class CropDecisionsTest {
 	}
 
 	@Test
+	void aCapitalAftsNRisesFromItsMinimumByHand() {
+		String[] rows = ReactToyData.STANDARD_ROWS.clone();
+		rows[1] = ReactToyData.withNMin("ExtC3C,AFT,1,C3cereals,Capital,react_GDP_50,1,,,,,", "40");
+		ReactToyData.parameters(dir, rows);
+		Run run = run();
+		run.decide(2020);
+
+		// react_N_min 40 + (Nfert_rate 100 - 40) x min(1, react_GDP_50 x 1)
+		double[] n = run.capital().nitrogen();
+		assertEquals(40 + 60 * 0.893, n[0], 1e-4, "pixel A, react_GDP_50 0.893");
+		assertEquals(40 + 60 * 0.696, n[2], 1e-4, "pixel B, react_GDP_50 0.696");
+		assertEquals((40 + 60 * 0.696) * 1.08, run.capital().nitrogenCost()[2], 1e-4);
+	}
+
+	@Test
 	void waterIsCappedByRunoffByHand() {
 		Run run = run();
 		run.decide(2020);

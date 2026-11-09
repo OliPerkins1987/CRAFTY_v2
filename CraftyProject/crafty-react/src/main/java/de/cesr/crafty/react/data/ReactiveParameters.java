@@ -14,7 +14,7 @@ import java.util.Set;
  * The reactive parameters sheet, {@code AFTs/react/Reactive_parameters.csv}: one row per AFT.
  *
  * <pre>
- * Label,react_isReactive,react_service,react_N_type,react_N_capital,react_N_par,react_I_eff,
+ * Label,react_isReactive,react_service,react_N_type,react_N_capital,react_N_min,react_N_par,react_I_eff,
  *      react_O_capital,react_O_par,react_S_par,react_R_type,react_R_capital,react_R_par
  * </pre>
  *
@@ -23,7 +23,7 @@ import java.util.Set;
  * from {@code Other_intensity}, and whether the AFT irrigates from {@code Irrigated}. For a forestry AFT,
  * {@code Other_intensity} holds its initial rotation in years.
  *
- * Columns other than {@code Label} and the twelve {@code react_} columns (for example {@code Type}) are
+ * Columns other than {@code Label} and the thirteen {@code react_} columns (for example {@code Type}) are
  * ignored. An unknown {@code react_} column is a problem, so that a mistyped column name is caught.
  *
  * Rows with {@code react_isReactive = 0} are not read further. For reactive rows, a value is only
@@ -40,6 +40,7 @@ public final class ReactiveParameters {
 	public static final String SERVICE = "react_service";
 	public static final String N_TYPE = "react_N_type";
 	public static final String N_CAPITAL = "react_N_capital";
+	public static final String N_MIN = "react_N_min";
 	public static final String N_PAR = "react_N_par";
 	public static final String I_EFF = "react_I_eff";
 	public static final String O_CAPITAL = "react_O_capital";
@@ -50,8 +51,8 @@ public final class ReactiveParameters {
 	public static final String R_PAR = "react_R_par";
 
 	/** Every react_ column the sheet must have. */
-	public static final List<String> REACT_COLUMNS = List.of(IS_REACTIVE, SERVICE, N_TYPE, N_CAPITAL, N_PAR, I_EFF,
-			O_CAPITAL, O_PAR, S_PAR, R_TYPE, R_CAPITAL, R_PAR);
+	public static final List<String> REACT_COLUMNS = List.of(IS_REACTIVE, SERVICE, N_TYPE, N_CAPITAL, N_MIN, N_PAR,
+			I_EFF, O_CAPITAL, O_PAR, S_PAR, R_TYPE, R_CAPITAL, R_PAR);
 
 	private final Path file;
 	private final List<String> labels;
@@ -158,6 +159,7 @@ public final class ReactiveParameters {
 			}
 		}
 		String nCapital = r.textOrNull(N_CAPITAL);
+		Double nMin = r.number(N_MIN);
 		Double nPar = r.number(N_PAR);
 		Double iEff = r.number(I_EFF);
 		String oCapital = r.textOrNull(O_CAPITAL);
@@ -193,12 +195,13 @@ public final class ReactiveParameters {
 		}
 
 		if (type == LpjgType.FORESTRY) {
-			for (String column : List.of(N_TYPE, N_CAPITAL, N_PAR, I_EFF, O_CAPITAL, O_PAR, S_PAR)) {
+			for (String column : List.of(N_TYPE, N_CAPITAL, N_MIN, N_PAR, I_EFF, O_CAPITAL, O_PAR, S_PAR)) {
 				if (!r.text(column).isEmpty()) {
 					r.problem(column + " does not apply to a forestry AFT; leave it blank");
 				}
 			}
 			nMode = null;
+			nMin = null;
 
 			// The rotation, as the crops AFTs' fertiliser: react_R_type, react_R_capital and react_R_par
 			// stand where react_N_type, react_N_capital and react_N_par do, and forestry's switch where
@@ -227,12 +230,13 @@ public final class ReactiveParameters {
 						+ " (e.g. 50), and must be above 0, not " + baseline.otherIntensity());
 			}
 		} else if (type == LpjgType.PASTURE) {
-			for (String column : List.of(N_TYPE, N_CAPITAL, N_PAR, I_EFF)) {
+			for (String column : List.of(N_TYPE, N_CAPITAL, N_MIN, N_PAR, I_EFF)) {
 				if (!r.text(column).isEmpty()) {
 					r.problem(column + " does not apply to a pasture AFT; leave it blank");
 				}
 			}
 			nMode = null;
+			nMin = null;
 			if (otherIntensity) {
 				r.require(O_CAPITAL, "a pasture AFT when other intensity is reactive");
 				r.require(O_PAR, "a pasture AFT when other intensity is reactive");
@@ -258,6 +262,9 @@ public final class ReactiveParameters {
 			if (nMode == NitrogenMode.PROSPECT && nCapital != null) {
 				r.problem(N_CAPITAL + " does not apply to a Prospect AFT; leave it blank");
 			}
+			if (nMode == NitrogenMode.PROSPECT && !r.text(N_MIN).isEmpty()) {
+				r.problem(N_MIN + " does not apply to a Prospect AFT; leave it blank");
+			}
 			if (fertiliser) {
 				if (nTypeText.isEmpty()) {
 					r.require(N_TYPE, "a crops AFT when fertiliser is reactive");
@@ -280,6 +287,17 @@ public final class ReactiveParameters {
 			}
 			if (nMode == NitrogenMode.CAPITAL && nPar != null && nPar <= 0) {
 				r.problem(N_PAR + " (the capital multiplier) must be above 0, not " + nPar);
+			}
+			// A Capital AFT's N rises from react_N_min with no capital to Nfert_rate (blank: from 0).
+			if (nMode == NitrogenMode.CAPITAL) {
+				if (nMin == null) {
+					nMin = 0.0;
+				} else if (nMin < 0) {
+					r.problem(N_MIN + " (a Capital AFT's N with no capital) must be 0 or more, not " + nMin);
+				} else if (nMin > baseline.nfertRate()) {
+					r.problem(N_MIN + " (" + nMin + ") must not be above Nfert_rate in AFTsMetaData.csv ("
+							+ baseline.nfertRate() + "): a Capital AFT's N rises from " + N_MIN + " to Nfert_rate");
+				}
 			}
 
 			// Irrigation.
@@ -310,8 +328,8 @@ public final class ReactiveParameters {
 			}
 		}
 
-		return new AftReactParameters(label, service, type, services.lpjgName(service), nMode, nCapital, nPar, iEff,
-				oCapital, oPar, sPar, rMode, rCapital, rPar, baseline);
+		return new AftReactParameters(label, service, type, services.lpjgName(service), nMode, nCapital, nMin, nPar,
+				iEff, oCapital, oPar, sPar, rMode, rCapital, rPar, baseline);
 	}
 
 	public Path file() {

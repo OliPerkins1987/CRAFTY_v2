@@ -49,15 +49,18 @@ public final class IntensityFunctions {
 	}
 
 	/**
-	 * A Capital AFT's N: its baseline, scaled down where the capital is low. R's
-	 * {@code pmin(N_base, N_base × GDP × N_sense)}, also kept from going below 0.
+	 * A Capital AFT's N: its minimum with no capital, rising in a straight line with the capital to its
+	 * maximum, and held there: {@code minimum + (maximum − minimum) × min(1, capital × nPar)}, also kept from
+	 * going below the minimum. N reaches the maximum where {@code capital × nPar = 1}, whatever the minimum.
+	 * With a minimum of 0 this is R's {@code pmin(N_base, N_base × GDP × N_sense)}.
 	 *
-	 * @param baseline the AFT's {@code Nfert_rate} from core, kg N/ha
-	 * @param capital  the AFT's {@code react_N_capital} at this pixel
-	 * @param nPar     the AFT's {@code react_N_par}: the capital multiplier
-	 * @return N, kg/ha, between 0 and the baseline
+	 * @param minimum the AFT's {@code react_N_min}, kg N/ha (0 when blank), at most the maximum
+	 * @param maximum the AFT's {@code Nfert_rate} from core, kg N/ha
+	 * @param capital the AFT's {@code react_N_capital} at this pixel
+	 * @param nPar    the AFT's {@code react_N_par}: the capital multiplier
+	 * @return N, kg/ha, between the minimum and the maximum
 	 */
-	public static double capitalNitrogen(double baseline, double capital, double nPar) {
-		return baseline * YieldResponse.clamp01(capital * nPar);
+	public static double capitalNitrogen(double minimum, double maximum, double capital, double nPar) {
+		return minimum + (maximum - minimum) * YieldResponse.clamp01(capital * nPar);
 	}
 }

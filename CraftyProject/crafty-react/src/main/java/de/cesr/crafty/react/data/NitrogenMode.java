@@ -6,7 +6,9 @@ package de.cesr.crafty.react.data;
  * <li>{@code Prospect}: responds to price through prospect theory. {@code react_N_par} is the AFT's
  * inertia: how much better, per kg N, a change in net return must be before the AFT acts on it. It is
  * subtracted from the marginal return before the value function, so 0 means "act on any gain";</li>
- * <li>{@code Capital}: follows a capital, {@code N = Nfert_rate × min(1, capital × react_N_par)}.</li>
+ * <li>{@code Capital}: follows a capital, rising in a straight line from {@code react_N_min} (0 when blank)
+ * to {@code Nfert_rate}:
+ * {@code N = react_N_min + (Nfert_rate − react_N_min) × min(1, capital × react_N_par)}.</li>
  * </ul>
  * Case is ignored when reading.
  */
