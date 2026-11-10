@@ -38,7 +38,8 @@ import de.cesr.crafty.react.science.ReactiveNitrogenStep;
  * <ul>
  * <li><b>Spin-up.</b> k is {@code spinup_iterations} in the first year decided and 1 after that. N starts
  * at the AFT's {@code Nfert_rate} in the first year and at last year's N after that. The anchor
- * ({@code Nfert_rate}) and Nmax ({@code n_max_factor × Nfert_rate}) never move.</li>
+ * ({@code Nfert_rate}), Nmin ({@code n_min_factor × Nfert_rate}, Prospect AFTs only) and Nmax
+ * ({@code n_max_factor × Nfert_rate}) never move.</li>
  * <li><b>Other intensity</b>, switched on: {@code Eff_func} of the AFT's {@code react_O_capital}, with
  * {@code Other_intensity} as the floor and {@code react_O_par} as the threshold. With the element off, or
  * with no {@code react_O_capital}: {@code Other_intensity}.</li>
@@ -47,7 +48,7 @@ import de.cesr.crafty.react.science.ReactiveNitrogenStep;
  * the water applied is what is required, but no more than the runoff, and the level is applied ÷
  * required.</li>
  * <li><b>Fertiliser</b>, switched on: a Prospect AFT takes {@link ReactiveNitrogenStep#prospect} steps at
- * its service's price in the unit's region; a Capital AFT's N is
+ * its service's price in the unit's region, between Nmin and Nmax; a Capital AFT's N is
  * {@link IntensityFunctions#capitalNitrogen}, from {@code react_N_min} up to {@code Nfert_rate} with its
  * capital, which needs no steps. Switched off: {@code Nfert_rate}.</li>
  * <li><b>Everything reported</b> (water, level, yield, costs) is worked out at the final N (phase 3 plan,
@@ -185,6 +186,7 @@ public final class CropDecisions {
 		AftReactParameters aft = m.aft();
 		double tech = config.yieldTechChange();
 		double anchor = aft.nitrogenBaseline();
+		double minimum = config.nMinFactor() * anchor;
 		double maximum = m.nitrogenMaximum();
 		double floor = aft.otherIntensityBaseline();
 		CropSurfaces.Surface surface = surfaces.crop(aft.lpjgName());
@@ -215,7 +217,7 @@ public final class CropDecisions {
 					double level = irrigated
 							? water(waterDemand, runoff[pixel], pixel, irrigation ? n : anchor, efficiency).level()
 							: 0;
-					n = ReactiveNitrogenStep.prospect(n, anchor, maximum,
+					n = ReactiveNitrogenStep.prospect(n, minimum, anchor, maximum,
 							nitrogen -> surface.yield(pixel, nitrogen, level, o, tech, yearsSinceStart), price[unit],
 							nitrogenPrice, aft.nPar(), nitrogenSettings);
 				}

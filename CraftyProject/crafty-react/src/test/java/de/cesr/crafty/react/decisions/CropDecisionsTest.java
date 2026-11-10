@@ -93,7 +93,8 @@ class CropDecisionsTest {
 			double level = Irrigation.level(Irrigation.applied(required, data.runoff()[pixel]), required);
 			double yearsSinceStart = data.year() - ReactToyData.FIRST_YEAR;
 			CropSurfaces.Surface surface = surfaces.crop(CROP);
-			return ReactiveNitrogenStep.prospect(nitrogen, 200, 300,
+			// Nmin 100: the default n_min_factor 0.5 x Nfert_rate 200.
+			return ReactiveNitrogenStep.prospect(nitrogen, 100, 200, 300,
 					n -> surface.yield(pixel, n, level, o, 0, yearsSinceStart), price, 1.08, 0, DEFAULT_SETTINGS);
 		}
 	}
@@ -191,6 +192,43 @@ class CropDecisionsTest {
 		CropSurfaces surfaces2020 = CropSurfaces.fit(year2020);
 
 		assertThrows(IllegalArgumentException.class, () -> run.crops.decide(year2020, surfaces2020, run.prices(2021)));
+	}
+
+	// ---- Nmin (47a) ----
+
+	@Test
+	void aProspectAftsNStopsAtNMinFactorTimesItsAnchor() {
+		// At 0.01 $/t every step is a loss. N falls slowly at first, so 40 spin-up steps take it to the floor.
+		settings("spinup_iterations: 40");
+		Run run = run(ReactToyData.context(dir).prices((service, region, year) -> 0.01));
+		run.decide(2020);
+
+		assertArrayEquals(new double[] { 100, 100, 100 }, run.irrigated().nitrogen(), 0,
+				"the default n_min_factor 0.5 x Nfert_rate 200");
+	}
+
+	@Test
+	void nMinFactorComesFromTheSettings() {
+		settings("spinup_iterations: 40", "n_min_factor: 0");
+		Run run = run(ReactToyData.context(dir).prices((service, region, year) -> 0.01));
+		run.decide(2020);
+
+		assertArrayEquals(new double[] { 0, 0, 0 }, run.irrigated().nitrogen(), 0, "n_min_factor 0: N can fall to 0");
+	}
+
+	@Test
+	void atNminAGoodPriceBringsNBackUp() {
+		// 300 $/t moves N part of the way, so where the step starts shows in where it ends.
+		settings("spinup_iterations: 40");
+		Run run = run(ReactToyData.context(dir).prices((service, region, year) -> year == 2020 ? 0.01 : 300));
+		run.decide(2020);
+		run.decide(2021);
+
+		for (int unit = 0; unit < 3; unit++) {
+			double n = run.irrigated().nitrogen()[unit];
+			assertEquals(run.stepByHand(unit, 100, 300), n, 1e-12, "unit " + unit + ": one step up from Nmin");
+			assertTrue(n > 100 && n < 300, "unit " + unit + " left the floor, part of the way: " + n);
+		}
 	}
 
 	// ---- regions ----

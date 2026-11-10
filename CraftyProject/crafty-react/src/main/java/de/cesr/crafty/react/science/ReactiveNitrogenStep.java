@@ -11,14 +11,18 @@ import java.util.function.DoubleUnaryOperator;
  * up to the anchor would. The return per extra kg of N, less its cost, is judged with prospect theory,
  * and N moves part of the way towards the bound in question: the fraction moved is
  * {@code (value × adjustmentScale)²}, and the direction comes from the gain or loss. N stays in
- * {@code [0, Nmax]}.
+ * {@code [Nmin, Nmax]}.
  *
  * There are two versions:
  * <ul>
- * <li>{@link #asInR}: exactly the calibration rule, kept so the golden test can check the port;</li>
- * <li>{@link #prospect}: the rule the model uses, which differs <b>only when N is at Nmax</b>. There R's
- * rule sees no return and no room to move, so N can never come down again. The fix judges the return on
- * the N above the anchor, and on a loss moves N back towards the anchor (phase 2 plan, Q-C).</li>
+ * <li>{@link #asInR}: exactly the calibration rule, with Nmin 0, kept so the golden test can check the
+ * port;</li>
+ * <li>{@link #prospect}: the rule the model uses, which differs in two ways. <b>At Nmax</b>, R's rule sees
+ * no return and no room to move, so N can never come down again. The fix judges the return on the N above
+ * the anchor, and on a loss moves N back towards the anchor (phase 2 plan, Q-C). <b>Nmin</b> is a floor
+ * ({@code n_min_factor × Nfert_rate}, 47a) that only stops a move: below the anchor the AFT still asks
+ * whether going back up to the anchor would pay, so at Nmin the return is never empty and N is not stuck
+ * there the way R's rule is at Nmax.</li>
  * </ul>
  *
  * Units are real: yields in t/ha, N in kg/ha, price in $/t and the N cost in $/kg N. R works in kg/m²
@@ -41,9 +45,10 @@ public final class ReactiveNitrogenStep {
 	}
 
 	/**
-	 * One step, with the fix for N at Nmax. This is the rule the model uses.
+	 * One step, with the fix for N at Nmax and the floor at Nmin. This is the rule the model uses.
 	 *
 	 * @param nitrogen  N now, kg/ha
+	 * @param minimum   Nmin: {@code n_min_factor × Nfert_rate}, kg/ha (0 to the anchor)
 	 * @param anchor    the AFT's {@code Nfert_rate}, kg/ha
 	 * @param maximum   Nmax: {@code n_max_factor × Nfert_rate}, kg/ha
 	 * @param yieldAt   the pixel's yield (t/ha) at a given N, with irrigation level and other intensity fixed
@@ -52,19 +57,23 @@ public final class ReactiveNitrogenStep {
 	 * @param reference the AFT's {@code react_N_par}: the prospect reference point, $/kg N
 	 * @return N after the step, kg/ha
 	 */
-	public static double prospect(double nitrogen, double anchor, double maximum, DoubleUnaryOperator yieldAt,
-			double price, double nCost, double reference, Settings settings) {
-		return step(nitrogen, anchor, maximum, yieldAt, price, nCost, reference, settings, true);
+	public static double prospect(double nitrogen, double minimum, double anchor, double maximum,
+			DoubleUnaryOperator yieldAt, double price, double nCost, double reference, Settings settings) {
+		return step(nitrogen, minimum, anchor, maximum, yieldAt, price, nCost, reference, settings, true);
 	}
 
-	/** One step, exactly as the calibration code has it: N at Nmax never comes down. For the golden test. */
+	/**
+	 * One step, exactly as the calibration code has it: N at Nmax never comes down, and N can fall to 0. For
+	 * the golden test.
+	 */
 	public static double asInR(double nitrogen, double anchor, double maximum, DoubleUnaryOperator yieldAt,
 			double price, double nCost, double reference, Settings settings) {
-		return step(nitrogen, anchor, maximum, yieldAt, price, nCost, reference, settings, false);
+		return step(nitrogen, 0, anchor, maximum, yieldAt, price, nCost, reference, settings, false);
 	}
 
-	private static double step(double nitrogen, double anchor, double maximum, DoubleUnaryOperator yieldAt,
-			double price, double nCost, double reference, Settings settings, boolean fixAtMaximum) {
+	private static double step(double nitrogen, double minimum, double anchor, double maximum,
+			DoubleUnaryOperator yieldAt, double price, double nCost, double reference, Settings settings,
+			boolean fixAtMaximum) {
 		boolean atOrAboveAnchor = nitrogen >= anchor;
 		// R tests Ncur == Nmax exactly. That works because N only reaches Nmax through the clamp below,
 		// which sets it to Nmax exactly.
@@ -101,6 +110,8 @@ public final class ReactiveNitrogenStep {
 
 		double scaled = value * settings.adjustmentScale();
 		double next = scaled * scaled * span + nitrogen;
-		return next > maximum ? maximum : next < 0 ? 0 : next;
+		// Nmin only stops a move down. The next step below the anchor still weighs going back up to the
+		// anchor, which is never an empty interval while Nmin < anchor, so N at Nmin can always rise again.
+		return next > maximum ? maximum : next < minimum ? minimum : next;
 	}
 }

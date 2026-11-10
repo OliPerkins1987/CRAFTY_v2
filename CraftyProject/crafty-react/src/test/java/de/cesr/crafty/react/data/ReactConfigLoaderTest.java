@@ -35,6 +35,7 @@ class ReactConfigLoaderTest {
 
 		assertEquals(ReactConfig.defaults().toString(), config.toString());
 		assertEquals(10, config.spinupIterations(), "For N and stocking alike (phase 4 plan, Q2)");
+		assertEquals(0.5, config.nMinFactor(), "Prospect AFTs keep at least half their anchor (47a)");
 		assertEquals(1.5, config.nMaxFactor());
 		assertEquals(0.15, config.nAdjustmentScale());
 		assertEquals(0.88, config.prospectAlpha());
@@ -110,6 +111,7 @@ class ReactConfigLoaderTest {
 				"  yield_file_units: t_per_ha",
 				"  irrigation_file_units: m3_per_ha",
 				"spinup_iterations: 7",
+				"n_min_factor: 0.25",
 				"n_max_factor: 2",
 				"prospect:",
 				"  lambda: 3",
@@ -125,6 +127,7 @@ class ReactConfigLoaderTest {
 		assertEquals(1, config.yieldFileUnits().toTonnesPerHectare());
 		assertEquals(1, config.irrigationFileUnits().toCubicMetresPerHectare());
 		assertEquals(7, config.spinupIterations(), "Not the default of 10, so the file's value is what was read");
+		assertEquals(0.25, config.nMinFactor());
 		assertEquals(2.0, config.nMaxFactor(), "A whole number is fine where a number is expected");
 		assertEquals(3.0, config.prospectLambda());
 		assertEquals(0.88, config.prospectAlpha(), "Unset keys in a section keep their defaults");
@@ -245,6 +248,19 @@ class ReactConfigLoaderTest {
 		assertTrue(message.contains("0 < min <= initial <= max"), message);
 		assertTrue(message.contains("yield_tech_change must be above -1"), message);
 		assertTrue(message.contains("stocking.harvest must be above 0 and at most 1"), message);
+	}
+
+	@Test
+	void nMinFactorMustBeFrom0To1() {
+		String outOfRange = "n_min_factor must be between 0 and 1";
+		assertMessage(outOfRange, "n_min_factor: -0.1");
+		assertMessage(outOfRange, "n_min_factor: 1.5");
+		assertMessage("n_min_factor must be a number", "n_min_factor: half");
+
+		writeConfig("n_min_factor: 1");
+		assertEquals(1.0, ReactConfigLoader.load(project).nMinFactor(), "1 is allowed: N never falls below the anchor");
+		writeConfig("n_min_factor: 0");
+		assertEquals(0.0, ReactConfigLoader.load(project).nMinFactor(), "0 is allowed: N can fall to 0, as in R");
 	}
 
 	// ---- forestry (32b) ----

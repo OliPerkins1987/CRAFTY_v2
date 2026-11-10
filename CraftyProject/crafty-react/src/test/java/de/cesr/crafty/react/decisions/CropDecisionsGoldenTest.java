@@ -31,7 +31,8 @@ import de.cesr.crafty.react.science.GoldenCsv;
  *
  * This test writes that world as a toy project, runs {@link CropDecisions} over the same three years with
  * the default settings, apart from the spin-up: 5 steps, as the R script has them (the default is now 10),
- * then 1 a year. It checks every row, one test per quantity. The
+ * then 1 a year; and Nmin: 0, as R has it (the default is now 0.5 × Nfert_rate, 47a). It checks every row,
+ * one test per quantity. The
  * world has pixels in two regions with different prices, units that reach Nmax and come back down after a
  * price crash, units that fall below the anchor, and pixels short of water.
  */
@@ -97,7 +98,8 @@ class CropDecisionsGoldenTest {
 		ReactToyData.services(dir);
 		ReactToyData.globalCosts(dir);
 		ReactToyData.parameters(dir, ROWS);
-		ReactToyData.write(dir, ReactConfigLoader.LOCATION.toString(), "spinup_iterations: " + SPINUP_STEPS);
+		ReactToyData.write(dir, ReactConfigLoader.LOCATION.toString(), "spinup_iterations: " + SPINUP_STEPS,
+				"n_min_factor: 0");
 		ReactToyData.Context context = ReactToyData.context(dir).years(FIRST_YEAR, LAST_YEAR)
 				.withoutAft("IntP").withoutAft("IntFodder").withoutAft("AF").withoutAft("Urban")
 				.aft("IntC3C_irrig", 200, 0.75, true, false)

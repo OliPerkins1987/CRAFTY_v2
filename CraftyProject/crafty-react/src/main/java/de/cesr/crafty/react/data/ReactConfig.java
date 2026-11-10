@@ -89,6 +89,9 @@ public final class ReactConfig {
 	// ---- tunable settings (phases 3 and 4 use these) ----
 	// Steps taken in the first year decided, for N and stocking alike, before one step a year.
 	int spinupIterations = 10;
+	// The least N a Prospect AFT can use, as a share of its anchor (Nfert_rate). Capital AFTs have their own
+	// minimum, react_N_min in the parameters sheet.
+	double nMinFactor = 0.5;
 	double nMaxFactor = 1.5;
 	double nAdjustmentScale = 0.15;
 	// The prospect reference point is not a setting here: it is each Prospect AFT's react_N_par
@@ -196,6 +199,11 @@ public final class ReactConfig {
 
 	public int spinupIterations() {
 		return spinupIterations;
+	}
+
+	/** Nmin for a Prospect AFT, as a share of its anchor: Nmin = {@code n_min_factor × Nfert_rate}. */
+	public double nMinFactor() {
+		return nMinFactor;
 	}
 
 	public double nMaxFactor() {
@@ -311,6 +319,10 @@ public final class ReactConfig {
 		if (spinupIterations < 0) {
 			problems.add("spinup_iterations must be 0 or more");
 		}
+		if (!(0 <= nMinFactor && nMinFactor <= 1)) {
+			problems.add("n_min_factor must be between 0 and 1, so the least N a Prospect AFT can use is not above its"
+					+ " anchor");
+		}
 		if (nMaxFactor < 1) {
 			problems.add("n_max_factor must be at least 1, so the most N an AFT can use is not below its anchor");
 		}
@@ -379,6 +391,7 @@ public final class ReactConfig {
 				"inputs.irrigation_file_units: " + irrigationFileUnits + " (x"
 						+ irrigationFileUnits.toCubicMetresPerHectare() + " -> m3/ha)",
 				"spinup_iterations: " + spinupIterations,
+				"n_min_factor: " + nMinFactor,
 				"n_max_factor: " + nMaxFactor,
 				"n_adjustment_scale: " + nAdjustmentScale,
 				"prospect: alpha " + prospectAlpha + ", beta " + prospectBeta

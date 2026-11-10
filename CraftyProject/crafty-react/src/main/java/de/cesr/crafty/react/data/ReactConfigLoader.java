@@ -92,6 +92,7 @@ public final class ReactConfigLoader {
 		inputs.rejectUnknownKeys();
 
 		c.spinupIterations = root.wholeNumber("spinup_iterations", c.spinupIterations);
+		c.nMinFactor = root.number("n_min_factor", c.nMinFactor);
 		c.nMaxFactor = root.number("n_max_factor", c.nMaxFactor);
 		c.nAdjustmentScale = root.number("n_adjustment_scale", c.nAdjustmentScale);
 

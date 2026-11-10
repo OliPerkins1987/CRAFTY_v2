@@ -38,7 +38,7 @@ class ReactiveNitrogenStepTest {
 		double n = row.get("nStart");
 		for (int step = 0; step < (int) row.get("steps"); step++) {
 			n = fixed
-					? ReactiveNitrogenStep.prospect(n, row.get("nBase"), row.get("nMax"), yieldAt, row.get("price"),
+					? ReactiveNitrogenStep.prospect(n, 0, row.get("nBase"), row.get("nMax"), yieldAt, row.get("price"),
 							row.get("nCost"), row.get("ref"), settings)
 					: ReactiveNitrogenStep.asInR(n, row.get("nBase"), row.get("nMax"), yieldAt, row.get("price"),
 							row.get("nCost"), row.get("ref"), settings);
@@ -55,7 +55,7 @@ class ReactiveNitrogenStepTest {
 	void aHandWorkedStepWithNoHiddenTimesTen() {
 		// Return 0.01 t/kg x $200/t = $2/kg, less $1/kg for the N: a gain of 1, so the value is 1^0.88 = 1.
 		// N moves (1 x 0.15)^2 = 2.25% of the way from 200 up to Nmax 300: 2.25 kg.
-		assertEquals(202.25, ReactiveNitrogenStep.prospect(200, 200, 300, STRAIGHT_LINE, 200, 1, 0, SETTINGS), 1e-9);
+		assertEquals(202.25, ReactiveNitrogenStep.prospect(200, 0, 200, 300, STRAIGHT_LINE, 200, 1, 0, SETTINGS), 1e-9);
 		assertEquals(202.25, ReactiveNitrogenStep.asInR(200, 200, 300, STRAIGHT_LINE, 200, 1, 0, SETTINGS), 1e-9);
 	}
 
@@ -63,7 +63,7 @@ class ReactiveNitrogenStepTest {
 	void atNmaxAndPricesDropRsRuleIsStuckButTheFixMovesNBackTowardsTheAnchor() {
 		// At Nmax the return on the N above the anchor is 0.01 t/kg x $50/t = $0.5/kg, less $1/kg: a loss.
 		double stuck = ReactiveNitrogenStep.asInR(300, 200, 300, STRAIGHT_LINE, 50, 1, 0, SETTINGS);
-		double fixed = ReactiveNitrogenStep.prospect(300, 200, 300, STRAIGHT_LINE, 50, 1, 0, SETTINGS);
+		double fixed = ReactiveNitrogenStep.prospect(300, 0, 200, 300, STRAIGHT_LINE, 50, 1, 0, SETTINGS);
 
 		assertEquals(300, stuck, "R's rule sees no return and no room to move at Nmax");
 		// value = -2.25 x 0.5^0.88; N moves (value x 0.15)^2 of the way from Nmax back to the anchor.
@@ -75,7 +75,7 @@ class ReactiveNitrogenStepTest {
 	@Test
 	void atNmaxAndStillProfitableNStaysUnderBothRules() {
 		assertEquals(300, ReactiveNitrogenStep.asInR(300, 200, 300, STRAIGHT_LINE, 500, 1, 0, SETTINGS));
-		assertEquals(300, ReactiveNitrogenStep.prospect(300, 200, 300, STRAIGHT_LINE, 500, 1, 0, SETTINGS));
+		assertEquals(300, ReactiveNitrogenStep.prospect(300, 0, 200, 300, STRAIGHT_LINE, 500, 1, 0, SETTINGS));
 	}
 
 	@Test
@@ -84,7 +84,7 @@ class ReactiveNitrogenStepTest {
 		for (double n : new double[] { 0, 50, 199.9, 200, 250, 299.999 }) {
 			for (double price : new double[] { 30, 300, 3000 }) {
 				assertEquals(ReactiveNitrogenStep.asInR(n, 200, 300, curve, price, 1.08, 0.2, SETTINGS),
-						ReactiveNitrogenStep.prospect(n, 200, 300, curve, price, 1.08, 0.2, SETTINGS),
+						ReactiveNitrogenStep.prospect(n, 0, 200, 300, curve, price, 1.08, 0.2, SETTINGS),
 						"N " + n + ", price " + price);
 			}
 		}
@@ -92,22 +92,58 @@ class ReactiveNitrogenStepTest {
 
 	@Test
 	void whenNmaxIsTheAnchorNStaysThere() {
-		assertEquals(200, ReactiveNitrogenStep.prospect(200, 200, 200, STRAIGHT_LINE, 50, 1, 0, SETTINGS));
-		assertEquals(200, ReactiveNitrogenStep.prospect(200, 200, 200, STRAIGHT_LINE, 5000, 1, 0, SETTINGS));
+		assertEquals(200, ReactiveNitrogenStep.prospect(200, 0, 200, 200, STRAIGHT_LINE, 50, 1, 0, SETTINGS));
+		assertEquals(200, ReactiveNitrogenStep.prospect(200, 0, 200, 200, STRAIGHT_LINE, 5000, 1, 0, SETTINGS));
 	}
 
 	@Test
 	void aLargeGainTakesNToNmaxExactlyAndALargeLossToZero() {
-		assertEquals(300, ReactiveNitrogenStep.prospect(250, 200, 300, STRAIGHT_LINE, 100_000, 1, 0, SETTINGS),
+		assertEquals(300, ReactiveNitrogenStep.prospect(250, 0, 200, 300, STRAIGHT_LINE, 100_000, 1, 0, SETTINGS),
 				"clamped to Nmax, exactly, so the next step sees N == Nmax");
-		assertEquals(0, ReactiveNitrogenStep.prospect(100, 200, 300, STRAIGHT_LINE, 0, 1000, 0, SETTINGS), 1e-15,
+		assertEquals(0, ReactiveNitrogenStep.prospect(100, 0, 200, 300, STRAIGHT_LINE, 0, 1000, 0, SETTINGS), 1e-15,
 				"clamped to 0");
 	}
 
 	@Test
 	void theReferencePointMustBeBeatenBeforeAReturnCountsAsAGain() {
 		// The same $1/kg net return: a gain with reference 0, a loss with reference 1.5.
-		assertTrue(ReactiveNitrogenStep.prospect(200, 200, 300, STRAIGHT_LINE, 200, 1, 0, SETTINGS) > 200);
-		assertTrue(ReactiveNitrogenStep.prospect(200, 200, 300, STRAIGHT_LINE, 200, 1, 1.5, SETTINGS) < 200);
+		assertTrue(ReactiveNitrogenStep.prospect(200, 0, 200, 300, STRAIGHT_LINE, 200, 1, 0, SETTINGS) > 200);
+		assertTrue(ReactiveNitrogenStep.prospect(200, 0, 200, 300, STRAIGHT_LINE, 200, 1, 1.5, SETTINGS) < 200);
+	}
+
+	// ---- Nmin (47a) ----
+
+	@Test
+	void aLargeLossStopsAtNminExactly() {
+		assertEquals(100, ReactiveNitrogenStep.prospect(150, 100, 200, 300, STRAIGHT_LINE, 0, 1000, 0, SETTINGS));
+	}
+
+	@Test
+	void atNminAPayingReturnBringsNBackUpTowardsTheAnchor() {
+		// At Nmin the AFT still weighs going back up to the anchor: 0.01 t/kg x $200/t, less $1/kg, is a gain of
+		// 1, so N moves (1 x 0.15)^2 = 2.25% of the way from 100 up to 200. Nothing sticks at the floor.
+		assertEquals(102.25, ReactiveNitrogenStep.prospect(100, 100, 200, 300, STRAIGHT_LINE, 200, 1, 0, SETTINGS), 1e-9);
+	}
+
+	@Test
+	void atNminALossKeepsNThere() {
+		assertEquals(100, ReactiveNitrogenStep.prospect(100, 100, 200, 300, STRAIGHT_LINE, 50, 1, 0, SETTINGS));
+	}
+
+	@Test
+	void nminOnlyStopsAMoveThatWouldGoBelowIt() {
+		DoubleUnaryOperator curve = n -> 2 + 4 * (1 - Math.exp(-3 * n / 1000));
+		for (double n : new double[] { 100, 120, 199.9, 200, 250, 300 }) {
+			for (double price : new double[] { 0.3, 30, 300, 3000 }) {
+				double free = ReactiveNitrogenStep.prospect(n, 0, 200, 300, curve, price, 1.08, 0.2, SETTINGS);
+				double floored = ReactiveNitrogenStep.prospect(n, 100, 200, 300, curve, price, 1.08, 0.2, SETTINGS);
+				assertEquals(Math.max(100, free), floored, "N " + n + ", price " + price);
+			}
+		}
+	}
+
+	@Test
+	void whenNminIsTheAnchorNNeverFallsBelowIt() {
+		assertEquals(200, ReactiveNitrogenStep.prospect(200, 200, 200, 300, STRAIGHT_LINE, 50, 1, 0, SETTINGS));
 	}
 }
