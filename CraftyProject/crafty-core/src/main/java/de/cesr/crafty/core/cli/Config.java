@@ -263,6 +263,7 @@ public class Config {
                 + "|-> plum_wait_timeout_minutes=" + plum_wait_timeout_minutes + "\n"
                 + "|-> plum_coupling_mode=" + plum_coupling_mode + "\n"
                 + "|-> plum_price_scaling=" + plum_price_scaling + "\n"
+                + "|-> plum_price_basis=" + plum_price_basis + "\n"
                 + "|-> plum_consumption=" + plum_consumption + "\n"
                 + "|-> dynamic_trade_capitals=" + dynamic_trade_capitals + "\n"
                 + "] \n\n";
@@ -307,6 +308,12 @@ public class Config {
     // index: each market service's price follows PLUM's relative price changes from its start-year file price.
     // factor: PLUM's price x PLUM_price_factor in Services.csv.
     public String plum_price_scaling = "index";
+    // Which PLUM price each region's market services follow:
+    // domestic: PLUM's own country price, the import and export prices weighted by the country's import share, so
+    //   it floats with how much the country imports (PLUM's PRICE_CALCULATION = weightedImportsExports).
+    // exporter: PLUM's world export price, the same for every region.
+    // importer: the country's import price, the world price x its import mark-up.
+    public String plum_price_basis = "domestic";
     // true: each year, each region's consumption for transport export shares is PLUM's domestic use, so the
     // consumption files are only needed for the start year. false: the consumption files, for every year.
     public boolean plum_consumption = true;

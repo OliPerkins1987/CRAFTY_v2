@@ -313,8 +313,8 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 
 - `plum_consumption` also changes core: with `coupled_with_plum` on, the consumption files for transport export
   shares only need the start year, because the coupler sets the later years from PLUM.
-- `plum_coupling_mode`, `plum_price_scaling` and the three numbers are checked at start-up, coupled or not. An
-  unknown value stops the run.
+- `plum_coupling_mode`, `plum_price_scaling`, `plum_price_basis` and the three numbers are checked at start-up,
+  coupled or not. An unknown value stops the run.
 
 | Key | Type | Default | Meaning |
 |---|---:|---|---|
@@ -329,6 +329,7 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 | `plum_wait_timeout_minutes` | integer | `120` | How long CRAFTY waits for each PLUM year before the run stops. More than 0. |
 | `plum_coupling_mode` | string | `sequential` | `sequential`: PLUM's market, then CRAFTY's land use, then PLUM's market. `overlapping`: PLUM solves year t while CRAFTY runs year t's giving up and competition. |
 | `plum_price_scaling` | string | `index` | `index`: each market service's price follows PLUM's relative price changes from its start-year file price. `factor`: PLUM's price × `PLUM_price_factor` in `Services.csv`. |
+| `plum_price_basis` | string | `domestic` | Which PLUM price a region's market services follow. `domestic`: PLUM's own country price, the import and export prices weighted by the country's import share, so it floats with how much the country imports. `exporter`: PLUM's world export price, the same for every region. `importer`: the country's import price, the world price × its import mark-up. |
 | `plum_consumption` | boolean | `true` | Each year, a region's consumption for transport export shares is PLUM's domestic use. `false`: the consumption files, for every year. |
 | `dynamic_trade_capitals` | boolean | `false` | The trade capitals are updated from PLUM's net exports each year and written over the capitals file's values. |
 

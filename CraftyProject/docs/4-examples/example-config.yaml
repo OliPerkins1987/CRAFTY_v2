@@ -184,5 +184,6 @@ coupled_end_year: 0                # last year CRAFTY runs; 0 = the scenario's e
 plum_wait_timeout_minutes: 120     # how long CRAFTY waits for each PLUM year before the run stops
 plum_coupling_mode: sequential     # sequential (PLUM market -> CRAFTY land use -> PLUM market) or overlapping
 plum_price_scaling: index          # index (CRAFTY price follows PLUM's relative changes) or factor (PLUM_price_factor in Services.csv)
+plum_price_basis: domestic         # domestic (PLUM's country price: import and export prices weighted by import share), exporter (world price) or importer (country import price)
 plum_consumption: true             # consumption for transport export shares from PLUM each year (files then needed for the start year only)
 dynamic_trade_capitals: false      # trade capitals updated from PLUM's net exports each year, over the capitals file's values

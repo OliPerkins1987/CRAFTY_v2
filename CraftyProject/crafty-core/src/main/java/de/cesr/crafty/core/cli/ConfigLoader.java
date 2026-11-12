@@ -411,6 +411,8 @@ public class ConfigLoader {
 	public static final List<String> PLUM_COUPLING_MODES = List.of("sequential", "overlapping");
 	/** The values plum_price_scaling can take; the first is the default. */
 	public static final List<String> PLUM_PRICE_SCALINGS = List.of("index", "factor");
+	/** The values plum_price_basis can take; the first is the default. */
+	public static final List<String> PLUM_PRICE_BASES = List.of("domestic", "exporter", "importer");
 
 	/**
 	 * The CRAFTY-PLUM coupling keys (used by crafty-landsymm) must hold values the coupler knows, so the run
@@ -439,6 +441,9 @@ public class ConfigLoader {
 		}
 		if (!PLUM_PRICE_SCALINGS.contains(c.plum_price_scaling)) {
 			problems.add("plum_price_scaling must be one of " + PLUM_PRICE_SCALINGS + ", got: " + c.plum_price_scaling);
+		}
+		if (!PLUM_PRICE_BASES.contains(c.plum_price_basis)) {
+			problems.add("plum_price_basis must be one of " + PLUM_PRICE_BASES + ", got: " + c.plum_price_basis);
 		}
 		if (c.plum_wait_timeout_minutes <= 0) {
 			problems.add("plum_wait_timeout_minutes must be more than 0, got: " + c.plum_wait_timeout_minutes);

@@ -93,5 +93,6 @@ coupled_with_plum: false
 plum_calibration_run: false                  # true = calibration run: write the starting map's production for PLUM and stop
 plum_coupling_mode: sequential               # sequential or overlapping
 plum_price_scaling: index                    # index or factor
+plum_price_basis: domestic                   # domestic (import-share-weighted country price), exporter (world price) or importer
 plum_consumption: true                       # PLUM's domestic use as each year's consumption for export shares (consumption files then need only the start year)
 dynamic_trade_capitals: false                # trade capitals updated from PLUM's net exports each year

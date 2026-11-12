@@ -1,0 +1,7 @@
+Year, Country, RoundwoodDemand, WoodfuelDemand, Production, Import_price, Export_price, Net_imports
+2029,Senegal Gambia & Cabo Verde,0.7539,5.2416,5.9479,0.0433,0.0299,0.0476
+2029,Argentina,6.6563,3.2615,10.4678,0.0411,0.0299,-0.5500
+2029,Tanzania,1.9401,18.6375,20.5838,0.0432,0.0299,-0.0062
+2030,Senegal Gambia & Cabo Verde,0.7539,5.2416,5.9479,0.0433,0.0299,0.0476
+2030,Argentina,6.6563,3.2615,10.4678,0.0411,0.0299,-0.5500
+2030,Tanzania,1.9401,18.6375,20.5838,0.0431,0.0299,-0.0062

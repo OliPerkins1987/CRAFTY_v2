@@ -1083,11 +1083,36 @@ class ConfigLoaderTest {
         assertEquals(120, c.plum_wait_timeout_minutes);
         assertEquals("sequential", c.plum_coupling_mode);
         assertEquals("index", c.plum_price_scaling);
+        assertEquals("domestic", c.plum_price_basis);
         assertTrue(c.plum_consumption);
         assertFalse(c.dynamic_trade_capitals);
         assertEquals(ConfigLoader.PLUM_COUPLING_MODES.get(0), c.plum_coupling_mode, "The default is listed first");
         assertEquals(ConfigLoader.PLUM_PRICE_SCALINGS.get(0), c.plum_price_scaling, "The default is listed first");
+        assertEquals(ConfigLoader.PLUM_PRICE_BASES.get(0), c.plum_price_basis, "The default is listed first");
         assertNull(ConfigLoader.plumCouplingConfigError(c));
+    }
+
+    @Test
+    void everyPriceBasisShouldBeAccepted() {
+        for (String basis : List.of("domestic", "exporter", "importer")) {
+            Config c = new Config();
+            c.plum_price_basis = basis;
+            assertNull(ConfigLoader.plumCouplingConfigError(c), basis);
+        }
+    }
+
+    @Test
+    void anUnknownPriceBasisShouldStopTheRunAndListTheValidOnes() {
+        for (String basis : List.of("net_trade", "Domestic", "export", "")) {
+            Config c = new Config();
+            c.plum_price_basis = basis;
+
+            String error = ConfigLoader.plumCouplingConfigError(c);
+
+            assertNotNull(error, "'" + basis + "' must be rejected");
+            assertTrue(error.contains("plum_price_basis") && error.contains("[domestic, exporter, importer]"),
+                    "The message must name the key and the valid values. Got: " + error);
+        }
     }
 
     @Test
@@ -1205,6 +1230,7 @@ class ConfigLoaderTest {
                 + "plum_wait_timeout_minutes: 45\n"
                 + "plum_coupling_mode: overlapping\n"
                 + "plum_price_scaling: factor\n"
+                + "plum_price_basis: importer\n"
                 + "plum_consumption: false\n"
                 + "dynamic_trade_capitals: true\n");
         ConfigLoader.configPath = configFile.toString();
@@ -1222,6 +1248,7 @@ class ConfigLoaderTest {
         assertEquals(45, cfg.plum_wait_timeout_minutes);
         assertEquals("overlapping", cfg.plum_coupling_mode);
         assertEquals("factor", cfg.plum_price_scaling);
+        assertEquals("importer", cfg.plum_price_basis);
         assertFalse(cfg.plum_consumption);
         assertTrue(cfg.dynamic_trade_capitals);
         assertNull(ConfigLoader.plumCouplingConfigError(cfg));

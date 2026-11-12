@@ -13,5 +13,6 @@
 		<module>crafty-institution</module>
 		<module>crafty-plum</module>
 		<module>crafty-react</module>
+		<module>crafty-landsymm</module>
 	</modules>
 </project>

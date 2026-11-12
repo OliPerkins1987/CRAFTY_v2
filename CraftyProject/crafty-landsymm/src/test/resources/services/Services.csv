@@ -1,0 +1,17 @@
+Name,Description,Penalise_Oversupply,Market_good,LPJG_name,LPJG_type,PLUM_name,PLUM_quantity_factor,PLUM_price_factor,PLUM_price_name
+C3cereals,C3 cereal crops (Wheat; barley; rye) for food,Yes,Yes,CerealsC3,crops,wheat,0.000001,1000,wheat
+C4crops,C4 crops (Maize; millet; sorghum) for food,Yes,Yes,CerealsC4,crops,maize,0.000001,1000,maize
+C3rice,C3 rice,Yes,Yes,Rice,crops,rice,0.000001,1000,rice
+C3nfix_oil,C3 nfixing oil crops,Yes,Yes,OilNfix,crops,oilcropsNFix,0.000001,1000,oilcropsNFix
+C3starchyroots,C3 root crops (potatoes; sugarbeet) for food,Yes,Yes,StarchyRoots,crops,starchyRoots,0.000001,1000,starchyRoots
+C3pulses,C3 pulses (peas; lentils; chickpeas; beans) for food,Yes,Yes,Pulses,crops,pulses,0.000001,1000,pulses
+C3fruitveg,C3 fruit or vegetable crops (leeks; onion; carrots; strawberries; grape etc.) for food,Yes,Yes,FruitAndVeg,crops,fruitveg,0.000001,1000,fruitveg
+C3oilcrops,C3 oil crops (rapeseed; sunflower; linseed; soybeans) for food,Yes,Yes,OilOther,crops,oilcropsOther,0.000001,1000,oilcropsOther
+C3sugarcane,C3 sugarcane,Yes,Yes,Sugarcane,crops,sugar,0.000001,1000,sugar
+C3sugarbeet,C3 sugarbeet,Yes,Yes,Sugarbeet,crops,sugar,0.000001,1000,sugar
+Pasture,Pasture,Yes,Yes,Pasture_sum,pasture,pasture,0.000001,1000,ruminants
+Timber,Timber,Yes,Yes,,forestry,wood,0.000001,1000,wood
+Fuelwood,Fuelwood,Yes,Yes,,forestry,wood,0.000001,1000,wood
+Biodiversity,Biological diversity,No,No,,,,,,
+Carbon,Quantity of carbon sequestered (above & below ground),No,No,,,,,,
+Recreation,Recreation potential,No,No,,,,,,
