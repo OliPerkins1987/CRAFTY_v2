@@ -85,6 +85,8 @@ class ProductionCostUpdaterTest {
 		// The config object is shared by every test in this JVM. Left on, transport would make any later
 		// updater with production costs on require transport rows, and stop the JVM without them.
 		ConfigLoader.config.use_transport_costs = false;
+		ConfigLoader.config.coupled_with_plum = false;
+		ConfigLoader.config.plum_consumption = true;
 		ProductionCostUpdater.setConsumption(new java.util.HashMap<>());
 		CustomLogger.shutdownRunFileLoggers();
 	}
@@ -1003,6 +1005,110 @@ class ProductionCostUpdaterTest {
 				ProductionCostUpdater.setTransportCosts(new double[0]);
 			}
 		});
+	}
+
+	// =========================================================
+	// Coupled with PLUM: the consumption files only need the start year
+	// =========================================================
+
+	@Test
+	void lastConsumptionFileYear_isTheStartYearOnlyWithPlumConsumption() {
+		assertEquals(2005, ProductionCostUpdater.lastConsumptionFileYear(), "uncoupled: every year of the run");
+
+		ConfigLoader.config.coupled_with_plum = true;
+		assertEquals(2000, ProductionCostUpdater.lastConsumptionFileYear(), "coupled: PLUM gives the later years");
+
+		ConfigLoader.config.plum_consumption = false;
+		assertEquals(2005, ProductionCostUpdater.lastConsumptionFileYear(),
+				"coupled, but consumption from the files: every year");
+
+		ConfigLoader.config.coupled_with_plum = false;
+		ConfigLoader.config.plum_consumption = true;
+		assertEquals(2005, ProductionCostUpdater.lastConsumptionFileYear(),
+				"plum_consumption alone does nothing without coupling");
+	}
+
+	@Test
+	void readConsumption_coupledWithPlum_needsOnlyTheStartYear() throws IOException {
+		withSer1TheOnlyMarketGood(() -> {
+			ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+			writeStartYearConsumption("R1", 100);
+
+			ConfigLoader.config.coupled_with_plum = true;
+			ProductionCostUpdater.Consumption read = ProductionCostUpdater.readConsumption(List.of("R1"),
+					"TestScenario");
+
+			assertEquals(List.of(), read.problems());
+			assertArrayEquals(new double[] { 100.0, 0.0, 0.0 }, read.byRegion().get("R1").get(2000), 0.0);
+			assertEquals(1, read.byRegion().get("R1").size(), "only the start year is read");
+		});
+	}
+
+	@Test
+	void readConsumption_withoutPlumConsumption_stillNeedsEveryYear() throws IOException {
+		withSer1TheOnlyMarketGood(() -> {
+			ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+			writeStartYearConsumption("R1", 100);
+
+			ProductionCostUpdater.Consumption uncoupled = ProductionCostUpdater.readConsumption(List.of("R1"),
+					"TestScenario");
+			assertFalse(uncoupled.problems().isEmpty(), "uncoupled, 2001-2005 are missing");
+
+			ConfigLoader.config.coupled_with_plum = true;
+			ConfigLoader.config.plum_consumption = false;
+			ProductionCostUpdater.Consumption fromFiles = ProductionCostUpdater.readConsumption(List.of("R1"),
+					"TestScenario");
+			assertEquals(uncoupled.problems(), fromFiles.problems(),
+					"coupled with plum_consumption off: the same years are missing");
+		});
+	}
+
+	@Test
+	void readConsumption_coupledWithPlum_stillNeedsTheStartYear() throws IOException {
+		withSer1TheOnlyMarketGood(() -> {
+			ConfigLoader.config.costs_directory = tempDir.resolve("costs").toString();
+			// A file that starts a year late.
+			writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("export").resolve("TestScenario"),
+					"consumption_R1.csv", "Year,ser1,ser2,ser3", "2001,100,7,0");
+
+			ConfigLoader.config.coupled_with_plum = true;
+			ProductionCostUpdater.Consumption read = ProductionCostUpdater.readConsumption(List.of("R1"),
+					"TestScenario");
+
+			assertFalse(read.problems().isEmpty(), "the start year is missing");
+			assertTrue(read.problems().stream().anyMatch(p -> p.contains("2000")), "Got: " + read.problems());
+		});
+	}
+
+	@Test
+	void transportByExportShare_coupledWithPlum_loadsTheStartYearFromStartYearOnlyFiles() throws IOException {
+		ConcurrentHashMap<String, Region> regionsBefore = CellsLoader.regions;
+		withSer1TheOnlyMarketGood(() -> {
+			try {
+				CellsLoader.regions = new ConcurrentHashMap<>(Map.of("R1", new Region("R1"), "R2", new Region("R2")));
+				writeSpatialModeFiles("ser1_transport,4.0,");
+				writeStartYearConsumption("R1", 100);
+				writeStartYearConsumption("R2", 300);
+				ConfigLoader.config.coupled_with_plum = true;
+
+				new ProductionCostUpdater(); // would stop the JVM if 2001-2005 were still required
+
+				assertArrayEquals(new double[] { 100.0, 0.0, 0.0 }, ProductionCostUpdater.getConsumption("R1", 2000),
+						0.0);
+				assertArrayEquals(new double[] { 300.0, 0.0, 0.0 }, ProductionCostUpdater.getConsumption("R2", 2000),
+						0.0);
+				assertNull(ProductionCostUpdater.getConsumption("R1", 2001), "the coupler sets the later years");
+			} finally {
+				CellsLoader.regions = regionsBefore;
+				ProductionCostUpdater.setTransportCosts(new double[0]);
+			}
+		});
+	}
+
+	/** Writes region's consumption file in costs/spatial/export/TestScenario/ with only the start year, 2000. */
+	private void writeStartYearConsumption(String region, double ser1) throws IOException {
+		writeCsv(tempDir.resolve("costs").resolve("spatial").resolve("export").resolve("TestScenario"),
+				"consumption_" + region + ".csv", "Year,ser1,ser2,ser3", "2000," + ser1 + ",7,0");
 	}
 
 	/**

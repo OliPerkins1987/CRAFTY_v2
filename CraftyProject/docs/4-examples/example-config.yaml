@@ -165,3 +165,24 @@ logger_trace: false
 # Runtime timing summaries
 print_abstract_model_runner_measures: true
 print_regional_model_runner_measures: true
+
+# -------------------------------------------------------------------
+# 7) Coupling with PLUM (crafty-landsymm)
+# -------------------------------------------------------------------
+# Only for runs started from the crafty-landsymm module. The coupled-run launcher writes these
+# keys into the run's copy of config.yaml from the master YAML, so they don't normally need to be
+# set by hand. A coupled run also needs use_price_feedback: false, global_price_feedback: false,
+# initial_demand_supply_equilibrium: false and use_explicit_price_utility: true.
+coupled_with_plum: false
+plum_calibration_run: false        # true = calibration run: write the starting map's production and stop
+crafty_production_path: ""         # CRAFTY -> PLUM: <path>/<year>/production.csv + done (PLUM's CRAFTY_PRODUCTION_DIR)
+plum_calibration_path: ""          # scenario runs: the calibration run's PLUM output folder
+plum_calibration_final_year: 0     # scenario runs: the calibration's last PLUM year (BASE_YEAR + END_TIMESTEP)
+calibration_production_path: ""    # scenario runs: the calibration run's production folder (start year compared, warns if different)
+plum_output_path: ""               # scenario runs: this run's PLUM output folder
+coupled_end_year: 0                # last year CRAFTY runs; 0 = the scenario's end year
+plum_wait_timeout_minutes: 120     # how long CRAFTY waits for each PLUM year before the run stops
+plum_coupling_mode: sequential     # sequential (PLUM market -> CRAFTY land use -> PLUM market) or overlapping
+plum_price_scaling: index          # index (CRAFTY price follows PLUM's relative changes) or factor (PLUM_price_factor in Services.csv)
+plum_consumption: true             # consumption for transport export shares from PLUM each year (files then needed for the start year only)
+dynamic_trade_capitals: false      # trade capitals updated from PLUM's net exports each year, over the capitals file's values

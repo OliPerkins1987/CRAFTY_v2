@@ -196,8 +196,9 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	/*
 	 * Transport by export share charges each region on the part of its supply above its consumption, so every
 	 * region needs a consumption file covering every service that pays transport and every year of the run.
-	 * Anything missing stops the run, listed in one message, so that a forgotten input cannot pass as a
-	 * consumption of 0 (everything exported) or as no transport at all.
+	 * When coupled with PLUM with plum_consumption on, the coupler sets each later year's consumption from
+	 * PLUM, so the files only need the start year. Anything missing stops the run, listed in one message, so
+	 * that a forgotten input cannot pass as a consumption of 0 (everything exported) or as no transport at all.
 	 */
 	private void loadConsumption() {
 		String scenario = ProjectLoader.getScenario();
@@ -206,15 +207,27 @@ public class ProductionCostUpdater extends AbstractUpdater {
 			LOGGER.fatal("Transport by export share needs each region's domestic consumption, in "
 					+ "spatial/export/" + scenario + "/consumption_<region>.csv under the costs folder: a "
 					+ ConsumptionData.YEAR_COLUMN + " column and one column per service that pays transport, "
-					+ "with a value for every year of the run. Found:\n  " + String.join("\n  ", read.problems()));
+					+ "with a value for " + (ConfigLoader.isPlumConsumption()
+							? "the start year (coupled with PLUM, which gives the later years)"
+							: "every year of the run")
+					+ ". Found:\n  " + String.join("\n  ", read.problems()));
 			return;
 		}
 		consumption = read.byRegion();
 	}
 
 	/**
-	 * Reads every region's consumption file (see {@link ConsumptionData}). It does not stop the run: a region
-	 * with no file, and every problem in the files read, are listed in the result.
+	 * The last year the consumption files must cover: the run's end year, or only the start year when the
+	 * CRAFTY-PLUM coupler sets the later years (see {@link ConfigLoader#isPlumConsumption()}).
+	 */
+	static int lastConsumptionFileYear() {
+		return ConfigLoader.isPlumConsumption() ? Timestep.getStartYear() : Timestep.getEndtYear();
+	}
+
+	/**
+	 * Reads every region's consumption file (see {@link ConsumptionData}), from the start year to
+	 * {@link #lastConsumptionFileYear()}. It does not stop the run: a region with no file, and every problem in
+	 * the files read, are listed in the result.
 	 */
 	static Consumption readConsumption(Collection<String> regions, String scenario) {
 		List<String> services = ServiceSet.getServicesList();
@@ -228,7 +241,7 @@ public class ProductionCostUpdater extends AbstractUpdater {
 			}
 			LOGGER.info("Consumption for [" + region + "]: " + file);
 			ConsumptionData data = new ConsumptionData(file, region, services, ProductionCostUpdater::paysTransport,
-					Timestep.getStartYear(), Timestep.getEndtYear());
+					Timestep.getStartYear(), lastConsumptionFileYear());
 			problems.addAll(data.problems());
 			byRegion.put(region, data.byYear());
 		}
@@ -512,7 +525,10 @@ public class ProductionCostUpdater extends AbstractUpdater {
 		return byYear == null ? null : byYear.get(year);
 	}
 
-	/** Region, then year, then service, as {@link #getConsumption} reads it. */
+	/**
+	 * Region, then year, then service, as {@link #getConsumption} reads it. The CRAFTY-PLUM coupler uses it to
+	 * set each year's consumption from PLUM; the map replaces the whole of what is held.
+	 */
 	public static void setConsumption(Map<String, Map<Integer, double[]>> byRegion) {
 		consumption = byRegion;
 	}

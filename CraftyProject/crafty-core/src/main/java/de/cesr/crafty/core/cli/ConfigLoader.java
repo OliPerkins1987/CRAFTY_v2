@@ -148,6 +148,7 @@ public class ConfigLoader {
 		validateMatrixGiveInConfig();
 		validatePriceFeedbackConfig();
 		validateReactiveConfig();
+		validatePlumCouplingConfig();
 		try {
 			loadExternalRScriptRunnerConfig();
 		} catch (IOException e) {
@@ -406,6 +407,51 @@ public class ConfigLoader {
 		return elements;
 	}
 
+	/** The values plum_coupling_mode can take; the first is the default. */
+	public static final List<String> PLUM_COUPLING_MODES = List.of("sequential", "overlapping");
+	/** The values plum_price_scaling can take; the first is the default. */
+	public static final List<String> PLUM_PRICE_SCALINGS = List.of("index", "factor");
+
+	/**
+	 * The CRAFTY-PLUM coupling keys (used by crafty-landsymm) must hold values the coupler knows, so the run
+	 * stops on a misspelt mode or a number out of range. They are checked whether or not coupled_with_plum is
+	 * on, so that a mistake can't wait unnoticed until the switch is turned on. The coupler's own start-up
+	 * check covers the rest of a coupled set-up.
+	 */
+	static void validatePlumCouplingConfig() {
+		if (config == null) return;
+		String error = plumCouplingConfigError(config);
+		if (error != null) {
+			LOGGER.fatal(error);
+		}
+	}
+
+	/**
+	 * The rules behind {@link #validatePlumCouplingConfig()}, kept separate because
+	 * LOGGER.fatal exits the JVM and so cannot be exercised from a test.
+	 *
+	 * @return the message to stop the run with, listing every problem, or null if the values are valid
+	 */
+	static String plumCouplingConfigError(Config c) {
+		List<String> problems = new ArrayList<>();
+		if (!PLUM_COUPLING_MODES.contains(c.plum_coupling_mode)) {
+			problems.add("plum_coupling_mode must be one of " + PLUM_COUPLING_MODES + ", got: " + c.plum_coupling_mode);
+		}
+		if (!PLUM_PRICE_SCALINGS.contains(c.plum_price_scaling)) {
+			problems.add("plum_price_scaling must be one of " + PLUM_PRICE_SCALINGS + ", got: " + c.plum_price_scaling);
+		}
+		if (c.plum_wait_timeout_minutes <= 0) {
+			problems.add("plum_wait_timeout_minutes must be more than 0, got: " + c.plum_wait_timeout_minutes);
+		}
+		if (c.coupled_end_year < 0) {
+			problems.add("coupled_end_year must be 0 (the scenario's end year) or a year, got: " + c.coupled_end_year);
+		}
+		if (c.plum_calibration_final_year < 0) {
+			problems.add("plum_calibration_final_year must be 0 or more, got: " + c.plum_calibration_final_year);
+		}
+		return problems.isEmpty() ? null : String.join("\n", problems);
+	}
+
 	static void validateGiveUpConfig() {
 		if (config == null) return;
 		if (config.use_price_explicit_giving_up) {
@@ -450,6 +496,19 @@ public class ConfigLoader {
 
 	public static boolean isUsePriceExplicitGivingUp() {
 		return config != null && config.use_price_explicit_giving_up;
+	}
+
+	public static boolean isCoupledWithPlum() {
+		return config != null && config.coupled_with_plum;
+	}
+
+	/**
+	 * Whether the CRAFTY-PLUM coupler sets each region's consumption for transport export shares every year
+	 * (coupled_with_plum and plum_consumption both on). The consumption files are then only needed for the
+	 * start year.
+	 */
+	public static boolean isPlumConsumption() {
+		return isCoupledWithPlum() && config.plum_consumption;
 	}
 
 	public static boolean isReactiveAfts() {

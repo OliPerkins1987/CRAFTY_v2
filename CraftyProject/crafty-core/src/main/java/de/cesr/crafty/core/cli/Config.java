@@ -252,6 +252,19 @@ public class Config {
                 + "|-> reactive_other_intensity=" + reactive_other_intensity + "\n"
                 + "|-> reactive_stocking=" + reactive_stocking + "\n"
                 + "|-> reactive_forestry=" + reactive_forestry + "\n"
+                + "|-> coupled_with_plum=" + coupled_with_plum + "\n"
+                + "|-> plum_calibration_run=" + plum_calibration_run + "\n"
+                + "|-> plum_calibration_path=" + plum_calibration_path + "\n"
+                + "|-> plum_calibration_final_year=" + plum_calibration_final_year + "\n"
+                + "|-> plum_output_path=" + plum_output_path + "\n"
+                + "|-> crafty_production_path=" + crafty_production_path + "\n"
+                + "|-> calibration_production_path=" + calibration_production_path + "\n"
+                + "|-> coupled_end_year=" + coupled_end_year + "\n"
+                + "|-> plum_wait_timeout_minutes=" + plum_wait_timeout_minutes + "\n"
+                + "|-> plum_coupling_mode=" + plum_coupling_mode + "\n"
+                + "|-> plum_price_scaling=" + plum_price_scaling + "\n"
+                + "|-> plum_consumption=" + plum_consumption + "\n"
+                + "|-> dynamic_trade_capitals=" + dynamic_trade_capitals + "\n"
                 + "] \n\n";
     }
 
@@ -270,5 +283,35 @@ public class Config {
     public String plum_calibration_path = "";
     public String plum_output_path = "";
     public String service_commodity_mapping_path = "";
+    // CRAFTY-PLUM coupling (crafty-landsymm). The coupled-run launcher writes these into the run's copy of
+    // config.yaml. They only act when coupled_with_plum is true and CRAFTY runs from crafty-landsymm, except
+    // plum_consumption, which core also reads (see ProductionCostUpdater).
+    // true = a calibration run: CRAFTY writes its starting map's production for PLUM and stops.
+    public boolean plum_calibration_run = false;
+    // Where CRAFTY writes its production for PLUM, as <year>/production.csv plus a done file
+    // (PLUM's CRAFTY_PRODUCTION_DIR).
+    public String crafty_production_path = "";
+    // Scenario runs: the calibration run's production folder. The start year's production is compared with its
+    // file for that year, with a warning if they differ.
+    public String calibration_production_path = "";
+    // Scenario runs: the year of the calibration's last PLUM block (PLUM's BASE_YEAR + END_TIMESTEP), which is
+    // PLUM's start-year state. plum_calibration_path is that calibration's PLUM output folder.
+    public int plum_calibration_final_year = 0;
+    // Scenario runs: the last year CRAFTY runs. 0 = the scenario's end year.
+    public int coupled_end_year = 0;
+    // How long CRAFTY waits for each PLUM year, in minutes, before the run stops.
+    public int plum_wait_timeout_minutes = 120;
+    // sequential: PLUM's market, then CRAFTY's land use, then PLUM's market, never at the same time.
+    // overlapping: PLUM solves year t while CRAFTY runs year t's giving up and competition.
+    public String plum_coupling_mode = "sequential";
+    // index: each market service's price follows PLUM's relative price changes from its start-year file price.
+    // factor: PLUM's price x PLUM_price_factor in Services.csv.
+    public String plum_price_scaling = "index";
+    // true: each year, each region's consumption for transport export shares is PLUM's domestic use, so the
+    // consumption files are only needed for the start year. false: the consumption files, for every year.
+    public boolean plum_consumption = true;
+    // true: the trade capitals are updated from PLUM's net exports each year and written over the capitals
+    // file's values.
+    public boolean dynamic_trade_capitals = false;
 
 }

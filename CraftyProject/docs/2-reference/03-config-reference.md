@@ -306,6 +306,38 @@ map_output_years: [2020, 2030, 2050, 2100]
 
 ---
 
+## 12) Coupling with PLUM (`crafty-landsymm`)
+
+These keys are only for runs started from the `crafty-landsymm` module. The coupled-run launcher writes them into
+the run's copy of `config.yaml` from the master YAML, so they don't normally need to be set by hand.
+
+- `plum_consumption` also changes core: with `coupled_with_plum` on, the consumption files for transport export
+  shares only need the start year, because the coupler sets the later years from PLUM.
+- `plum_coupling_mode`, `plum_price_scaling` and the three numbers are checked at start-up, coupled or not. An
+  unknown value stops the run.
+
+| Key | Type | Default | Meaning |
+|---|---:|---|---|
+| `coupled_with_plum` | boolean | `false` | The run is coupled with PLUM. |
+| `plum_calibration_run` | boolean | `false` | A calibration run: CRAFTY writes its starting map's production for PLUM and stops. |
+| `crafty_production_path` | string | `""` | Where CRAFTY writes its production for PLUM: `<path>/<year>/production.csv` plus a `done` file (PLUM's `CRAFTY_PRODUCTION_DIR`). |
+| `plum_calibration_path` | string | `""` | Scenario runs: the calibration run's PLUM output folder. |
+| `plum_calibration_final_year` | integer | `0` | Scenario runs: the calibration's last PLUM year (PLUM's BASE_YEAR + END_TIMESTEP), which is PLUM's start-year state. 0 or more. |
+| `calibration_production_path` | string | `""` | Scenario runs: the calibration run's production folder. The start year's production is compared with it, with a warning if they differ. |
+| `plum_output_path` | string | `""` | Scenario runs: this run's PLUM output folder. |
+| `coupled_end_year` | integer | `0` | The last year CRAFTY runs. 0 = the scenario's end year. |
+| `plum_wait_timeout_minutes` | integer | `120` | How long CRAFTY waits for each PLUM year before the run stops. More than 0. |
+| `plum_coupling_mode` | string | `sequential` | `sequential`: PLUM's market, then CRAFTY's land use, then PLUM's market. `overlapping`: PLUM solves year t while CRAFTY runs year t's giving up and competition. |
+| `plum_price_scaling` | string | `index` | `index`: each market service's price follows PLUM's relative price changes from its start-year file price. `factor`: PLUM's price × `PLUM_price_factor` in `Services.csv`. |
+| `plum_consumption` | boolean | `true` | Each year, a region's consumption for transport export shares is PLUM's domestic use. `false`: the consumption files, for every year. |
+| `dynamic_trade_capitals` | boolean | `false` | The trade capitals are updated from PLUM's net exports each year and written over the capitals file's values. |
+
+A coupled run also needs `use_price_feedback: false`, `global_price_feedback: false`,
+`initial_demand_supply_equilibrium: false` and `use_explicit_price_utility: true`. The coupler's own start-up check
+stops the run otherwise.
+
+---
+
 ## Related pages
 
 - Running scenarios + path resolution: `../user-guide/02-running-scenarios.md`

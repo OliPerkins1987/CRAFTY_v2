@@ -1065,4 +1065,165 @@ class ConfigLoaderTest {
         assertEquals(0.5, cfg.price_feedback_strength);
         assertTrue(cfg.global_price_feedback);
     }
+
+    // =========================================================
+    // CRAFTY-PLUM coupling keys (crafty-landsymm)
+    // =========================================================
+
+    @Test
+    void couplingKeysShouldDefaultToAnUncoupledRunAndBeValid() {
+        Config c = new Config();
+
+        assertFalse(c.coupled_with_plum);
+        assertFalse(c.plum_calibration_run);
+        assertEquals("", c.crafty_production_path);
+        assertEquals("", c.calibration_production_path);
+        assertEquals(0, c.plum_calibration_final_year);
+        assertEquals(0, c.coupled_end_year, "0 = the scenario's end year");
+        assertEquals(120, c.plum_wait_timeout_minutes);
+        assertEquals("sequential", c.plum_coupling_mode);
+        assertEquals("index", c.plum_price_scaling);
+        assertTrue(c.plum_consumption);
+        assertFalse(c.dynamic_trade_capitals);
+        assertEquals(ConfigLoader.PLUM_COUPLING_MODES.get(0), c.plum_coupling_mode, "The default is listed first");
+        assertEquals(ConfigLoader.PLUM_PRICE_SCALINGS.get(0), c.plum_price_scaling, "The default is listed first");
+        assertNull(ConfigLoader.plumCouplingConfigError(c));
+    }
+
+    @Test
+    void everyCouplingModeAndPriceScalingShouldBeAccepted() {
+        for (String mode : List.of("sequential", "overlapping")) {
+            for (String scaling : List.of("index", "factor")) {
+                Config c = new Config();
+                c.plum_coupling_mode = mode;
+                c.plum_price_scaling = scaling;
+                assertNull(ConfigLoader.plumCouplingConfigError(c), mode + ", " + scaling);
+            }
+        }
+    }
+
+    @Test
+    void anUnknownCouplingModeShouldStopTheRunAndListTheValidOnes() {
+        for (String mode : List.of("parallel", "Sequential", "")) {
+            Config c = new Config();
+            c.plum_coupling_mode = mode;
+
+            String error = ConfigLoader.plumCouplingConfigError(c);
+
+            assertNotNull(error, "'" + mode + "' must be rejected");
+            assertTrue(error.contains("plum_coupling_mode") && error.contains("[sequential, overlapping]"),
+                    "The message must name the key and the valid values. Got: " + error);
+        }
+    }
+
+    @Test
+    void anUnknownPriceScalingShouldStopTheRunAndListTheValidOnes() {
+        for (String scaling : List.of("ratio", "Index", "")) {
+            Config c = new Config();
+            c.plum_price_scaling = scaling;
+
+            String error = ConfigLoader.plumCouplingConfigError(c);
+
+            assertNotNull(error, "'" + scaling + "' must be rejected");
+            assertTrue(error.contains("plum_price_scaling") && error.contains("[index, factor]"),
+                    "The message must name the key and the valid values. Got: " + error);
+        }
+    }
+
+    @Test
+    void couplingNumbersOutOfRangeShouldStopTheRun() {
+        Config timeout = new Config();
+        timeout.plum_wait_timeout_minutes = 0;
+        assertTrue(String.valueOf(ConfigLoader.plumCouplingConfigError(timeout)).contains("plum_wait_timeout_minutes"));
+
+        Config endYear = new Config();
+        endYear.coupled_end_year = -1;
+        assertTrue(String.valueOf(ConfigLoader.plumCouplingConfigError(endYear)).contains("coupled_end_year"));
+
+        Config finalYear = new Config();
+        finalYear.plum_calibration_final_year = -1;
+        assertTrue(String.valueOf(ConfigLoader.plumCouplingConfigError(finalYear))
+                .contains("plum_calibration_final_year"));
+
+        Config inRange = new Config();
+        inRange.plum_wait_timeout_minutes = 1;
+        inRange.coupled_end_year = 2000;
+        inRange.plum_calibration_final_year = 2030;
+        assertNull(ConfigLoader.plumCouplingConfigError(inRange));
+    }
+
+    @Test
+    void everyCouplingProblemShouldBeListedInOneMessage() {
+        Config c = new Config();
+        c.plum_coupling_mode = "parallel";
+        c.plum_price_scaling = "ratio";
+        c.plum_wait_timeout_minutes = -5;
+
+        String error = ConfigLoader.plumCouplingConfigError(c);
+
+        assertNotNull(error);
+        assertEquals(3, error.split("\n").length, "One line per problem. Got: " + error);
+        assertTrue(error.contains("plum_coupling_mode") && error.contains("plum_price_scaling")
+                && error.contains("plum_wait_timeout_minutes"), "Got: " + error);
+    }
+
+    @Test
+    void plumConsumptionShouldNeedTheCouplingSwitch() {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+
+        ConfigLoader.config = null;
+        assertFalse(ConfigLoader.isCoupledWithPlum());
+        assertFalse(ConfigLoader.isPlumConsumption());
+
+        ConfigLoader.config = new Config();
+        assertFalse(ConfigLoader.isPlumConsumption(), "plum_consumption is on by default, but the run isn't coupled");
+
+        ConfigLoader.config.coupled_with_plum = true;
+        assertTrue(ConfigLoader.isCoupledWithPlum());
+        assertTrue(ConfigLoader.isPlumConsumption());
+
+        ConfigLoader.config.plum_consumption = false;
+        assertFalse(ConfigLoader.isPlumConsumption());
+    }
+
+    @Test
+    void couplingKeysShouldLoadFromYaml() throws Exception {
+        originalConfigPath = ConfigLoader.configPath;
+        originalConfig = ConfigLoader.config;
+        backupSynchronisationFields();
+
+        Path configFile = tempDir.resolve("coupling-config.yaml");
+        Files.writeString(configFile, "coupled_with_plum: true\n"
+                + "plum_calibration_run: true\n"
+                + "plum_calibration_path: C:/runs/calib1990_v1/plum/output\n"
+                + "plum_output_path: C:/runs/hist_seq_test1/plum/output\n"
+                + "crafty_production_path: C:/runs/hist_seq_test1/production\n"
+                + "calibration_production_path: C:/runs/calib1990_v1/production\n"
+                + "plum_calibration_final_year: 2030\n"
+                + "coupled_end_year: 2000\n"
+                + "plum_wait_timeout_minutes: 45\n"
+                + "plum_coupling_mode: overlapping\n"
+                + "plum_price_scaling: factor\n"
+                + "plum_consumption: false\n"
+                + "dynamic_trade_capitals: true\n");
+        ConfigLoader.configPath = configFile.toString();
+
+        Config cfg = invokeLoadConfig();
+
+        assertTrue(cfg.coupled_with_plum);
+        assertTrue(cfg.plum_calibration_run);
+        assertEquals("C:/runs/calib1990_v1/plum/output", cfg.plum_calibration_path);
+        assertEquals("C:/runs/hist_seq_test1/plum/output", cfg.plum_output_path);
+        assertEquals("C:/runs/hist_seq_test1/production", cfg.crafty_production_path);
+        assertEquals("C:/runs/calib1990_v1/production", cfg.calibration_production_path);
+        assertEquals(2030, cfg.plum_calibration_final_year);
+        assertEquals(2000, cfg.coupled_end_year);
+        assertEquals(45, cfg.plum_wait_timeout_minutes);
+        assertEquals("overlapping", cfg.plum_coupling_mode);
+        assertEquals("factor", cfg.plum_price_scaling);
+        assertFalse(cfg.plum_consumption);
+        assertTrue(cfg.dynamic_trade_capitals);
+        assertNull(ConfigLoader.plumCouplingConfigError(cfg));
+    }
 }
