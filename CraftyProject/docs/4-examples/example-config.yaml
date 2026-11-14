@@ -185,5 +185,9 @@ plum_wait_timeout_minutes: 120     # how long CRAFTY waits for each PLUM year be
 plum_coupling_mode: sequential     # sequential (PLUM market -> CRAFTY land use -> PLUM market) or overlapping
 plum_price_scaling: index          # index (CRAFTY price follows PLUM's relative changes) or factor (PLUM_price_factor in Services.csv)
 plum_price_basis: domestic         # domestic (PLUM's country price: import and export prices weighted by import share), exporter (world price) or importer (country import price)
+initialise_regional_price_weights: false # true: each region starts at the file price x its country's PLUM price / PLUM's world price (index scaling, importer or domestic basis)
 plum_consumption: true             # consumption for transport export shares from PLUM each year (files then needed for the start year only)
-dynamic_trade_capitals: false      # trade capitals updated from PLUM's net exports each year, over the capitals file's values
+dynamic_trade_capitals: false      # trade capitals updated from PLUM each year, over the capitals file's values (Capitals.csv PLUM_name says which crop)
+trade_capital_slope: 6             # trade capital = 1 / (1 + exp(-slope x (production / domestic use - midpoint))), to be calibrated
+trade_capital_midpoint: 1          # the self-sufficiency ratio (production / domestic use) at which a trade capital is 0.5
+trade_capital_averaging_years: 5   # trade capital = (1 - 1/k) x last year's value + 1/k x the rule's value, from the file value; 1 = no averaging

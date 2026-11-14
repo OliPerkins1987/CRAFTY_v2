@@ -1,0 +1,17 @@
+Label,Name,Type,Description,PLUM_name
+Health,Health index of HDI,Capital,Health index of HDI,
+Education,Education index of HDI,Capital,Education index of HDI,
+MA,Market access,Capital,Market access,
+WAP,Working age population,Capital,Working age population normalised at 150 km2-1,
+GDP,GDP pc (2017 USD PPP),Capital,GDP normalised at 50k USD pc,
+c3_cereals_trade,Trade friction for C3 cereals,Capital,Trade friction for C3 cereals,wheat
+c3_fruits_veg_trade,Trade friction for C3 fruit and veg,Capital,Trade friction for C3 fruit and veg,fruitveg
+c4_crops_trade,Trade friction for C4 crops,Capital,Trade friction for C4 crops,maize
+n_fix_oil_crops_trade,Trade friction for C3 Nfix oil crops,Capital,Trade friction for C3 Nfix oil crops,oilcropsNFix
+oil_crops_trade,Trade friction for C3 oil crops,Capital,Trade friction for C3 oil crops,oilcropsOther
+pulses_trade,Trade friction for C3 pulses,Capital,Trade friction for C3 pulses,pulses
+rice_trade,Trade friction for C3 rice,Capital,Trade friction for C3 rice,rice
+starchy_roots_trade,Trade friction for C3 starchy roots,Capital,Trade friction for C3 starchy roots,starchyRoots
+sugar_trade,Trade friction for C3 sugar,Capital,Trade friction for C3 sugar,sugar
+biodiversity_suit,Biodiversity value,Suitability,Calculated per country from HILDA+,
+SoshC3C_suit,SoshC3C suitability,Suitability,SoshC3C suitability,

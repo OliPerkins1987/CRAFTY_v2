@@ -34,6 +34,7 @@ public final class CouplingStartupCheck {
 		private final List<String> warnings = new ArrayList<>();
 		private ServiceCommodityMap services;
 		private RegionCountryKey key;
+		private TradeCapitalMap tradeCapitals;
 
 		public List<String> problems() {
 			return problems;
@@ -51,6 +52,14 @@ public final class CouplingStartupCheck {
 		/** The region-country key, if it was read without problems; null otherwise. */
 		public RegionCountryKey key() {
 			return key;
+		}
+
+		/**
+		 * Capitals.csv's trade capitals and their crops, with dynamic_trade_capitals on and read without problems; null
+		 * otherwise.
+		 */
+		TradeCapitalMap tradeCapitals() {
+			return tradeCapitals;
 		}
 	}
 
@@ -102,13 +111,17 @@ public final class CouplingStartupCheck {
 				r.problems.add("plum_output_path is empty: a scenario run needs this run's PLUM output folder");
 			}
 		}
-		if (c.dynamic_trade_capitals) {
-			r.warnings.add("dynamic_trade_capitals is true: until the net-export rule is in (48g), the stand-in rule "
-					+ "sets the trade capitals");
-		}
 		if (c.plum_consumption && !(c.use_transport_costs && c.spatial_production_costs)) {
 			r.warnings.add("plum_consumption is true but transport isn't charged by export share (use_transport_costs "
 					+ "and spatial_production_costs), so PLUM's consumption has no effect");
+		}
+		if (c.initialise_regional_price_weights && "exporter".equals(c.plum_price_basis)) {
+			r.warnings.add("initialise_regional_price_weights is true but plum_price_basis is exporter: every region's "
+					+ "PLUM price is the world price, so every region still starts at the file price");
+		}
+		if (c.initialise_regional_price_weights && "factor".equals(c.plum_price_scaling)) {
+			r.warnings.add("initialise_regional_price_weights is true but plum_price_scaling is factor, which doesn't "
+					+ "use the file prices, so it changes nothing");
 		}
 		return r;
 	}
@@ -118,16 +131,34 @@ public final class CouplingStartupCheck {
 	 * the scenario are known but before the cells load.
 	 *
 	 * @param servicesCsv     Services.csv (ProjectLoader's service metadata)
+	 * @param capitalsCsv     Capitals.csv (ProjectLoader's capitals metadata); its PLUM_name column is read with
+	 *                        dynamic_trade_capitals on
 	 * @param gisFile         the GIS file (see {@link #locateGisFile(Config)}); null if none was found
 	 * @param startYear       the scenario's first year
 	 * @param scenarioEndYear the scenario's last year
 	 */
-	public static Report dataReport(Config c, Path servicesCsv, Path gisFile, int startYear, int scenarioEndYear) {
+	public static Report dataReport(Config c, Path servicesCsv, Path capitalsCsv, Path gisFile, int startYear,
+			int scenarioEndYear) {
 		Report r = new Report();
 		try {
 			r.services = ServiceCommodityMap.read(servicesCsv);
 		} catch (CouplingInputException e) {
 			r.problems.addAll(e.getProblems());
+		}
+		if (c.dynamic_trade_capitals) {
+			if (capitalsCsv == null) {
+				r.problems.add("dynamic_trade_capitals is true, but there's no Capitals.csv to read its PLUM_name column from");
+			} else {
+				try {
+					r.tradeCapitals = TradeCapitalMap.read(capitalsCsv);
+					if (!r.tradeCapitals.untagged().isEmpty()) {
+						r.warnings.add("dynamic_trade_capitals: " + r.tradeCapitals.untagged() + " look like trade capitals "
+								+ "but have no PLUM_name in " + capitalsCsv.getFileName() + ", so they keep their file values");
+					}
+				} catch (CouplingInputException e) {
+					r.problems.addAll(e.getProblems());
+				}
+			}
 		}
 		if (gisFile == null) {
 			r.problems.add("No GIS file, so no region key: set gis_path, or put the regions file under the project's GIS "
@@ -184,8 +215,9 @@ public final class CouplingStartupCheck {
 	}
 
 	/**
-	 * Checks that need the loaded cells: CRAFTY read the same GIS file as the key, kept its regions, and has no
-	 * region the key lacks.
+	 * Checks that need the loaded cells: CRAFTY read the same GIS file as the key, kept its regions, and has the same
+	 * regions as the key. A region the key lacks has no PLUM country. A region in the key with no cells would have
+	 * its country sent 0 production, which PLUM would cover with imports.
 	 *
 	 * @param key            the key from {@link #dataReport}
 	 * @param loadedGisFile  the GIS file CRAFTY read (GisLoader.getGisFile())
@@ -209,6 +241,14 @@ public final class CouplingStartupCheck {
 			List<String> first = unknown.stream().limit(MAX_LISTED).toList();
 			problems.add("CRAFTY region(s) with no PLUM country in the key: " + first
 					+ (unknown.size() > MAX_LISTED ? " and " + (unknown.size() - MAX_LISTED) + " more" : ""));
+		}
+		TreeSet<String> notLoaded = new TreeSet<>(key.regions());
+		notLoaded.removeAll(loadedRegions);
+		if (regionalised && !notLoaded.isEmpty()) {
+			List<String> first = notLoaded.stream().limit(MAX_LISTED).toList();
+			problems.add("Region(s) in the key with no cells in CRAFTY: " + first
+					+ (notLoaded.size() > MAX_LISTED ? " and " + (notLoaded.size() - MAX_LISTED) + " more" : "")
+					+ ". Their countries would be sent 0 production, which PLUM would cover with imports");
 		}
 		return problems;
 	}

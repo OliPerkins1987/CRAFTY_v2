@@ -31,6 +31,12 @@ import java.util.TreeMap;
  * PLUM price in PLUM's start-year state (the calibration's last year), so CRAFTY starts at its own price and follows
  * PLUM's relative changes. {@code factor}: the service's PLUM_price_factor from Services.csv.
  *
+ * <b>Regional start (initialise_regional_price_weights).</b> The file weights are global prices. With index scaling,
+ * each region can instead start at its file weight x its country's PLUM price / PLUM's world price, so its start
+ * carries its country's mark-up over the world price. Its factor is then the file weight / the world price, the same
+ * for every region, and its price follows its country's PLUM price from there. With the exporter basis the country
+ * price is the world price, so it changes nothing.
+ *
  * Factors are per region and service. They are fixed for the run and can be written to price_factors.csv.
  */
 public final class PriceScaling {
@@ -61,9 +67,13 @@ public final class PriceScaling {
 		}
 	}
 
-	/** One region's factor for one service, and what it was made from. */
-	public record Factor(String region, String country, String service, String priceName, double startWeight,
-			double startPrice, double factor) {
+	/**
+	 * One region's factor for one service, and what it was made from: the file weight, the region's start weight
+	 * (the file weight, or with a regional start the file weight x country / world price) and its PLUM start price.
+	 * The weights are NaN under factor scaling, which doesn't use them.
+	 */
+	public record Factor(String region, String country, String service, String priceName, double fileWeight,
+			double startWeight, double startPrice, double factor) {
 	}
 
 	private final Basis basis;
@@ -81,15 +91,25 @@ public final class PriceScaling {
 		this.factors = Collections.unmodifiableMap(factors);
 	}
 
+	/** {@link #create(Scaling, Basis, ServiceCommodityMap, RegionCountryKey, Map, PlumYearOutputs, boolean)} with every
+	 * region starting at its file weight. */
+	public static PriceScaling create(Scaling scaling, Basis basis, ServiceCommodityMap services,
+			RegionCountryKey key, Map<String, Map<String, Double>> startWeights, PlumYearOutputs startState) {
+		return create(scaling, basis, services, key, startWeights, startState, false);
+	}
+
 	/**
 	 * Works out every region's factor for every market service, stopping with every problem found.
 	 *
-	 * @param startWeights each region's start-year file weight for each service (CRAFTY's price in the start year);
-	 *                     only read with index scaling
-	 * @param startState   PLUM's outputs for its start-year state: the calibration's last year
+	 * @param startWeights  each region's start-year file weight for each service (CRAFTY's price in the start year);
+	 *                      only read with index scaling
+	 * @param startState    PLUM's outputs for its start-year state: the calibration's last year
+	 * @param regionalStart with index scaling, start each region at its file weight x its country's PLUM price /
+	 *                      PLUM's world price (initialise_regional_price_weights)
 	 */
 	public static PriceScaling create(Scaling scaling, Basis basis, ServiceCommodityMap services,
-			RegionCountryKey key, Map<String, Map<String, Double>> startWeights, PlumYearOutputs startState) {
+			RegionCountryKey key, Map<String, Map<String, Double>> startWeights, PlumYearOutputs startState,
+			boolean regionalStart) {
 		List<String> problems = new ArrayList<>();
 		Map<String, Map<String, Factor>> factors = new TreeMap<>();
 		for (String region : new java.util.TreeSet<>(startWeights.keySet())) {
@@ -107,7 +127,8 @@ public final class PriceScaling {
 					problems.addAll(e.getProblems());
 					continue;
 				}
-				double weight = Double.NaN;
+				double fileWeight = Double.NaN;
+				double startWeight = Double.NaN;
 				double factor;
 				if (scaling == Scaling.INDEX) {
 					Double w = startWeights.get(region).get(link.service());
@@ -116,13 +137,20 @@ public final class PriceScaling {
 								+ " is " + w + "; index scaling needs a number greater than 0");
 						continue;
 					}
-					weight = w;
-					factor = w / startPrice;
+					fileWeight = w;
+					if (regionalStart) {
+						// w x country / world: the factor is w / world, and the start is that x the country price
+						factor = w / startState.price(link.priceName());
+						startWeight = factor * startPrice;
+					} else {
+						factor = w / startPrice;
+						startWeight = w;
+					}
 				} else {
 					factor = link.priceFactor();
 				}
-				byService.put(link.service(),
-						new Factor(region, country, link.service(), link.priceName(), weight, startPrice, factor));
+				byService.put(link.service(), new Factor(region, country, link.service(), link.priceName(), fileWeight,
+						startWeight, startPrice, factor));
 			}
 			factors.put(region, byService);
 		}
@@ -227,10 +255,12 @@ public final class PriceScaling {
 	/** Writes every factor to a CSV file (price_factors.csv). */
 	public void writeCsv(Path file) {
 		List<String> lines = new ArrayList<>();
-		lines.add("Region,Country,Service,PLUM_price_name,Basis,Scaling,CRAFTY_start_weight,PLUM_start_price,Factor");
+		lines.add("Region,Country,Service,PLUM_price_name,Basis,Scaling,File_weight,CRAFTY_start_weight,PLUM_start_price,"
+				+ "Factor");
 		for (Factor f : factors()) {
 			lines.add(String.join(",", csv(f.region()), csv(f.country()), csv(f.service()), csv(f.priceName()),
-					basis.key(), scaling.key(), number(f.startWeight()), number(f.startPrice()), number(f.factor())));
+					basis.key(), scaling.key(), number(f.fileWeight()), number(f.startWeight()), number(f.startPrice()),
+					number(f.factor())));
 		}
 		try {
 			Files.createDirectories(file.toAbsolutePath().getParent());

@@ -264,8 +264,12 @@ public class Config {
                 + "|-> plum_coupling_mode=" + plum_coupling_mode + "\n"
                 + "|-> plum_price_scaling=" + plum_price_scaling + "\n"
                 + "|-> plum_price_basis=" + plum_price_basis + "\n"
+                + "|-> initialise_regional_price_weights=" + initialise_regional_price_weights + "\n"
                 + "|-> plum_consumption=" + plum_consumption + "\n"
                 + "|-> dynamic_trade_capitals=" + dynamic_trade_capitals + "\n"
+                + "|-> trade_capital_slope=" + trade_capital_slope + "\n"
+                + "|-> trade_capital_midpoint=" + trade_capital_midpoint + "\n"
+                + "|-> trade_capital_averaging_years=" + trade_capital_averaging_years + "\n"
                 + "] \n\n";
     }
 
@@ -314,11 +318,23 @@ public class Config {
     // exporter: PLUM's world export price, the same for every region.
     // importer: the country's import price, the world price x its import mark-up.
     public String plum_price_basis = "domestic";
+    // With index scaling and the importer or domestic basis: true starts each region at the file price x its
+    // country's PLUM price / PLUM's world price, instead of at the file price itself. The file prices are global
+    // (median producer or export prices), so this gives each region its own start price from PLUM's mark-ups. It
+    // changes nothing with the exporter basis or factor scaling, which the coupler warns about.
+    public boolean initialise_regional_price_weights = false;
     // true: each year, each region's consumption for transport export shares is PLUM's domestic use, so the
     // consumption files are only needed for the start year. false: the consumption files, for every year.
     public boolean plum_consumption = true;
-    // true: the trade capitals are updated from PLUM's net exports each year and written over the capitals
-    // file's values.
+    // true: the trade capitals are updated from PLUM each year and written over the capitals file's values.
     public boolean dynamic_trade_capitals = false;
+    // The trade-capital rule with dynamic_trade_capitals: capital = 1 / (1 + exp(-slope x (ratio - midpoint))),
+    // where ratio = the region's production / domestic use of the capital's crop in PLUM. Self-sufficiency
+    // (ratio = midpoint) gives 0.5. To be calibrated.
+    public double trade_capital_slope = 6;
+    public double trade_capital_midpoint = 1;
+    // Each year a trade capital moves 1/k of the way to the rule's value: (1 - 1/k) x last year's value + 1/k x
+    // the rule's value, starting from the file value. 1 = no averaging.
+    public int trade_capital_averaging_years = 5;
 
 }

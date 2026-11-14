@@ -94,5 +94,9 @@ plum_calibration_run: false                  # true = calibration run: write the
 plum_coupling_mode: sequential               # sequential or overlapping
 plum_price_scaling: index                    # index or factor
 plum_price_basis: domestic                   # domestic (import-share-weighted country price), exporter (world price) or importer
+initialise_regional_price_weights: false     # true (index scaling, importer or domestic basis): each region starts at file price x its PLUM price / world price
 plum_consumption: true                       # PLUM's domestic use as each year's consumption for export shares (consumption files then need only the start year)
-dynamic_trade_capitals: false                # trade capitals updated from PLUM's net exports each year
+dynamic_trade_capitals: false                # trade capitals updated from PLUM each year (Capitals.csv PLUM_name says which crop)
+trade_capital_slope: 6                       # trade capital = 1 / (1 + exp(-slope x (production / domestic use - midpoint)))
+trade_capital_midpoint: 1                    # self-sufficiency ratio at which a trade capital is 0.5
+trade_capital_averaging_years: 5             # each year a trade capital moves 1/k of the way to the rule's value; 1 = no averaging

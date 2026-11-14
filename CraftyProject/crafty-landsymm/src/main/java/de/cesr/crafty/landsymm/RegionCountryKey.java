@@ -55,6 +55,13 @@ public final class RegionCountryKey {
 		if (!blankCountry.isEmpty()) {
 			problems.add(name + ": region(s) with a blank " + COUNTRY_COLUMN + " on some cells: " + listed(blankCountry));
 		}
+		Set<String> unquotable = new TreeSet<>();
+		countriesByRegion.values().forEach(countries -> countries.stream()
+				.filter(c -> c.indexOf(',') >= 0 || c.indexOf('"') >= 0).forEach(unquotable::add));
+		if (!unquotable.isEmpty()) {
+			problems.add(name + ": " + COUNTRY_COLUMN + " name(s) with a comma or a double quote, which production.csv "
+					+ "can't carry (it is unquoted, and PLUM splits on commas): " + listed(unquotable));
+		}
 		Map<String, String> countryByRegion = new TreeMap<>();
 		Map<String, Set<String>> regionsByCountry = new TreeMap<>();
 		countriesByRegion.forEach((region, countries) -> {

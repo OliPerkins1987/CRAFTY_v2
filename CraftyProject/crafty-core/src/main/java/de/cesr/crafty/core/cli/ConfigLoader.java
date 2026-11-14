@@ -454,6 +454,16 @@ public class ConfigLoader {
 		if (c.plum_calibration_final_year < 0) {
 			problems.add("plum_calibration_final_year must be 0 or more, got: " + c.plum_calibration_final_year);
 		}
+		if (!Double.isFinite(c.trade_capital_slope) || c.trade_capital_slope <= 0) {
+			problems.add("trade_capital_slope must be a number more than 0, got: " + c.trade_capital_slope);
+		}
+		if (!Double.isFinite(c.trade_capital_midpoint) || c.trade_capital_midpoint < 0) {
+			problems.add("trade_capital_midpoint must be a number of 0 or more, got: " + c.trade_capital_midpoint);
+		}
+		if (c.trade_capital_averaging_years < 1) {
+			problems.add("trade_capital_averaging_years must be 1 (no averaging) or more, got: "
+					+ c.trade_capital_averaging_years);
+		}
 		return problems.isEmpty() ? null : String.join("\n", problems);
 	}
 

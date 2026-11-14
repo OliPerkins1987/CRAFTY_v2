@@ -100,7 +100,7 @@ class CouplingStartupCheckTest {
 	}
 
 	@Test
-	void theStandInTradeCapitalRuleAndUnusedConsumptionAreWarnedAbout() {
+	void unusedConsumptionIsWarnedAboutButTheTradeCapitalRuleNoLonger() {
 		Config c = coupledScenario();
 		c.dynamic_trade_capitals = true;
 		c.use_transport_costs = false;
@@ -108,9 +108,67 @@ class CouplingStartupCheckTest {
 		CouplingStartupCheck.Report r = CouplingStartupCheck.configReport(c);
 
 		assertEquals(List.of(), r.problems());
-		assertEquals(2, r.warnings().size(), String.join("\n", r.warnings()));
-		assertTrue(r.warnings().get(0).startsWith("dynamic_trade_capitals"));
-		assertTrue(r.warnings().get(1).startsWith("plum_consumption"));
+		assertEquals(1, r.warnings().size(), String.join("\n", r.warnings()));
+		assertTrue(r.warnings().get(0).startsWith("plum_consumption"));
+	}
+
+	@Test
+	void aRegionalStartThatChangesNothingIsWarnedAbout() {
+		Config exporter = coupledScenario();
+		exporter.initialise_regional_price_weights = true;
+		exporter.plum_price_basis = "exporter";
+		List<String> warnings = CouplingStartupCheck.configReport(exporter).warnings();
+		assertEquals(1, warnings.size(), String.join("\n", warnings));
+		assertTrue(warnings.get(0).contains("plum_price_basis is exporter"), warnings.get(0));
+
+		Config factor = coupledScenario();
+		factor.initialise_regional_price_weights = true;
+		factor.plum_price_scaling = "factor";
+		assertTrue(CouplingStartupCheck.configReport(factor).warnings().stream()
+				.anyMatch(w -> w.contains("plum_price_scaling is factor")));
+
+		Config domestic = coupledScenario();
+		domestic.initialise_regional_price_weights = true;
+		assertEquals(List.of(), CouplingStartupCheck.configReport(domestic).warnings(), "domestic and index: it acts");
+	}
+
+	@Test
+	void withDynamicTradeCapitalsCapitalsCsvsPlumNamesAreRead() throws Exception {
+		Config c = coupledScenario();
+		c.dynamic_trade_capitals = true;
+		finishedCalibration(c);
+
+		CouplingStartupCheck.Report r = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(),
+				TradeCapitalMapTest.capitals(), gis(), 1990, 2020);
+
+		assertEquals(List.of(), r.problems());
+		assertEquals(9, r.tradeCapitals().cropByCapital().size());
+
+		c.dynamic_trade_capitals = false;
+		assertNull(CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(),
+				TradeCapitalMapTest.capitals(), gis(), 1990, 2020).tradeCapitals(), "only read with the switch on");
+	}
+
+	@Test
+	void capitalsCsvProblemsAndUntaggedTradeCapitalsAreReported() throws Exception {
+		Config c = coupledScenario();
+		c.dynamic_trade_capitals = true;
+		finishedCalibration(c);
+		Path capitals = tempDir.resolve("Capitals.csv");
+		Files.writeString(capitals, Files.readString(TradeCapitalMapTest.capitals()).replace("C3 rice,rice", "C3 rice,"));
+
+		CouplingStartupCheck.Report untagged = CouplingStartupCheck.dataReport(c,
+				ServiceCommodityMapTest.globalServices(), capitals, gis(), 1990, 2020);
+		assertEquals(List.of(), untagged.problems());
+		assertTrue(untagged.warnings().stream().anyMatch(w -> w.contains("[rice_trade]")),
+				String.join("\n", untagged.warnings()));
+
+		Files.writeString(capitals, "Label,Name,Type,Description\nc3_cereals_trade,x,Capital,x\n");
+		assertTrue(CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), capitals, gis(), 1990,
+				2020).problems().stream().anyMatch(p -> p.contains("PLUM_name")));
+
+		assertTrue(CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), null, gis(), 1990,
+				2020).problems().stream().anyMatch(p -> p.contains("no Capitals.csv")));
 	}
 
 	// ---- Data ----
@@ -140,7 +198,7 @@ class CouplingStartupCheckTest {
 		Config c = coupledScenario();
 		finishedCalibration(c);
 
-		CouplingStartupCheck.Report r = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(),
+		CouplingStartupCheck.Report r = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), null,
 				gis(), 1990, 2020);
 
 		assertEquals(List.of(), r.problems());
@@ -156,7 +214,7 @@ class CouplingStartupCheckTest {
 		Files.delete(Path.of(c.plum_calibration_path).resolve("wood.txt"));
 		Files.delete(Path.of(c.calibration_production_path).resolve("1990").resolve("production.csv"));
 
-		List<String> problems = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), gis(),
+		List<String> problems = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), null, gis(),
 				1990, 2020).problems();
 
 		assertEquals(3, problems.size(), String.join("\n", problems));
@@ -173,7 +231,7 @@ class CouplingStartupCheckTest {
 		Files.createDirectories(done.getParent());
 		Files.createFile(done);
 
-		List<String> problems = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), gis(),
+		List<String> problems = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), null, gis(),
 				1990, 2020).problems();
 
 		assertEquals(1, problems.size(), String.join("\n", problems));
@@ -186,17 +244,17 @@ class CouplingStartupCheckTest {
 		finishedCalibration(c);
 		c.coupled_end_year = 2021;
 
-		List<String> late = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), gis(), 1990,
+		List<String> late = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), null, gis(), 1990,
 				2020).problems();
 		assertEquals(1, late.size(), String.join("\n", late));
 		assertTrue(late.get(0).startsWith("coupled_end_year (2021)"));
 
 		c.coupled_end_year = 2000;
-		assertEquals(List.of(), CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), gis(),
+		assertEquals(List.of(), CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), null, gis(),
 				1990, 2020).problems());
 
 		c.plum_calibration_final_year = 1990;
-		List<String> early = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), gis(), 1990,
+		List<String> early = CouplingStartupCheck.dataReport(c, ServiceCommodityMapTest.globalServices(), null, gis(), 1990,
 				2020).problems();
 		assertTrue(early.stream().anyMatch(p -> p.startsWith("plum_calibration_final_year (1990)")),
 				String.join("\n", early));
@@ -209,7 +267,7 @@ class CouplingStartupCheckTest {
 		Path services = tempDir.resolve("Services.csv");
 		Files.writeString(services, "Name,Market_good\nC3cereals,Yes\n");
 
-		CouplingStartupCheck.Report r = CouplingStartupCheck.dataReport(c, services, null, 1990, 2020);
+		CouplingStartupCheck.Report r = CouplingStartupCheck.dataReport(c, services, null, null, 1990, 2020);
 
 		assertEquals(2, r.problems().size(), String.join("\n", r.problems()));
 		assertTrue(r.problems().get(0).contains("PLUM_name"));
@@ -224,10 +282,11 @@ class CouplingStartupCheckTest {
 	void afterLoadingTheGisFileRegionsAndRegionalisationAreChecked() throws Exception {
 		RegionCountryKey key = RegionCountryKey.read(gis());
 
-		assertEquals(List.of(), CouplingStartupCheck.afterLoadProblems(key, gis(), Set.of("Tanzania"), true));
+		assertEquals(List.of(),
+				CouplingStartupCheck.afterLoadProblems(key, gis(), Set.of("Tanzania", "Italy_and_Malta"), true));
 
 		List<String> problems = CouplingStartupCheck.afterLoadProblems(key, tempDir.resolve("other_Regions.csv"),
-				Set.of("Tanzania", "Atlantis"), true);
+				Set.of("Tanzania", "Italy_and_Malta", "Atlantis"), true);
 		assertEquals(2, problems.size(), String.join("\n", problems));
 		assertTrue(problems.get(0).contains("other_Regions.csv"));
 		assertTrue(problems.get(1).contains("[Atlantis]"));
@@ -235,6 +294,16 @@ class CouplingStartupCheckTest {
 		List<String> single = CouplingStartupCheck.afterLoadProblems(key, gis(), Set.of("World"), false);
 		assertEquals(1, single.size(), String.join("\n", single));
 		assertTrue(single.get(0).startsWith("CRAFTY fell back to a single region"));
+	}
+
+	@Test
+	void aRegionInTheKeyWithNoCellsStops() throws Exception {
+		RegionCountryKey key = RegionCountryKey.read(gis());
+
+		List<String> problems = CouplingStartupCheck.afterLoadProblems(key, gis(), Set.of("Tanzania"), true);
+
+		assertEquals(1, problems.size(), String.join("\n", problems));
+		assertTrue(problems.get(0).contains("no cells in CRAFTY: [Italy_and_Malta]"), problems.get(0));
 	}
 
 	@Test

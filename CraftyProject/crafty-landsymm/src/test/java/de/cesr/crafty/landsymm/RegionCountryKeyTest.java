@@ -72,6 +72,16 @@ class RegionCountryKeyTest {
 	}
 
 	@Test
+	void aCountryNameWithACommaOrAQuoteStopsTheRead() throws IOException {
+		CouplingInputException e = assertThrows(CouplingInputException.class, () -> RegionCountryKey
+				.read(gis("1,1,\"Korea\",1,\"Korea, Republic of\"\n2,1,\"Cote\",1,\"C\"\"ote\"\n3,1,\"Chile\",1,\"Chile\"\n")));
+
+		assertEquals(1, e.getProblems().size(), e.getMessage());
+		assertTrue(e.getMessage().contains("comma or a double quote"), e.getMessage());
+		assertTrue(e.getMessage().contains("[C\"ote, Korea, Republic of]"), e.getMessage());
+	}
+
+	@Test
 	void aFileWithNoRegionsStopsTheRead() throws IOException {
 		assertThrows(CouplingInputException.class, () -> RegionCountryKey.read(gis("1,1,\"\",1,\"\"\n")));
 	}

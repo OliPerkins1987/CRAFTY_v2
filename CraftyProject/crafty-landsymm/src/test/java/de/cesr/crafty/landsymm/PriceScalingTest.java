@@ -200,12 +200,54 @@ class PriceScalingTest {
 		s.writeCsv(file);
 
 		List<String> lines = Files.readAllLines(file);
-		assertEquals("Region,Country,Service,PLUM_price_name,Basis,Scaling,CRAFTY_start_weight,PLUM_start_price,Factor",
-				lines.get(0));
+		assertEquals("Region,Country,Service,PLUM_price_name,Basis,Scaling,File_weight,CRAFTY_start_weight,"
+				+ "PLUM_start_price,Factor", lines.get(0));
 		assertEquals(1 + 3 * 13, lines.size(), "3 regions x 13 market services");
 		// Argentina is a net exporter of ruminants, so its domestic price is the world price
-		assertTrue(lines.contains("Argentina,Argentina,Pasture,ruminants,domestic,index,300.0," + 0.13263045 + ","
+		assertTrue(lines.contains("Argentina,Argentina,Pasture,ruminants,domestic,index,300.0,300.0," + 0.13263045 + ","
 				+ (300 / 0.13263045)), String.join("\n", lines));
+	}
+
+	@Test
+	void aRegionalStartGivesEachRegionItsCountrysMarkUpOnTheFilePrice() throws Exception {
+		Fixture f = fixture();
+		double world = y2029.price("wheat");
+
+		for (Basis basis : List.of(Basis.DOMESTIC, Basis.IMPORTER)) {
+			PriceScaling s = PriceScaling.create(Scaling.INDEX, basis, f.services, f.key, f.weights(300), y2029, true);
+			for (String country : List.of("Tanzania", "Argentina")) {
+				double countryPrice = PriceScaling.plumPrice(basis, y2029, country, "wheat");
+				PriceScaling.Factor factor = s.factor(country, "C3cereals");
+				assertEquals(300 / world, factor.factor(), 1e-9, basis + ", " + country + ": the world-price factor");
+				assertEquals(300 * countryPrice / world, factor.startWeight(), 1e-9);
+				assertEquals(300.0, factor.fileWeight(), 0.0);
+				assertEquals(300 * countryPrice / world, s.price(country, "C3cereals", y2029), 1e-9,
+						"the start year's price is the regional start");
+			}
+		}
+		// Tanzania imports wheat, so it starts above the file price; Argentina exports it, so at the file price
+		PriceScaling domestic = PriceScaling.create(Scaling.INDEX, Basis.DOMESTIC, f.services, f.key, f.weights(300),
+				y2029, true);
+		assertTrue(domestic.factor("Tanzania", "C3cereals").startWeight() > 300);
+		assertEquals(300.0, domestic.factor("Argentina", "C3cereals").startWeight(), 1e-9);
+	}
+
+	@Test
+	void aRegionalStartChangesNothingWithTheExporterBasisOrFactorScaling() throws Exception {
+		Fixture f = fixture();
+		for (Scaling scaling : Scaling.values()) {
+			PriceScaling plain = PriceScaling.create(scaling, Basis.EXPORTER, f.services, f.key, f.weights(300), y2029);
+			PriceScaling regional = PriceScaling.create(scaling, Basis.EXPORTER, f.services, f.key, f.weights(300), y2029,
+					true);
+			assertEquals(plain.price("Tanzania", "C3cereals", y2029), regional.price("Tanzania", "C3cereals", y2029),
+					1e-12, scaling.key());
+		}
+		PriceScaling plainFactor = PriceScaling.create(Scaling.FACTOR, Basis.DOMESTIC, f.services, f.key,
+				f.weights(300), y2029);
+		PriceScaling regionalFactor = PriceScaling.create(Scaling.FACTOR, Basis.DOMESTIC, f.services, f.key,
+				f.weights(300), y2029, true);
+		assertEquals(plainFactor.price("Tanzania", "C3cereals", y2029),
+				regionalFactor.price("Tanzania", "C3cereals", y2029), 0.0);
 	}
 
 	// ---- Fixtures ----

@@ -1084,8 +1084,12 @@ class ConfigLoaderTest {
         assertEquals("sequential", c.plum_coupling_mode);
         assertEquals("index", c.plum_price_scaling);
         assertEquals("domestic", c.plum_price_basis);
+        assertFalse(c.initialise_regional_price_weights);
         assertTrue(c.plum_consumption);
         assertFalse(c.dynamic_trade_capitals);
+        assertEquals(6.0, c.trade_capital_slope);
+        assertEquals(1.0, c.trade_capital_midpoint);
+        assertEquals(5, c.trade_capital_averaging_years);
         assertEquals(ConfigLoader.PLUM_COUPLING_MODES.get(0), c.plum_coupling_mode, "The default is listed first");
         assertEquals(ConfigLoader.PLUM_PRICE_SCALINGS.get(0), c.plum_price_scaling, "The default is listed first");
         assertEquals(ConfigLoader.PLUM_PRICE_BASES.get(0), c.plum_price_basis, "The default is listed first");
@@ -1174,7 +1178,38 @@ class ConfigLoaderTest {
         inRange.plum_wait_timeout_minutes = 1;
         inRange.coupled_end_year = 2000;
         inRange.plum_calibration_final_year = 2030;
+        inRange.trade_capital_slope = 0.5;
+        inRange.trade_capital_midpoint = 0;
         assertNull(ConfigLoader.plumCouplingConfigError(inRange));
+    }
+
+    @Test
+    void aTradeCapitalSlopeOf0OrLessOrANegativeMidpointShouldStopTheRun() {
+        for (double slope : new double[] { 0, -6, Double.NaN, Double.POSITIVE_INFINITY }) {
+            Config c = new Config();
+            c.trade_capital_slope = slope;
+            assertTrue(String.valueOf(ConfigLoader.plumCouplingConfigError(c)).contains("trade_capital_slope"),
+                    "slope " + slope);
+        }
+        for (double midpoint : new double[] { -0.1, Double.NaN }) {
+            Config c = new Config();
+            c.trade_capital_midpoint = midpoint;
+            assertTrue(String.valueOf(ConfigLoader.plumCouplingConfigError(c)).contains("trade_capital_midpoint"),
+                    "midpoint " + midpoint);
+        }
+    }
+
+    @Test
+    void tradeCapitalAveragingYearsBelow1ShouldStopTheRun() {
+        for (int years : new int[] { 0, -5 }) {
+            Config c = new Config();
+            c.trade_capital_averaging_years = years;
+            assertTrue(String.valueOf(ConfigLoader.plumCouplingConfigError(c)).contains("trade_capital_averaging_years"),
+                    "k " + years);
+        }
+        Config noAveraging = new Config();
+        noAveraging.trade_capital_averaging_years = 1;
+        assertNull(ConfigLoader.plumCouplingConfigError(noAveraging));
     }
 
     @Test
@@ -1232,7 +1267,11 @@ class ConfigLoaderTest {
                 + "plum_price_scaling: factor\n"
                 + "plum_price_basis: importer\n"
                 + "plum_consumption: false\n"
-                + "dynamic_trade_capitals: true\n");
+                + "dynamic_trade_capitals: true\n"
+                + "trade_capital_slope: 4.5\n"
+                + "trade_capital_midpoint: 1\n"
+                + "initialise_regional_price_weights: true\n"
+                + "trade_capital_averaging_years: 3\n");
         ConfigLoader.configPath = configFile.toString();
 
         Config cfg = invokeLoadConfig();
@@ -1251,6 +1290,10 @@ class ConfigLoaderTest {
         assertEquals("importer", cfg.plum_price_basis);
         assertFalse(cfg.plum_consumption);
         assertTrue(cfg.dynamic_trade_capitals);
+        assertEquals(4.5, cfg.trade_capital_slope);
+        assertEquals(1.0, cfg.trade_capital_midpoint, "a whole number in the YAML loads as a double");
+        assertTrue(cfg.initialise_regional_price_weights);
+        assertEquals(3, cfg.trade_capital_averaging_years);
         assertNull(ConfigLoader.plumCouplingConfigError(cfg));
     }
 }
