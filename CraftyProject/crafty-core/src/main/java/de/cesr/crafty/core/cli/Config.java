@@ -1,5 +1,6 @@
 package de.cesr.crafty.core.cli;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import de.cesr.crafty.core.main.MainHeadless;
@@ -270,6 +271,7 @@ public class Config {
                 + "|-> trade_capital_slope=" + trade_capital_slope + "\n"
                 + "|-> trade_capital_midpoint=" + trade_capital_midpoint + "\n"
                 + "|-> trade_capital_averaging_years=" + trade_capital_averaging_years + "\n"
+                + "|-> plum_coupling_outputs=" + plum_coupling_outputs + "\n"
                 + "] \n\n";
     }
 
@@ -336,5 +338,10 @@ public class Config {
     // Each year a trade capital moves 1/k of the way to the rule's value: (1 - 1/k) x last year's value + 1/k x
     // the rule's value, starting from the file value. 1 = no averaging.
     public int trade_capital_averaging_years = 5;
+    // The coupler's yearly files in plum_coupling/ to write: any of prices_received, production_sent, export_basis,
+    // trade_capitals and ungrazed_grass ([] = none). price_factors.csv and baseline_check.csv are always written.
+    // The launcher sets it from the master YAML's outputs block.
+    public List<String> plum_coupling_outputs = new ArrayList<>(
+            List.of("prices_received", "production_sent", "export_basis", "trade_capitals", "ungrazed_grass"));
 
 }

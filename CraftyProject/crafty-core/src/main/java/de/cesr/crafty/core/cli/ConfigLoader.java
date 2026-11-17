@@ -413,6 +413,12 @@ public class ConfigLoader {
 	public static final List<String> PLUM_PRICE_SCALINGS = List.of("index", "factor");
 	/** The values plum_price_basis can take; the first is the default. */
 	public static final List<String> PLUM_PRICE_BASES = List.of("domestic", "exporter", "importer");
+	/**
+	 * The coupler's yearly files plum_coupling_outputs can name, in the order the launcher lists them; all of them
+	 * are written by default.
+	 */
+	public static final List<String> PLUM_COUPLING_OUTPUTS = List.of("prices_received", "production_sent",
+			"export_basis", "trade_capitals", "ungrazed_grass");
 
 	/**
 	 * The CRAFTY-PLUM coupling keys (used by crafty-landsymm) must hold values the coupler knows, so the run
@@ -463,6 +469,17 @@ public class ConfigLoader {
 		if (c.trade_capital_averaging_years < 1) {
 			problems.add("trade_capital_averaging_years must be 1 (no averaging) or more, got: "
 					+ c.trade_capital_averaging_years);
+		}
+		if (c.plum_coupling_outputs == null) {
+			problems.add("plum_coupling_outputs must be a list of the coupler's yearly files to write, from "
+					+ PLUM_COUPLING_OUTPUTS + "; [] writes none of them");
+		} else {
+			for (Object name : c.plum_coupling_outputs) { // Object: YAML can put a number in the list
+				if (!PLUM_COUPLING_OUTPUTS.contains(String.valueOf(name))) {
+					problems.add("plum_coupling_outputs names a file the coupler doesn't write: " + name
+							+ ". It can name " + PLUM_COUPLING_OUTPUTS);
+				}
+			}
 		}
 		return problems.isEmpty() ? null : String.join("\n", problems);
 	}

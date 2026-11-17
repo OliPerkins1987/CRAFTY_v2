@@ -1,0 +1,40 @@
+# A scenario run (48e): CRAFTY and PLUM together from a complete calibration run, 1990 to end_year.
+#   java -jar crafty-landsymm-1.0.jar --check scenario.yaml        checks everything, starts nothing
+#   java -jar crafty-landsymm-1.0.jar scenario.yaml                runs it
+# Relative paths are relative to this file's folder.
+
+run_name: hist_seq_test1
+output_root: C:/Users/olive/Documents/UEA_fellowship/coupled_runs
+is_calibration_run: false
+calibration_run: C:/Users/olive/Documents/UEA_fellowship/coupled_runs/calib1990_v1   # made by the launcher
+end_year: 1993                              # CRAFTY's last year; PLUM solves it too (END_TIMESTEP = 1993 - 1990)
+# wait_timeout_minutes: 120
+
+coupling:                                   # the coupler's settings, under their config.yaml names; any left out
+  plum_coupling_mode: sequential            # take core's defaults. config.yaml mustn't set them.
+  plum_price_scaling: index
+  plum_price_basis: domestic
+  initialise_regional_price_weights: false
+  plum_consumption: true
+  dynamic_trade_capitals: false
+  # trade_capital_slope: 6
+  # trade_capital_midpoint: 1
+  # trade_capital_averaging_years: 5
+
+outputs:                                    # the coupler's yearly files in plum_coupling/; each defaults to true.
+  prices_received: true                     # price_factors.csv and baseline_check.csv are always written
+  production_sent: true
+  export_basis: true
+  trade_capitals: true
+  ungrazed_grass: true
+
+crafty:
+  config: C:/Users/olive/Documents/UEA_fellowship/Data/CRAFTY_drive/CRAFTY-PLUM-Global/config.yaml
+  heap: 16g
+  # jvm_args: ["-Xlog:gc:file=gc.log"]
+
+plum:
+  config: C:/Users/olive/Documents/UEA_fellowship/PLUM/output/CRAFTY_calib1990/config.properties
+  classes: C:/Users/olive/Documents/UEA_fellowship/PLUM/build/6
+  gams_dir: C:/GAMS/53
+  heap: 3g

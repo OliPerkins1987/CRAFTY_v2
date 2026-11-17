@@ -21,7 +21,9 @@ import de.cesr.crafty.core.updaters.Timestep;
 
 /**
  * Entry point for CRAFTY in a coupled CRAFTY-PLUM run. It takes the same command line as MainHeadless
- * ({@code --config-file ...}) and runs CRAFTY the same way, with the coupler's start-up checks and steps added:
+ * ({@code --config-file ...}) and runs CRAFTY the same way, with the coupler's start-up checks and steps added. The
+ * jar's main class is {@link LandSymmLauncher}, which starts this as a child JVM; to run CRAFTY on its own, use
+ * {@code java -cp crafty-landsymm-1.0.jar de.cesr.crafty.landsymm.MainLandSymm --config-file ...}. In order:
  * <ol>
  * <li>load the config (core's own checks run here);</li>
  * <li>check the coupling settings, before anything loads;</li>
@@ -73,7 +75,11 @@ public final class MainLandSymm {
 		try {
 			// PLUM stops at once if the production folder isn't there when it starts waiting
 			Files.createDirectories(Paths.get(config.crafty_production_path));
-			outputs = CouplingOutputs.inOutputFolder(config.output_folder_name);
+			outputs = CouplingOutputs.inOutputFolder(config.output_folder_name, config.plum_coupling_outputs);
+			if (!outputs.switchedOff().isEmpty()) {
+				LOGGER.info("Coupling: the coupler's yearly files switched off (plum_coupling_outputs): "
+						+ outputs.switchedOff());
+			}
 		} catch (IOException e) {
 			stopIf("Making the production folder", List.of(config.crafty_production_path + ": " + e));
 		} catch (CouplingInputException e) {

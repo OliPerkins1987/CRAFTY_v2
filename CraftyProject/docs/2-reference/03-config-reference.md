@@ -313,8 +313,8 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 
 - `plum_consumption` also changes core: with `coupled_with_plum` on, the consumption files for transport export
   shares only need the start year, because the coupler sets the later years from PLUM.
-- `plum_coupling_mode`, `plum_price_scaling`, `plum_price_basis` and the numbers are checked at start-up,
-  coupled or not. An unknown value, or a number out of range, stops the run.
+- `plum_coupling_mode`, `plum_price_scaling`, `plum_price_basis`, `plum_coupling_outputs` and the numbers are
+  checked at start-up, coupled or not. An unknown value, or a number out of range, stops the run.
 - With `dynamic_trade_capitals` on, a `PLUM_name` column in `csv/Capitals.csv` says which PLUM crop each trade
   capital follows (for example `c3_cereals_trade` → `wheat`), blank for every other capital.
 
@@ -338,10 +338,12 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 | `trade_capital_slope` | number | `6` | The trade-capital rule's slope: capital = 1 / (1 + exp(−slope × (ratio − midpoint))), with ratio = the region's production ÷ domestic use of the capital's crop in PLUM. More than 0. |
 | `trade_capital_midpoint` | number | `1` | The self-sufficiency ratio at which a trade capital is 0.5. 0 or more. |
 | `trade_capital_averaging_years` | integer | `5` | k: each year a trade capital = (1 − 1/k) × last year's value + 1/k × the rule's value, starting from the file value. 1 = no averaging. 1 or more. |
+| `plum_coupling_outputs` | list | all five | The coupler's yearly files in `plum_coupling/` to write: any of `prices_received`, `production_sent`, `export_basis`, `trade_capitals` and `ungrazed_grass`. `[]` writes none of them. `price_factors.csv` and `baseline_check.csv` are always written. The launcher sets it from the master YAML's `outputs` block. |
 
 A coupled run also needs `use_price_feedback: false`, `global_price_feedback: false`,
 `initial_demand_supply_equilibrium: false` and `use_explicit_price_utility: true`. The coupler's own start-up check
-stops the run otherwise.
+stops the run otherwise. The launcher (`LandSymmLauncher`) turns the first three off in a run's copy of
+`config.yaml`.
 
 ---
 

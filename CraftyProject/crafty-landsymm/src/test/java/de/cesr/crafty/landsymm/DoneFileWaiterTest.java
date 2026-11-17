@@ -62,4 +62,43 @@ class DoneFileWaiterTest {
 		assertTrue(e.getMessage().contains(DoneFileWaiter.doneFile(tempDir, 1993).toString()), e.getMessage());
 		assertTrue(e.getMessage().contains("plum_wait_timeout_minutes"), e.getMessage());
 	}
+
+	@Test
+	void plumsErrorFileStopsTheWaitAtOnce() throws Exception {
+		Path error = DoneFileWaiter.errorFile(tempDir, 1994);
+		Thread writer = new Thread(() -> {
+			try {
+				Thread.sleep(300);
+				Files.createDirectories(error.getParent());
+				Files.createFile(error);
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		});
+		writer.start();
+
+		long start = System.nanoTime();
+		CouplingInputException e = assertThrows(CouplingInputException.class,
+				() -> waiter.await(tempDir, 1994, Duration.ofSeconds(20)));
+
+		assertTrue(System.nanoTime() - start < Duration.ofSeconds(10).toNanos(), "not the whole timeout");
+		assertTrue(e.getMessage().contains(error.toString()), "the error file, not a timeout: " + e.getMessage());
+		writer.join();
+	}
+
+	@Test
+	void anErrorFileAlreadyThereStopsItTooButADoneFileWins() throws IOException {
+		Path error = DoneFileWaiter.errorFile(tempDir, 1995);
+		Files.createDirectories(error.getParent());
+		Files.createFile(error);
+
+		long start = System.nanoTime();
+		CouplingInputException e = assertThrows(CouplingInputException.class,
+				() -> waiter.await(tempDir, 1995, Duration.ofSeconds(20)));
+
+		assertTrue(System.nanoTime() - start < Duration.ofSeconds(10).toNanos(), "not the whole timeout");
+		assertTrue(e.getMessage().contains(error.toString()), "the error file, not a timeout: " + e.getMessage());
+		Files.createFile(DoneFileWaiter.doneFile(tempDir, 1995));
+		waiter.await(tempDir, 1995, Duration.ofMillis(10)); // the year's outputs were complete before the error
+	}
 }

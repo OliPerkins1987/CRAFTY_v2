@@ -7,6 +7,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -1090,10 +1091,39 @@ class ConfigLoaderTest {
         assertEquals(6.0, c.trade_capital_slope);
         assertEquals(1.0, c.trade_capital_midpoint);
         assertEquals(5, c.trade_capital_averaging_years);
+        assertEquals(ConfigLoader.PLUM_COUPLING_OUTPUTS, c.plum_coupling_outputs, "Every coupler file by default");
         assertEquals(ConfigLoader.PLUM_COUPLING_MODES.get(0), c.plum_coupling_mode, "The default is listed first");
         assertEquals(ConfigLoader.PLUM_PRICE_SCALINGS.get(0), c.plum_price_scaling, "The default is listed first");
         assertEquals(ConfigLoader.PLUM_PRICE_BASES.get(0), c.plum_price_basis, "The default is listed first");
         assertNull(ConfigLoader.plumCouplingConfigError(c));
+    }
+
+    @Test
+    void couplingOutputsShouldNameOnlyTheCouplersFiles() {
+        Config none = new Config();
+        none.plum_coupling_outputs = new ArrayList<>();
+        assertNull(ConfigLoader.plumCouplingConfigError(none), "[] writes none of them");
+
+        Config some = new Config();
+        some.plum_coupling_outputs = new ArrayList<>(List.of("prices_received", "trade_capitals"));
+        assertNull(ConfigLoader.plumCouplingConfigError(some));
+
+        Config misspelt = new Config();
+        misspelt.plum_coupling_outputs = new ArrayList<>(List.of("prices_recieved"));
+        String error = ConfigLoader.plumCouplingConfigError(misspelt);
+        assertNotNull(error);
+        assertTrue(error.contains("plum_coupling_outputs") && error.contains("prices_recieved"), "Got: " + error);
+
+        Config alwaysWritten = new Config();
+        alwaysWritten.plum_coupling_outputs = new ArrayList<>(List.of("price_factors"));
+        assertNotNull(ConfigLoader.plumCouplingConfigError(alwaysWritten),
+                "price_factors.csv is always written, so it has no switch");
+
+        Config missing = new Config();
+        missing.plum_coupling_outputs = null;
+        String nullError = ConfigLoader.plumCouplingConfigError(missing);
+        assertNotNull(nullError);
+        assertTrue(nullError.contains("plum_coupling_outputs"), "Got: " + nullError);
     }
 
     @Test
@@ -1271,7 +1301,8 @@ class ConfigLoaderTest {
                 + "trade_capital_slope: 4.5\n"
                 + "trade_capital_midpoint: 1\n"
                 + "initialise_regional_price_weights: true\n"
-                + "trade_capital_averaging_years: 3\n");
+                + "trade_capital_averaging_years: 3\n"
+                + "plum_coupling_outputs: [prices_received, trade_capitals]\n");
         ConfigLoader.configPath = configFile.toString();
 
         Config cfg = invokeLoadConfig();
@@ -1294,6 +1325,7 @@ class ConfigLoaderTest {
         assertEquals(1.0, cfg.trade_capital_midpoint, "a whole number in the YAML loads as a double");
         assertTrue(cfg.initialise_regional_price_weights);
         assertEquals(3, cfg.trade_capital_averaging_years);
+        assertEquals(List.of("prices_received", "trade_capitals"), cfg.plum_coupling_outputs);
         assertNull(ConfigLoader.plumCouplingConfigError(cfg));
     }
 }

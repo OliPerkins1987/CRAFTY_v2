@@ -191,3 +191,5 @@ dynamic_trade_capitals: false      # trade capitals updated from PLUM each year,
 trade_capital_slope: 6             # trade capital = 1 / (1 + exp(-slope x (production / domestic use - midpoint))), to be calibrated
 trade_capital_midpoint: 1          # the self-sufficiency ratio (production / domestic use) at which a trade capital is 0.5
 trade_capital_averaging_years: 5   # trade capital = (1 - 1/k) x last year's value + 1/k x the rule's value, from the file value; 1 = no averaging
+# the coupler's yearly files in plum_coupling/ to write ([] = none); price_factors.csv and baseline_check.csv are always written
+plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass]

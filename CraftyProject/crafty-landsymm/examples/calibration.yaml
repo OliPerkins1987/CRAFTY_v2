@@ -1,0 +1,25 @@
+# A calibration run (48e): CRAFTY writes its 1990 production, then PLUM calibrates on it.
+#   java -jar crafty-landsymm-1.0.jar --check calibration.yaml     checks everything, starts nothing
+#   java -jar crafty-landsymm-1.0.jar calibration.yaml             runs it
+# Relative paths are relative to this file's folder.
+
+run_name: calib1990_v1                      # the run folder: <output_root>/<run_name>, which mustn't exist yet
+output_root: C:/Users/olive/Documents/UEA_fellowship/coupled_runs
+is_calibration_run: true
+# wait_timeout_minutes: 120                 # how long each model waits for the other's done file
+
+# outputs:                                  # the coupler's yearly files in plum_coupling/; each defaults to true
+#   production_sent: true                   # (a calibration run writes only production_sent.csv of these)
+
+crafty:
+  config: C:/Users/olive/Documents/UEA_fellowship/Data/CRAFTY_drive/CRAFTY-PLUM-Global/config.yaml
+  heap: 16g                                 # test A: 9.8 GB live heap, 13 GB working set
+  # jvm_args: ["-Xlog:gc:file=gc.log"]     # anything else for CRAFTY's JVM; it runs in <run>/crafty
+  # jar: C:/.../crafty-landsymm-1.0.jar     # default: the jar this launcher runs from
+
+plum:
+  config: C:/Users/olive/Documents/UEA_fellowship/PLUM/output/CRAFTY_calib1990/config.properties
+  classes: C:/Users/olive/Documents/UEA_fellowship/PLUM/build/6
+  gams_dir: C:/GAMS/53
+  heap: 3g                                  # A2, every country, peaked at 0.9 GB used
+  calibration_steps: 15                     # PLUM's END_TIMESTEP; the final year is BASE_YEAR + 15 = 2005
