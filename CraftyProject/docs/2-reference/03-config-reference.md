@@ -317,6 +317,23 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
   checked at start-up, coupled or not. An unknown value, or a number out of range, stops the run.
 - With `dynamic_trade_capitals` on, a `PLUM_name` column in `csv/Capitals.csv` says which PLUM crop each trade
   capital follows (for example `c3_cereals_trade` → `wheat`), blank for every other capital.
+- `use_stock_costs`, `stock_target` and `stock_cost_threshold` are the exception: they are set in your own
+  `config.yaml`, not by the launcher. Core stops the run if `use_stock_costs` is on without `coupled_with_plum` or
+  without `use_production_costs`. It needs a `Stock_cost` row in `global_costs.csv` and a `Pays_stock_cost` column
+  (0–1, blank = 0) in `AFTsMetaData`; either one missing stops the run. Each year, from the same PLUM year as the
+  prices (the calibration's final year in the start year), the coupler sets each market good's cost per unit
+  produced from the PLUM commodity it is priced on (`PLUM_price_name`):
+  - stock ratio = stock ÷ (production + imports − exports). The stock, imports and exports are the world values
+    in `prices.txt` (`Stock Levels (Mt)`, `Imports (Mt)`, `Exports (Mt)`). The production is the sum of `Production`
+    over every country in `domestic.txt` (`wood.txt` for wood).
+  - cost = `Stock_cost` × stock ratio when the stock ratio is above `stock_target` × `stock_cost_threshold`,
+    otherwise 0.
+
+  `PLUM_price_name` and `PLUM_name` are the same for every service but Pasture. PLUM keeps no stock of grass, so
+  Pasture is charged on ruminant stocks, at the ruminants rate per unit of grass. A service whose `PLUM_price_name`
+  has no row in `prices.txt` never pays. An AFT pays, per ha, its `Pays_stock_cost` share of its production × that
+  cost. The cost is not reduced by self-consumption, and it is subtracted from explicit-price utility only;
+  CRAFTY-react ignores it.
 
 | Key | Type | Default | Meaning |
 |---|---:|---|---|
@@ -338,7 +355,10 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 | `trade_capital_slope` | number | `6` | The trade-capital rule's slope: capital = 1 / (1 + exp(−slope × (ratio − midpoint))), with ratio = the region's production ÷ domestic use of the capital's crop in PLUM. More than 0. |
 | `trade_capital_midpoint` | number | `1` | The self-sufficiency ratio at which a trade capital is 0.5. 0 or more. |
 | `trade_capital_averaging_years` | integer | `5` | k: each year a trade capital = (1 − 1/k) × last year's value + 1/k × the rule's value, starting from the file value. 1 = no averaging. 1 or more. |
-| `plum_coupling_outputs` | list | all five | The coupler's yearly files in `plum_coupling/` to write: any of `prices_received`, `production_sent`, `export_basis`, `trade_capitals` and `ungrazed_grass`. `[]` writes none of them. `price_factors.csv` and `baseline_check.csv` are always written. The launcher sets it from the master YAML's `outputs` block. |
+| `use_stock_costs` | boolean | `false` | Charge stock costs, set each year by the coupler from PLUM's world stocks (see above). Set in your `config.yaml`. |
+| `stock_target` | number | `0.3` | The target stock ratio (stock ÷ consumption) for stock costs; PLUM's own target is 0.3. More than 0, checked whether or not stock costs are on. |
+| `stock_cost_threshold` | number | `3` | Stock costs are charged once the stock ratio is above `stock_target` × this. 0 or more, checked whether or not stock costs are on. |
+| `plum_coupling_outputs` | list | all six | The coupler's yearly files in `plum_coupling/` to write: any of `prices_received`, `production_sent`, `export_basis`, `trade_capitals`, `ungrazed_grass` and `stock_costs`. `[]` writes none of them. `price_factors.csv` and `baseline_check.csv` are always written. The launcher sets it from the master YAML's `outputs` block. |
 
 A coupled run also needs `use_price_feedback: false`, `global_price_feedback: false`,
 `initial_demand_supply_equilibrium: false` and `use_explicit_price_utility: true`. The coupler's own start-up check

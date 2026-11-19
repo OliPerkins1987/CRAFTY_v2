@@ -78,6 +78,52 @@ class PlumYearOutputsTest {
 	}
 
 	@Test
+	void stocksComeFromPricesTxt_underTheirTrimmedHeader() throws Exception {
+		PlumYearOutputs y = PlumYearOutputs.read(all1990Extract(), 2029);
+
+		assertEquals(259.142, y.stock("wheat"));
+		assertEquals(612.466, y.stock("ruminants"));
+		assertEquals(1047.916, y.stock("wood"));
+		assertEquals(103.8, y.stock("energycrops"), "read even where the trade columns are NaN");
+		assertTrue(Double.isNaN(y.stock("pasture")), "PLUM keeps no stock of grass");
+		assertEquals(612.483, PlumYearOutputs.read(all1990Extract(), 2030).stock("ruminants"));
+	}
+
+	@Test
+	void worldImportsAndExportsComeFromPricesTxt() throws Exception {
+		PlumYearOutputs y = PlumYearOutputs.read(all1990Extract(), 2029);
+
+		assertEquals(145.9, y.worldImports("wheat"));
+		assertEquals(152.3, y.worldExports("wheat"));
+		assertEquals(171.5, y.worldImports("wood"));
+		assertEquals(173.0, y.worldExports("wood"));
+		assertTrue(Double.isNaN(y.worldImports("energycrops")), "PLUM writes NaN for untraded energy crops");
+		assertTrue(Double.isNaN(y.worldExports("pasture")), "no row");
+		assertEquals(166.3, PlumYearOutputs.read(all1990Extract(), 2030).worldImports("ruminants"));
+	}
+
+	@Test
+	void worldProductionSumsEveryCountry_fromWoodTxtForWood() throws Exception {
+		PlumYearOutputs y = PlumYearOutputs.read(all1990Extract(), 2029);
+
+		assertEquals(0.0008 + 11.1993 + 0.1113, y.worldProduction("wheat"), 1e-12);
+		assertEquals(1.7259 + 81.2402 + 5.8947, y.worldProduction("pasture"), 1e-12);
+		assertEquals(5.9479 + 10.4678 + 20.5838, y.worldProduction("wood"), 1e-12);
+		assertTrue(Double.isNaN(y.worldProduction("barley")), "no rows");
+	}
+
+	@Test
+	void aPricesFileWithoutStocksStops() throws Exception {
+		Path copy = copyOfExtract();
+		String text = Files.readString(copy.resolve("prices.txt")).replace(", Stock Levels (Mt)", ", Stocks");
+		Files.writeString(copy.resolve("prices.txt"), text);
+
+		CouplingInputException e = assertThrows(CouplingInputException.class, () -> PlumYearOutputs.read(copy, 2029));
+
+		assertTrue(e.getMessage().contains("Stock Levels (Mt)"), e.getMessage());
+	}
+
+	@Test
 	void aYearWithNoRowsStopsTheReadForEveryFile() throws Exception {
 		CouplingInputException e = assertThrows(CouplingInputException.class,
 				() -> PlumYearOutputs.read(all1990Extract(), 2031));

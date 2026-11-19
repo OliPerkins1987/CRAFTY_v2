@@ -43,6 +43,13 @@ block at the end, so a diff against your file shows exactly what changed. In par
 - The coupler's settings (`plum_coupling_mode`, `plum_price_basis`, `dynamic_trade_capitals`, …) come only from the
   master YAML's `coupling` block, and `plum_coupling_outputs` from its `outputs` block. A `config.yaml` that sets one
   stops the run.
+- `use_stock_costs`, `stock_target` and `stock_cost_threshold` are the exception: they stay in your `config.yaml`.
+  With stock costs on, a standalone run of that `config.yaml` stops, because stock costs need PLUM. Each year the
+  coupler sets each market good's stock cost per unit, `Stock_cost` (`global_costs.csv`) × stock ratio, where stock
+  ratio = PLUM's world stock ÷ (production + imports − exports) of the commodity it is priced on
+  (`PLUM_price_name`), when the ratio is above `stock_target` × `stock_cost_threshold`. It writes every term to
+  `plum_coupling/stock_costs.csv` (`outputs: stock_costs`, on by default). AFTs pay their `Pays_stock_cost` share
+  (`AFTsMetaData`). Pasture follows ruminant stocks, since PLUM keeps no stock of grass.
 - PLUM's config must already have `ALL_CRAFTY_COUNTRIES=true` and `BASE_YEAR` = CRAFTY's start year; the launcher
   sets `IS_CALIBRATION_RUN`, the timesteps, `OUTPUT_DIR`, `CRAFTY_PRODUCTION_DIR`, `CALIB_DIR` and
   `LPJG_MONITOR_TIMEOUT`.

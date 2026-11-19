@@ -31,6 +31,9 @@ use_production_costs: false                    # Enable production cost subtract
 spatial_production_costs: false                 # When true, costs are read per-cell from spatial CSV; when false, global per-AFT costs apply
 costs_directory: ''                            # Directory containing production cost CSVs (required when use_production_costs is true)
 use_transport_costs: false                     # Needs use_production_costs; a <service>_transport row in global_costs.csv for every market good (every service if Services.csv has no Market_good column), x production x the region's export share (spatial_production_costs: supply above consumption, from costs/spatial/export/<scenario>/consumption_<region>.csv) or each AFT's *_trade value (global)
+use_stock_costs: false                         # Coupled CRAFTY-PLUM runs only (needs coupled_with_plum and use_production_costs, or the run stops); a Stock_cost row in global_costs.csv and a Pays_stock_cost column (0-1) in AFTsMetaData. Each year the coupler sets each market good's cost per unit from PLUM's world rows: stock ratio = stock / (production + imports - exports); cost = Stock_cost x stock ratio when the ratio is above stock_target x stock_cost_threshold, else 0
+stock_target: 0.3                              # Target stock ratio (stock / consumption) for stock costs; PLUM's own target is 0.3. More than 0
+stock_cost_threshold: 3                        # Stock costs are charged once the stock ratio is above stock_target x this. 0 or more
 
 most_competitive_aft_probability: 0.8         # Probability of selecting the highest-utility AFT for cell
 averaged_residual_demand_per_cell: false      # Averaged residual demand for each cell
@@ -101,4 +104,4 @@ trade_capital_slope: 6                       # trade capital = 1 / (1 + exp(-slo
 trade_capital_midpoint: 1                    # self-sufficiency ratio at which a trade capital is 0.5
 trade_capital_averaging_years: 5             # each year a trade capital moves 1/k of the way to the rule's value; 1 = no averaging
 # The coupler's yearly files in plum_coupling/ to write ([] = none); price_factors.csv and baseline_check.csv are always written
-plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass]
+plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass, stock_costs]

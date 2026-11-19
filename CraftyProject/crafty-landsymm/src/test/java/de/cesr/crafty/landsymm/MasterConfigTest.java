@@ -41,7 +41,7 @@ class MasterConfigTest {
 		assertEquals(LauncherFixture.CALIBRATION_STEPS, m.calibrationSteps());
 		assertEquals(120, m.waitTimeoutMinutes());
 		assertEquals(List.of("prices_received", "production_sent", "export_basis", "trade_capitals",
-				"ungrazed_grass"), m.outputs(), "every file by default");
+				"ungrazed_grass", "stock_costs"), m.outputs(), "every file by default");
 		assertTrue(m.coupling().isEmpty());
 		assertEquals(f.jar, m.craftyJar());
 		assertEquals(f.gamsDir.resolve("apifiles/Java/api/GAMSJavaAPI.jar"), m.gamsJar());
@@ -63,7 +63,8 @@ class MasterConfigTest {
 		assertEquals("overlapping", m.coupling().get("plum_coupling_mode"));
 		assertEquals(true, m.coupling().get("dynamic_trade_capitals"));
 		assertEquals(6, m.coupling().get("trade_capital_slope"), "a whole number is still a number");
-		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass"), m.outputs());
+		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass", "stock_costs"),
+				m.outputs());
 		assertEquals(List.of("export_basis"), m.outputsOff());
 		assertEquals(0, m.calibrationSteps());
 	}

@@ -10,8 +10,9 @@ import java.util.TreeMap;
 
 /**
  * One year of PLUM's outputs, as the coupler uses them: from {@code prices.txt}, each commodity's
- * {@code New export price} (the world price PLUM trades at the following year); from {@code domestic.txt} and
- * {@code wood.txt}, each country's production, net imports and import and export prices.
+ * {@code New export price} (the world price PLUM trades at the following year), {@code Stock Levels (Mt)} (PLUM's
+ * world stock at the end of the year) and world {@code Imports (Mt)} and {@code Exports (Mt)}; from
+ * {@code domestic.txt} and {@code wood.txt}, each country's production, net imports and import and export prices.
  *
  * PLUM appends a block to each file every year, so the files are read one line at a time and only the year's rows
  * are kept. Header names are trimmed (PLUM writes {@code Year, Country, Crop}). Values are kept as PLUM wrote them,
@@ -24,6 +25,13 @@ public final class PlumYearOutputs {
 	public static final String PRICES_FILE = "prices.txt";
 	public static final String DOMESTIC_FILE = "domestic.txt";
 	public static final String WOOD_FILE = "wood.txt";
+	static final String STOCK_COLUMN = "Stock Levels (Mt)";
+	static final String IMPORTS_COLUMN = "Imports (Mt)";
+	static final String EXPORTS_COLUMN = "Exports (Mt)";
+
+	/** A commodity's world row in prices.txt: its New export price, stock, imports and exports. */
+	private record World(double price, double stock, double imports, double exports) {
+	}
 
 	/**
 	 * A country's trade in one commodity: production, net imports (negative for net exports; surplus counted as
@@ -42,15 +50,15 @@ public final class PlumYearOutputs {
 
 	private final Path folder;
 	private final int year;
-	private final Map<String, Double> prices;
+	private final Map<String, World> world; // commodity
 	private final Map<String, Map<String, Domestic>> domestic; // country, crop
 	private final Map<String, Wood> wood; // country
 
-	private PlumYearOutputs(Path folder, int year, Map<String, Double> prices,
+	private PlumYearOutputs(Path folder, int year, Map<String, World> world,
 			Map<String, Map<String, Domestic>> domestic, Map<String, Wood> wood) {
 		this.folder = folder;
 		this.year = year;
-		this.prices = Collections.unmodifiableMap(prices);
+		this.world = Collections.unmodifiableMap(world);
 		this.domestic = Collections.unmodifiableMap(domestic);
 		this.wood = Collections.unmodifiableMap(wood);
 	}
@@ -58,24 +66,28 @@ public final class PlumYearOutputs {
 	/** Reads a year of PLUM's outputs from its output folder, stopping with every problem found. */
 	public static PlumYearOutputs read(Path plumOutputFolder, int year) {
 		List<String> problems = new ArrayList<>();
-		Map<String, Double> prices = readPrices(plumOutputFolder.resolve(PRICES_FILE), year, problems);
+		Map<String, World> world = readPrices(plumOutputFolder.resolve(PRICES_FILE), year, problems);
 		Map<String, Map<String, Domestic>> domestic = readDomestic(plumOutputFolder.resolve(DOMESTIC_FILE), year,
 				problems);
 		Map<String, Wood> wood = readWood(plumOutputFolder.resolve(WOOD_FILE), year, problems);
 		if (!problems.isEmpty()) {
 			throw new CouplingInputException(problems);
 		}
-		return new PlumYearOutputs(plumOutputFolder, year, prices, domestic, wood);
+		return new PlumYearOutputs(plumOutputFolder, year, world, domestic, wood);
 	}
 
-	private static Map<String, Double> readPrices(Path file, int year, List<String> problems) {
-		Map<String, Double> prices = new TreeMap<>();
-		readYear(file, year, List.of("Year", "Crop", "New export price"), problems, (line, v) -> {
-			if (prices.put(v[1], CsvReader.parseNumber(file, line, "New export price", v[2])) != null) {
+	private static Map<String, World> readPrices(Path file, int year, List<String> problems) {
+		Map<String, World> world = new TreeMap<>();
+		List<String> columns = List.of("Year", "Crop", "New export price", STOCK_COLUMN, IMPORTS_COLUMN,
+				EXPORTS_COLUMN);
+		readYear(file, year, columns, problems, (line, v) -> {
+			World row = new World(number(file, line, columns, v, 2), number(file, line, columns, v, 3),
+					number(file, line, columns, v, 4), number(file, line, columns, v, 5));
+			if (world.put(v[1], row) != null) {
 				problems.add(file + ", line " + line + ": " + v[1] + " appears twice in " + year);
 			}
 		});
-		return prices;
+		return world;
 	}
 
 	private static Map<String, Map<String, Domestic>> readDomestic(Path file, int year, List<String> problems) {
@@ -145,12 +157,55 @@ public final class PlumYearOutputs {
 
 	/** A commodity's New export price; NaN if prices.txt has no row for it. */
 	public double price(String priceName) {
-		return prices.getOrDefault(priceName, Double.NaN);
+		World w = world.get(priceName);
+		return w == null ? Double.NaN : w.price();
 	}
 
 	/** Every commodity in prices.txt for the year. */
 	public Set<String> priceNames() {
-		return prices.keySet();
+		return world.keySet();
+	}
+
+	/** A commodity's world stock at the end of the year (Stock Levels in prices.txt); NaN if there is no row. */
+	public double stock(String commodity) {
+		World w = world.get(commodity);
+		return w == null ? Double.NaN : w.stock();
+	}
+
+	/** A commodity's world imports in the year (Imports in prices.txt); NaN if there is no row. */
+	public double worldImports(String commodity) {
+		World w = world.get(commodity);
+		return w == null ? Double.NaN : w.imports();
+	}
+
+	/** A commodity's world exports in the year (Exports in prices.txt); NaN if there is no row. */
+	public double worldExports(String commodity) {
+		World w = world.get(commodity);
+		return w == null ? Double.NaN : w.exports();
+	}
+
+	/**
+	 * A commodity's world production in the year: the sum of Production over every country with a row, in wood.txt
+	 * for wood and in domestic.txt otherwise. NaN if no country has a row, or if a country's Production is NaN.
+	 */
+	public double worldProduction(String commodity) {
+		double sum = 0;
+		int rows = 0;
+		if (PlumCommodities.WOOD.equals(commodity)) {
+			for (Wood w : wood.values()) {
+				sum += w.trade().production();
+				rows++;
+			}
+		} else {
+			for (Map<String, Domestic> crops : domestic.values()) {
+				Domestic d = crops.get(commodity);
+				if (d != null) {
+					sum += d.trade().production();
+					rows++;
+				}
+			}
+		}
+		return rows == 0 ? Double.NaN : sum;
 	}
 
 	/** The countries in domestic.txt for the year. */

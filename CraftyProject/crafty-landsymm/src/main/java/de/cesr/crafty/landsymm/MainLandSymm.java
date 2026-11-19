@@ -97,8 +97,8 @@ public final class MainLandSymm {
 			ProductionStep.Regions regions = ProductionStep.Regions.ofModel();
 			production = new ProductionStep(config, data.services(), data.key(), outputs, regions);
 			StepInserter.Steps steps = config.plum_calibration_run
-					? new StepInserter.Steps(PlumInputStep.inCalibrationRun(), TradeCapitalStep.off(),
-							ConsumptionStep.off(), production)
+					? new StepInserter.Steps(PlumInputStep.inCalibrationRun(), StockCostStep.off(),
+							TradeCapitalStep.off(), ConsumptionStep.off(), production)
 					: scenarioSteps(config, data, outputs, regions, startYear, production);
 			StepInserter.insert(runner.getScheduled(), steps, config.plum_coupling_mode, StepInserter.Anchors.of(runner));
 		} catch (CouplingInputException e) {
@@ -161,6 +161,21 @@ public final class MainLandSymm {
 						config.trade_capital_slope, config.trade_capital_midpoint, config.trade_capital_averaging_years,
 						data.key(), outputs, regions)
 				: TradeCapitalStep.off();
+		StockCostStep stockCost = StockCostStep.off();
+		if (config.use_stock_costs) {
+			StockCosts stockCosts = StockCosts.create(data.services(), calibrationRows,
+					ProductionCostUpdater.getGlobalCostData().getStockCost(), config.stock_target,
+					config.stock_cost_threshold);
+			stockCost = new StockCostStep(plumYear, stockCosts, outputs, ProductionCostUpdater::setStockCosts);
+			LOGGER.info("Coupling from PLUM: stock costs, Stock_cost " + stockCosts.stockCost()
+					+ " x stock ratio (world stock / (production + imports - exports)) when the ratio is above "
+					+ "stock_target " + config.stock_target + " x stock_cost_threshold " + config.stock_cost_threshold
+					+ " = " + stockCosts.criticalRatio() + ", on "
+					+ stockCosts.payers().stream().map(ServiceCommodityMap.Link::service).toList()
+					+ (stockCosts.exempt().isEmpty() ? ""
+							: "; never on " + stockCosts.exempt() + ", whose PLUM_price_name has no row in PLUM's "
+									+ PlumYearOutputs.PRICES_FILE));
+		}
 		LOGGER.info("Coupling from PLUM: prices from the calibration's " + config.plum_calibration_final_year
 				+ " rows in " + startYear + ", then PLUM's year t - 1"
 				+ (config.initialise_regional_price_weights ? ", each region starting at its country's mark-up" : "")
@@ -169,7 +184,7 @@ public final class MainLandSymm {
 				+ "; trade capitals " + (config.dynamic_trade_capitals ? "from PLUM (slope " + config.trade_capital_slope
 						+ ", midpoint " + config.trade_capital_midpoint + ", averaged over "
 						+ config.trade_capital_averaging_years + " years)" : "from the files"));
-		return new StepInserter.Steps(plumInput, tradeCapitals, consumption, production);
+		return new StepInserter.Steps(plumInput, stockCost, tradeCapitals, consumption, production);
 	}
 
 	private static void report(String what, CouplingStartupCheck.Report report) {

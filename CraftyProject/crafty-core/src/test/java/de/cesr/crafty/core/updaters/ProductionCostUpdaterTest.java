@@ -814,6 +814,68 @@ class ProductionCostUpdaterTest {
 		assertEquals(Map.of("C3cereals", 50.0), data.getIntensityCosts());
 	}
 
+	// =========================================================
+	// Stock costs
+	// =========================================================
+
+	@Test
+	void globalCostData_keepsTheStockCostOutOfIntensity() throws IOException {
+		Path csvPath = writeCsv(tempDir, "global_costs.csv",
+				"Item,Cost,Notes",
+				"C3cereals,50,service cost",
+				"C3cereals_transport,7.5,per tonne",
+				"Stock_cost,40,per tonne");
+
+		GlobalCostData data = new GlobalCostData(csvPath);
+
+		assertTrue(data.hasStockCost());
+		assertEquals(40.0, data.getStockCost(), 0.0);
+		assertEquals(Map.of("C3cereals", 50.0), data.getIntensityCosts());
+		assertEquals(Map.of("C3cereals", 7.5), data.getTransportCosts());
+		assertNull(ProductionCostUpdater.stockCostProblem(data));
+	}
+
+	@Test
+	void stockCostProblem_aMissingOrNegativeRowStopsTheRun() throws IOException {
+		GlobalCostData none = new GlobalCostData(writeCsv(tempDir, "global_costs.csv",
+				"Item,Cost,Notes",
+				"C3cereals,50,service cost"));
+		assertFalse(none.hasStockCost());
+		assertTrue(Double.isNaN(none.getStockCost()));
+		String missing = ProductionCostUpdater.stockCostProblem(none);
+		assertNotNull(missing);
+		assertTrue(missing.contains("Stock_cost"), "Got: " + missing);
+
+		GlobalCostData negative = new GlobalCostData(writeCsv(tempDir, "global_costs_negative.csv",
+				"Item,Cost,Notes",
+				"Stock_cost,-1,"));
+		String below = ProductionCostUpdater.stockCostProblem(negative);
+		assertNotNull(below);
+		assertTrue(below.contains("0 or more"), "Got: " + below);
+
+		GlobalCostData zero = new GlobalCostData(writeCsv(tempDir, "global_costs_zero.csv",
+				"Item,Cost,Notes",
+				"Stock_cost,0,"));
+		assertNull(ProductionCostUpdater.stockCostProblem(zero), "0 only warns");
+	}
+
+	@Test
+	void stockCosts_areEmptyUntilTheCouplerSetsThem_andANewUpdaterClearsThem() throws IOException {
+		writeGlobalModeFiles();
+		// writeGlobalModeFiles switches transport on; without transport rows the updater would stop the JVM.
+		ConfigLoader.config.use_transport_costs = false;
+		try {
+			ProductionCostUpdater.setStockCosts(new double[] { 1.0, 0.0, 0.0 });
+			new ProductionCostUpdater();
+			assertEquals(0, ProductionCostUpdater.getStockCosts().length);
+
+			ProductionCostUpdater.setStockCosts(new double[] { 1.0, 0.0, 0.0 });
+			assertArrayEquals(new double[] { 1.0, 0.0, 0.0 }, ProductionCostUpdater.getStockCosts(), 0.0);
+		} finally {
+			ProductionCostUpdater.setStockCosts(new double[0]);
+		}
+	}
+
 	@Test
 	void missingTransportCosts_listsMarketGoodsWithNoRow_inOrder() {
 		assertEquals(List.of("ser1", "ser3"),

@@ -76,6 +76,10 @@ public abstract class AbstractAft {
 	// produces that it uses itself, so that never reaches supply
 	private double selfConsumption = 0.0;
 
+	// Stock costs (use_stock_costs): the share, 0-1, of the stock cost on its production that
+	// this AFT pays (Pays_stock_cost in AFTsMetaData)
+	private double paysStockCost = 0.0;
+
 	// Matrix give-in (use_matrix_give_in): this AFT's row of the give-in matrix, i.e. its
 	// give-in threshold against each challenger, keyed by the challenger's label. A
 	// challenger with no value falls back to giveInMean. Null when the switch is off.
@@ -335,6 +339,14 @@ public abstract class AbstractAft {
 
 	public void setSelfConsumption(double selfConsumption) {
 		this.selfConsumption = selfConsumption;
+	}
+
+	public double getPaysStockCost() {
+		return paysStockCost;
+	}
+
+	public void setPaysStockCost(double paysStockCost) {
+		this.paysStockCost = paysStockCost;
 	}
 
 	public double getReceivesSubsidy() {

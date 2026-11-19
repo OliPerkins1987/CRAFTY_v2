@@ -165,6 +165,10 @@ public class ConfigLoader {
 		if (transportError != null) {
 			LOGGER.fatal(transportError);
 		}
+		String stockError = stockCostConfigError(config);
+		if (stockError != null) {
+			LOGGER.fatal(stockError);
+		}
 	}
 
 	/**
@@ -179,6 +183,37 @@ public class ConfigLoader {
 					+ "switch use_production_costs on, or use_transport_costs off.";
 		}
 		return null;
+	}
+
+	/**
+	 * The stock cost rules in {@link #validateProductionCostConfig()}, kept separate because LOGGER.fatal exits
+	 * the JVM and so cannot be exercised from a test. Stock costs are set each year by the CRAFTY-PLUM coupler
+	 * from PLUM's world stocks, so a run without the coupling would never charge them. The two numbers are checked
+	 * whether or not the switch is on, so that a mistake can't wait unnoticed until it is turned on.
+	 *
+	 * @return the message to stop the run with, listing every problem, or null if the settings are valid
+	 */
+	static String stockCostConfigError(Config c) {
+		List<String> problems = new ArrayList<>();
+		if (!Double.isFinite(c.stock_target) || c.stock_target <= 0) {
+			problems.add("stock_target must be a number more than 0 (a stock / consumption ratio), got: "
+					+ c.stock_target);
+		}
+		if (!Double.isFinite(c.stock_cost_threshold) || c.stock_cost_threshold < 0) {
+			problems.add("stock_cost_threshold must be a number of 0 or more, got: " + c.stock_cost_threshold);
+		}
+		if (!c.use_stock_costs) {
+			return problems.isEmpty() ? null : String.join("\n", problems);
+		}
+		if (!c.coupled_with_plum) {
+			problems.add("use_stock_costs is on but coupled_with_plum is off. Stock costs come from PLUM's world "
+					+ "stocks, which only a coupled CRAFTY-PLUM run has: run coupled, or switch use_stock_costs off.");
+		}
+		if (!c.use_production_costs) {
+			problems.add("use_stock_costs is on but use_production_costs is off. The stock cost is a production cost: "
+					+ "switch use_production_costs on, or use_stock_costs off.");
+		}
+		return problems.isEmpty() ? null : String.join("\n", problems);
 	}
 
 	static void validateTwinnedAftConfig() {
@@ -418,7 +453,7 @@ public class ConfigLoader {
 	 * are written by default.
 	 */
 	public static final List<String> PLUM_COUPLING_OUTPUTS = List.of("prices_received", "production_sent",
-			"export_basis", "trade_capitals", "ungrazed_grass");
+			"export_basis", "trade_capitals", "ungrazed_grass", "stock_costs");
 
 	/**
 	 * The CRAFTY-PLUM coupling keys (used by crafty-landsymm) must hold values the coupler knows, so the run
@@ -516,6 +551,10 @@ public class ConfigLoader {
 
 	public static boolean isUseTransportCosts() {
 		return config != null && config.use_transport_costs;
+	}
+
+	public static boolean isUseStockCosts() {
+		return config != null && config.use_stock_costs;
 	}
 
 	/**

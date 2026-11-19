@@ -192,4 +192,11 @@ trade_capital_slope: 6             # trade capital = 1 / (1 + exp(-slope x (prod
 trade_capital_midpoint: 1          # the self-sufficiency ratio (production / domestic use) at which a trade capital is 0.5
 trade_capital_averaging_years: 5   # trade capital = (1 - 1/k) x last year's value + 1/k x the rule's value, from the file value; 1 = no averaging
 # the coupler's yearly files in plum_coupling/ to write ([] = none); price_factors.csv and baseline_check.csv are always written
-plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass]
+plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass, stock_costs]
+# Stock costs: set here, not by the launcher. Needs coupled_with_plum and use_production_costs (the run stops
+# otherwise), a Stock_cost row in global_costs.csv and a Pays_stock_cost column (0-1) in AFTsMetaData.
+# Charged per unit as Stock_cost x stock ratio, stock ratio = stock / (production + imports - exports) from PLUM's
+# world rows, when the ratio is above stock_target x stock_cost_threshold.
+use_stock_costs: false
+stock_target: 0.3                  # target stock ratio (PLUM's own target is 0.3)
+stock_cost_threshold: 3            # charged once the stock ratio is above stock_target x this

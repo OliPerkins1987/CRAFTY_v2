@@ -901,6 +901,65 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void stockCostsShouldBeOffByDefault() {
+        Config c = new Config();
+
+        assertFalse(c.use_stock_costs, "Stock costs must be off by default");
+        assertEquals(0.3, c.stock_target, 0.0, "PLUM's own target");
+        assertEquals(3.0, c.stock_cost_threshold, 0.0);
+        assertNull(ConfigLoader.stockCostConfigError(c));
+    }
+
+    @Test
+    void stockTargetAndThresholdOutOfRangeShouldStopTheRun_evenWithStockCostsOff() {
+        Config c = new Config();
+        c.stock_target = 0;
+        c.stock_cost_threshold = -1;
+
+        String error = ConfigLoader.stockCostConfigError(c);
+
+        assertNotNull(error, "Checked whether or not use_stock_costs is on");
+        assertTrue(error.contains("stock_target") && error.contains("stock_cost_threshold"), "Got: " + error);
+
+        c.stock_target = Double.NaN;
+        c.stock_cost_threshold = 0;
+        String nan = ConfigLoader.stockCostConfigError(c);
+        assertTrue(nan.contains("stock_target") && !nan.contains("stock_cost_threshold"),
+                "A threshold of 0 (always charge) is allowed. Got: " + nan);
+    }
+
+    @Test
+    void stockCostsWithoutThePlumCouplingShouldStopTheRun() throws Exception {
+        String error = ConfigLoader.stockCostConfigError(
+                configWithSwitchesOn("use_stock_costs", "use_production_costs"));
+
+        assertNotNull(error, "Stock costs come from PLUM, so a standalone run must be rejected");
+        assertTrue(error.contains("coupled_with_plum"), "The message must say how to fix it. Got: " + error);
+        assertFalse(error.contains("use_production_costs is off"), "Got: " + error);
+    }
+
+    @Test
+    void stockCostsWithoutProductionCostsShouldStopTheRun() throws Exception {
+        String error = ConfigLoader.stockCostConfigError(configWithSwitchesOn("use_stock_costs", "coupled_with_plum"));
+
+        assertNotNull(error);
+        assertTrue(error.contains("use_production_costs"), "Got: " + error);
+        assertFalse(error.contains("coupled_with_plum is off"), "Got: " + error);
+
+        String both = ConfigLoader.stockCostConfigError(configWithSwitchesOn("use_stock_costs"));
+        assertTrue(both.contains("coupled_with_plum") && both.contains("use_production_costs"),
+                "Both problems are listed together. Got: " + both);
+    }
+
+    @Test
+    void stockCostsInACoupledRunWithProductionCostsShouldBeAccepted() throws Exception {
+        assertNull(ConfigLoader.stockCostConfigError(
+                configWithSwitchesOn("use_stock_costs", "coupled_with_plum", "use_production_costs")));
+        assertNull(ConfigLoader.stockCostConfigError(configWithSwitchesOn("coupled_with_plum")),
+                "A coupled run needs no stock costs");
+    }
+
+    @Test
     void priceFeedbackShouldBeOffByDefault() {
         Config c = new Config();
 

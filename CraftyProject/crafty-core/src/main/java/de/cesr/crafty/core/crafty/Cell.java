@@ -32,7 +32,7 @@ import de.cesr.crafty.core.utils.general.DeterministicRandom;
  * - Production costs:
  *   {@link #productionCost(Aft, RegionalModelRunner)} is the $/ha subtracted from explicit-price utility:
  *   fertiliser, irrigation, intensity and stocking costs, plus
- *   {@link #transportCost(Aft, RegionalModelRunner)}.
+ *   {@link #transportCost(Aft, RegionalModelRunner)} and {@link #stockCost(Aft)}.
  *
  * - Behavioural land abandonment (give-up):
  *   {@link #giveUp(RegionalModelRunner, ConcurrentHashMap)} compares the cell utility to the mean utility
@@ -136,7 +136,34 @@ public class Cell extends AbstractCell {
 		} else {
 			cost += a.getNfertCostPerHa() + a.getIntensityCostPerHa() + a.getStockingCostPerHa();
 		}
-		return cost + transportCost(a, r);
+		return cost + transportCost(a, r) + stockCost(a);
+	}
+
+	/**
+	 * The cost of world stocks, $/ha (use_stock_costs): for each service with a stock cost this year (set by the
+	 * CRAFTY-PLUM coupler from PLUM's world stock and production of its commodity), the AFT's production x that cost
+	 * per unit, times the AFT's Pays_stock_cost share. It is charged on production, as transport is. Unlike
+	 * transport, it is not reduced by self-consumption: Pays_stock_cost already says how much of it the AFT pays.
+	 * It is kept out of the cell cost maps, so CRAFTY-react never sees it.
+	 */
+	double stockCost(Aft a) {
+		double[] unitCosts = ProductionCostUpdater.getStockCosts();
+		if (unitCosts.length == 0) {
+			return 0.0;
+		}
+		final double share = a.getPaysStockCost();
+		if (share == 0.0) {
+			return 0.0;
+		}
+		List<String> services = ServiceSet.getServicesList();
+		double cost = 0.0;
+		for (int i = 0; i < Math.min(unitCosts.length, services.size()); i++) {
+			// Zero for every service that pays no stock cost this year.
+			if (unitCosts[i] == 0.0)
+				continue;
+			cost += productivity(a, services.get(i)) * unitCosts[i];
+		}
+		return cost * share;
 	}
 
 	/**

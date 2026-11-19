@@ -161,6 +161,76 @@ class AFTsLoaderTest {
         }
     }
 
+    // -----------------------------
+    // Pays_stock_cost (use_stock_costs)
+    // -----------------------------
+
+    @Test
+    void parseShare_readsBlankAsZero_andOnlyAcceptsZeroToOne() {
+        assertEquals(0.0, AFTsLoader.parseShare(""), 0.0);
+        assertEquals(0.0, AFTsLoader.parseShare("NaN"), 0.0);
+        assertEquals(0.0, AFTsLoader.parseShare(null), 0.0);
+        assertEquals(0.5, AFTsLoader.parseShare(" 0.5 "), 0.0);
+        assertEquals(1.0, AFTsLoader.parseShare("1"), 0.0);
+
+        assertTrue(Double.isNaN(AFTsLoader.parseShare("1.01")));
+        assertTrue(Double.isNaN(AFTsLoader.parseShare("-0.5")));
+        assertTrue(Double.isNaN(AFTsLoader.parseShare("half")));
+    }
+
+    @Test
+    void stockCostSummary_countsTheFullPayers_andListsTheRestInLabelOrder() {
+        Aft agri = producingAft("Agri", 1.0);
+        Aft family = producingAft("Family", 1.0);
+        Aft sosh = producingAft("Sosh", 0.5);
+        Aft swidden = producingAft("Swidden", 0.0);
+        Aft pastoralist = producingAft("Pastoralist", 0.0);
+        Aft urban = new Aft("Urban");
+        urban.setType(ManagerTypes.MASK);
+
+        assertEquals("stock costs are on (Pays_stock_cost): 2 AFT(s) pay all of it; a share: Sosh 0.5; "
+                + "none of it: Pastoralist, Swidden",
+                AFTsLoader.stockCostSummary(List.of(swidden, agri, urban, sosh, pastoralist, family)));
+        assertEquals("stock costs are on (Pays_stock_cost): 1 AFT(s) pay all of it; a share: none; none of it: none",
+                AFTsLoader.stockCostSummary(List.of(agri)));
+    }
+
+    @Test
+    void initializeAftList_readsPaysStockCost_onlyWhenTheSwitchIsOn() throws Exception {
+        Path metaData = tempDir.resolve("AFTsMetaData_stock_cost.csv");
+        Files.write(metaData, List.of("Label,Type,Color,Pays_stock_cost", "Agri,AFT,#cc6300,1",
+                "Sosh,AFT,#cc6300,0.5", "Swidden,AFT,#cc6300,0", "Urban,Mask,#ff0000,"));
+        Field path = ProjectLoader.class.getDeclaredField("aftMetaData");
+        path.setAccessible(true);
+        Object pathBackup = path.get(null);
+        boolean switchBackup = ConfigLoader.config.use_stock_costs;
+        try {
+            path.set(null, metaData);
+
+            ConfigLoader.config.use_stock_costs = true;
+            initializeAftList();
+            assertEquals(1.0, AFTsLoader.getAftHash().get("Agri").getPaysStockCost(), 0.0);
+            assertEquals(0.5, AFTsLoader.getAftHash().get("Sosh").getPaysStockCost(), 0.0);
+            assertEquals(0.0, AFTsLoader.getAftHash().get("Swidden").getPaysStockCost(), 0.0);
+            assertEquals(0.0, AFTsLoader.getAftHash().get("Urban").getPaysStockCost(), 0.0, "blank is 0");
+
+            // Off: the column is not read at all.
+            ConfigLoader.config.use_stock_costs = false;
+            initializeAftList();
+            assertEquals(0.0, AFTsLoader.getAftHash().get("Agri").getPaysStockCost(), 0.0);
+        } finally {
+            path.set(null, pathBackup);
+            ConfigLoader.config.use_stock_costs = switchBackup;
+        }
+    }
+
+    private static Aft producingAft(String label, double paysStockCost) {
+        Aft a = new Aft(label);
+        a.setType(ManagerTypes.AFT);
+        a.setPaysStockCost(paysStockCost);
+        return a;
+    }
+
     /**
      * Runs AFTsLoader's private initializeAftList() on its own, without the rest of the constructor,
      * which needs a whole project. It reads and writes only static state, so a mock instance will do.

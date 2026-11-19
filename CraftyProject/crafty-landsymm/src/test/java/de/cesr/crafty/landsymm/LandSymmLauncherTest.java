@@ -133,7 +133,8 @@ class LandSymmLauncherTest {
 		assertTrue(crafty.contains("\nplum_price_basis: \"exporter\"\n"), crafty);
 		assertTrue(crafty.contains("\ntrade_capital_slope: 4.5\n"), crafty);
 		assertTrue(crafty.contains(
-				"\nplum_coupling_outputs: [prices_received, production_sent, trade_capitals, ungrazed_grass]\n"), crafty);
+				"\nplum_coupling_outputs: [prices_received, production_sent, trade_capitals, ungrazed_grass, stock_costs]\n"),
+				crafty);
 
 		String plum = Files.readString(run.resolve("plum/config.properties"));
 		assertTrue(plum.contains("\nIS_CALIBRATION_RUN=false\n"), plum);

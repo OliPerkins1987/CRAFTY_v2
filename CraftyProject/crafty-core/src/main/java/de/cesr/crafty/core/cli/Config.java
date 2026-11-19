@@ -64,6 +64,17 @@ public class Config {
     // of supply; consumption from costs/spatial/export/<scenario>/) with spatial_production_costs, and the
     // AFT's *_trade value without. Explicit-price utility only; CRAFTY-react ignores it.
     public boolean use_transport_costs = false;
+    // Stock costs (coupled CRAFTY-PLUM runs only: needs use_production_costs and coupled_with_plum, or the run
+    // stops). Each year the coupler gives each market good a cost per unit produced from PLUM's world rows for its
+    // commodity: stock ratio = stock / (production + imports - exports), and the cost is Stock_cost
+    // (global_costs.csv) x stock ratio when the ratio is above stock_target x stock_cost_threshold, 0 otherwise.
+    // An AFT pays, per ha, its Pays_stock_cost share (AFTsMetaData, 0-1) of production x that cost.
+    // Explicit-price utility only; CRAFTY-react ignores it.
+    public boolean use_stock_costs = false;
+    // The target stock ratio (stock / consumption) that stock costs are measured against; PLUM's own target is 0.3.
+    public double stock_target = 0.3;
+    // Stock costs are charged once the stock ratio is above stock_target x stock_cost_threshold.
+    public double stock_cost_threshold = 3;
 
     // Price-explicit giving up
     public boolean use_price_explicit_giving_up = false;
@@ -237,6 +248,9 @@ public class Config {
                 + "|-> spatial_production_costs=" + spatial_production_costs + "\n"
                 + "|-> costs_directory=" + costs_directory + "\n"
                 + "|-> use_transport_costs=" + use_transport_costs + "\n"
+                + "|-> use_stock_costs=" + use_stock_costs + "\n"
+                + "|-> stock_target=" + stock_target + "\n"
+                + "|-> stock_cost_threshold=" + stock_cost_threshold + "\n"
                 + "|-> use_price_explicit_giving_up=" + use_price_explicit_giving_up + "\n"
                 + "|-> prescribed_subsidies_path=" + prescribed_subsidies_path + "\n"
                 + "|-> use_twinned_afts=" + use_twinned_afts + "\n"
@@ -339,9 +353,9 @@ public class Config {
     // the rule's value, starting from the file value. 1 = no averaging.
     public int trade_capital_averaging_years = 5;
     // The coupler's yearly files in plum_coupling/ to write: any of prices_received, production_sent, export_basis,
-    // trade_capitals and ungrazed_grass ([] = none). price_factors.csv and baseline_check.csv are always written.
-    // The launcher sets it from the master YAML's outputs block.
-    public List<String> plum_coupling_outputs = new ArrayList<>(
-            List.of("prices_received", "production_sent", "export_basis", "trade_capitals", "ungrazed_grass"));
+    // trade_capitals, ungrazed_grass and stock_costs ([] = none). price_factors.csv and baseline_check.csv are always
+    // written. The launcher sets it from the master YAML's outputs block.
+    public List<String> plum_coupling_outputs = new ArrayList<>(List.of("prices_received", "production_sent",
+            "export_basis", "trade_capitals", "ungrazed_grass", "stock_costs"));
 
 }

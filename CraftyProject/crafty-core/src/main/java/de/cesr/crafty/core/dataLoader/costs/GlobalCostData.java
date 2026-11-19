@@ -16,9 +16,14 @@ public class GlobalCostData {
 	private Map<String, Double> intensityCosts = new HashMap<>();
 	// Transport cost per unit of production, keyed by service: the <service>_transport rows
 	private Map<String, Double> transportCosts = new HashMap<>();
+	// The Stock_cost row (use_stock_costs), $ per unit produced; NaN when the file has no such row
+	private double stockCost = Double.NaN;
 
 	/** The suffix that marks a transport cost row: {@code <service>_transport}. */
 	public static final String TRANSPORT_SUFFIX = "_transport";
+
+	/** The row holding the stock cost per unit produced (use_stock_costs). */
+	public static final String STOCK_COST = "Stock_cost";
 
 	public GlobalCostData(Path globalCostsCsv) {
 		Map<String, List<String>> csv = CsvProcessors.ReadAsaHash(globalCostsCsv);
@@ -58,6 +63,11 @@ public class GlobalCostData {
 				 */
 				continue;
 			}
+			if (item.equalsIgnoreCase(STOCK_COST)) {
+				// Kept out of the intensity map, where it would never match a service name.
+				stockCost = cost;
+				continue;
+			}
 			if (item.endsWith(TRANSPORT_SUFFIX)) {
 				// Kept out of the intensity map, where it would never match a service name.
 				transportCosts.put(item.substring(0, item.length() - TRANSPORT_SUFFIX.length()), cost);
@@ -67,7 +77,8 @@ public class GlobalCostData {
 			intensityCosts.put(item, cost);
 		}
 		LOGGER.info("Loaded global costs: Nfert=" + nfertUnitCost + ", Stocking=" + stockingUnitCost
-				+ ", intensity items=" + intensityCosts.keySet() + ", transport items=" + transportCosts.keySet());
+				+ ", intensity items=" + intensityCosts.keySet() + ", transport items=" + transportCosts.keySet()
+				+ (hasStockCost() ? ", " + STOCK_COST + "=" + stockCost : ""));
 	}
 
 	public double getNfertUnitCost() {
@@ -85,5 +96,15 @@ public class GlobalCostData {
 	/** Transport cost per unit of production, by service (the {@code <service>_transport} rows). */
 	public Map<String, Double> getTransportCosts() {
 		return transportCosts;
+	}
+
+	/** The stock cost per unit produced (the {@code Stock_cost} row); NaN when the file has none. */
+	public double getStockCost() {
+		return stockCost;
+	}
+
+	/** Whether the file has a {@code Stock_cost} row. */
+	public boolean hasStockCost() {
+		return !Double.isNaN(stockCost);
 	}
 }

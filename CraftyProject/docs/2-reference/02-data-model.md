@@ -189,6 +189,16 @@ suitability capitals only), not competitiveness. The factor depends on the cost 
 Transport is subtracted from explicit-price utility only, so it affects giving in and giving up; CRAFTY-react
 ignores it.
 
+With `use_stock_costs` on (coupled CRAFTY-PLUM runs only; it needs `coupled_with_plum` and `use_production_costs`, or
+the run stops), `global_costs.csv` also needs a `Stock_cost` row (the cost per unit produced; the run stops if it is
+missing), and `AFTsMetaData` needs a `Pays_stock_cost` column: each AFT's share of the stock cost, 0 to 1, blank = 0.
+Each year the coupler sets every market good's cost per unit from PLUM's world rows for the commodity it is priced on
+(`PLUM_price_name`, so Pasture follows ruminant stocks):
+`Stock_cost` × stock ratio, with stock ratio = stock ÷ (production + imports − exports), when the stock ratio is
+above `stock_target` × `stock_cost_threshold`, and 0 otherwise. An AFT pays, per ha, its `Pays_stock_cost`
+share of its production × that cost. Like transport, it is charged on production, subtracted from explicit-price
+utility only, and ignored by CRAFTY-react. See the coupling section of the config reference.
+
 ### Capitals metadata
 Defines the authoritative capital list (used by capital loading and by AFT sensitivity matrices).
 Typical columns:

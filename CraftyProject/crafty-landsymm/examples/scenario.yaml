@@ -27,6 +27,7 @@ outputs:                                    # the coupler's yearly files in plum
   export_basis: true
   trade_capitals: true
   ungrazed_grass: true
+  stock_costs: true                         # written only with use_stock_costs: true in the CRAFTY config.yaml
 
 crafty:
   config: C:/Users/olive/Documents/UEA_fellowship/Data/CRAFTY_drive/CRAFTY-PLUM-Global/config.yaml

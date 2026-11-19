@@ -69,6 +69,9 @@ public class AFTsLoader extends HashSet<Aft> {
 
 	private static final CustomLogger LOGGER = new CustomLogger(AFTsLoader.class);
 	private static final long serialVersionUID = 1L;
+
+	/** The AFTsMetaData column with each AFT's share, 0-1, of the stock cost it pays (use_stock_costs). */
+	public static final String PAYS_STOCK_COST = "Pays_stock_cost";
 	private static ConcurrentHashMap<String, Aft> hashAFTs = new ConcurrentHashMap<>();
 	private static ConcurrentHashMap<String, Aft> activateAFTsHash = new ConcurrentHashMap<>();
 	public static ConcurrentHashMap<String, Integer> hashAgentNbr = new ConcurrentHashMap<>();
@@ -364,6 +367,15 @@ public class AFTsLoader extends HashSet<Aft> {
 				}
 				a.setSelfConsumption(share);
 			}
+			if (ConfigLoader.config.use_stock_costs && csv.containsKey(PAYS_STOCK_COST)) {
+				String raw = csv.get(PAYS_STOCK_COST).get(i);
+				double share = parseShare(raw);
+				if (Double.isNaN(share)) {
+					LOGGER.fatal("AFT '" + label + "' has " + PAYS_STOCK_COST + " '" + raw.trim()
+							+ "' in AFTsMetaData; it must be blank or a number from 0 to 1");
+				}
+				a.setPaysStockCost(share);
+			}
 			if (csv.containsKey("Receives_subsidy")) {
 				String val = csv.get("Receives_subsidy").get(i).trim();
 				try {
@@ -412,6 +424,12 @@ public class AFTsLoader extends HashSet<Aft> {
 				LOGGER.info(summary);
 			}
 		}
+		if (ConfigLoader.config.use_stock_costs && !csv.containsKey(PAYS_STOCK_COST)) {
+			LOGGER.fatal("use_stock_costs is true but '" + PAYS_STOCK_COST + "' column is missing from AFTsMetaData");
+		}
+		if (ConfigLoader.config.use_stock_costs) {
+			LOGGER.info(stockCostSummary(hashAFTs.values()));
+		}
 		if (ConfigLoader.config.use_price_explicit_giving_up && !csv.containsKey("Receives_subsidy")) {
 			LOGGER.warn("use_price_explicit_giving_up is true but 'Receives_subsidy' column is missing "
 					+ "from AFTsMetaData — all AFTs will default to not receiving subsidies; "
@@ -449,6 +467,16 @@ public class AFTsLoader extends HashSet<Aft> {
 	 * @return the share, or NaN when the cell is not a number from 0 to 1
 	 */
 	static double parseSelfConsumption(String raw) {
+		return parseShare(raw);
+	}
+
+	/**
+	 * One AFTsMetaData cell holding a share from 0 to 1 (self_consumption, Pays_stock_cost). Blank, or "NaN"
+	 * (which Tablesaw gives for an empty numeric cell), is 0.
+	 *
+	 * @return the share, or NaN when the cell is not a number from 0 to 1
+	 */
+	static double parseShare(String raw) {
 		String val = raw == null ? "" : raw.trim();
 		if (val.isEmpty() || val.equalsIgnoreCase("NaN")) {
 			return 0.0;
@@ -471,6 +499,23 @@ public class AFTsLoader extends HashSet<Aft> {
 				.forEach(a -> shares.add(a.getLabel() + " " + a.getSelfConsumption()));
 		return "self consumption is on for market goods " + marketGoods + ": "
 				+ (shares.length() == 0 ? "no AFT has self_consumption above 0" : shares);
+	}
+
+	/**
+	 * The startup line for use_stock_costs: how many producing AFTs pay all of the stock cost, then those that pay a
+	 * share and those that pay none, each in label order. Masks never produce, so they are left out.
+	 */
+	static String stockCostSummary(Collection<Aft> afts) {
+		List<Aft> producers = afts.stream().filter(Aft::isInteract).sorted(Comparator.comparing(Aft::getLabel))
+				.toList();
+		long all = producers.stream().filter(a -> a.getPaysStockCost() == 1.0).count();
+		StringJoiner part = new StringJoiner(", ");
+		producers.stream().filter(a -> a.getPaysStockCost() > 0 && a.getPaysStockCost() < 1.0)
+				.forEach(a -> part.add(a.getLabel() + " " + a.getPaysStockCost()));
+		StringJoiner none = new StringJoiner(", ");
+		producers.stream().filter(a -> a.getPaysStockCost() == 0.0).forEach(a -> none.add(a.getLabel()));
+		return "stock costs are on (" + PAYS_STOCK_COST + "): " + all + " AFT(s) pay all of it; a share: "
+				+ (part.length() == 0 ? "none" : part) + "; none of it: " + (none.length() == 0 ? "none" : none);
 	}
 
 	public static void hashAgentNbr() {

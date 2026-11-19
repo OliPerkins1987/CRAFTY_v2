@@ -90,7 +90,7 @@ class CouplingOutputsTest {
 
 		assertFalse(Files.exists(outputs.file(ProductionStep.PRODUCTION_SENT)));
 		assertEquals(List.of("Year,Value", "1990,2.0"), Files.readAllLines(outputs.file(PlumInputStep.PRICES_RECEIVED)));
-		assertEquals(Set.of("export_basis", "production_sent", "ungrazed_grass"), outputs.switchedOff());
+		assertEquals(Set.of("export_basis", "production_sent", "ungrazed_grass", "stock_costs"), outputs.switchedOff());
 	}
 
 	@Test
@@ -102,13 +102,14 @@ class CouplingOutputsTest {
 		assertFalse(outputs.isWritten(ConsumptionStep.EXPORT_BASIS));
 		assertFalse(outputs.isWritten(TradeCapitalStep.TRADE_CAPITALS));
 		assertFalse(outputs.isWritten(PlumInputStep.UNGRAZED_GRASS));
+		assertFalse(outputs.isWritten(StockCostStep.STOCK_COSTS));
 	}
 
 	@Test
 	void theSwitchesAreTheStepsOwnFileNames() {
 		assertEquals(Set.copyOf(ConfigLoader.PLUM_COUPLING_OUTPUTS),
 				Set.of(PlumInputStep.PRICES_RECEIVED, ProductionStep.PRODUCTION_SENT, ConsumptionStep.EXPORT_BASIS,
-						TradeCapitalStep.TRADE_CAPITALS, PlumInputStep.UNGRAZED_GRASS).stream()
+						TradeCapitalStep.TRADE_CAPITALS, PlumInputStep.UNGRAZED_GRASS, StockCostStep.STOCK_COSTS).stream()
 						.map(n -> n.substring(0, n.length() - ".csv".length())).collect(Collectors.toSet()),
 				"a renamed file would otherwise lose its switch");
 	}

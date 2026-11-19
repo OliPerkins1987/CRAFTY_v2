@@ -652,6 +652,99 @@ class CellTest {
 	}
 
 	// -----------------------------
+	// stock costs (use_stock_costs, set by the CRAFTY-PLUM coupler)
+	// -----------------------------
+
+	@Test
+	void stockCost_isProductionTimesUnitCostTimesTheAftsShare() throws Throwable {
+		withStockCosts(() -> {
+			Cell c = producingCell(stockPayer(0.5, 0.0));
+			// S1: production 2 x 4 per unit x share 0.5; S2 has no stock cost this year.
+			assertEquals(4.0, c.stockCost(c.getOwner()), 1e-12);
+			assertEquals(4.0, c.productionCost(c.getOwner(), null), 1e-12, "no other costs");
+		});
+	}
+
+	@Test
+	void stockCost_isZero_forAnAftThatPaysNone() throws Throwable {
+		withStockCosts(() -> {
+			Cell c = producingCell(stockPayer(0.0, 0.0));
+			assertEquals(0.0, c.stockCost(c.getOwner()), 0.0);
+		});
+	}
+
+	@Test
+	void stockCost_isNotReducedBySelfConsumption() throws Throwable {
+		withStockCosts(() -> {
+			// withMarketGoods puts the switch back.
+			ConfigLoader.config.use_self_consumption = true;
+			Cell c = producingCell(stockPayer(1.0, 0.5));
+			assertEquals(1.0, c.currentSupply(0), 1e-12, "half of S1 is self-consumed");
+			assertEquals(8.0, c.stockCost(c.getOwner()), 1e-12, "Pays_stock_cost alone sets the share");
+		});
+	}
+
+	@Test
+	void stockCost_isChargedOnProduction_notCompetitiveness() throws Throwable {
+		withStockCosts(() -> withTradeCapital(() -> {
+			Aft a = tradeCapitalProducer();
+			when(a.getPaysStockCost()).thenReturn(1.0);
+			Cell c = producingCell(a);
+			c.getCapitals().put("s1_trade", 0.5);
+			// Production 2 x 4, not competitiveness 1 x 4.
+			assertEquals(8.0, c.stockCost(c.getOwner()), 1e-12);
+		}));
+	}
+
+	@Test
+	void stockCost_chargesAChallengerOnItsOwnProduction() throws Throwable {
+		withStockCosts(() -> {
+			Cell c = producingCell(stockPayer(1.0, 0.0));
+			Aft challenger = stockPayer(1.0, 0.0);
+			when(challenger.getProductivityLevel()).thenReturn(new ConcurrentHashMap<>(Map.of("S1", 3.0, "S2", 1.0)));
+			assertEquals(24.0, c.stockCost(challenger), 1e-12);
+		});
+	}
+
+	@Test
+	void stockCost_addsToTransport_inProductionCost() throws Throwable {
+		withTransport(false, () -> {
+			ProductionCostUpdater.setStockCosts(new double[] { 4.0, 0.0 });
+			try {
+				Aft a = trader(0.5, 0.0);
+				when(a.getPaysStockCost()).thenReturn(0.5);
+				Cell c = producingCell(a);
+				// transport 2 x 0.5 x 3 = 3, stock 2 x 4 x 0.5 = 4
+				assertEquals(7.0, c.productionCost(c.getOwner(), null), 1e-12);
+			} finally {
+				ProductionCostUpdater.setStockCosts(new double[0]);
+			}
+		});
+	}
+
+	@Test
+	void stockCost_isNotCharged_untilTheCouplerSetsIt_orWhenProductionCostsAreOff() throws Throwable {
+		withStockCosts(() -> {
+			Cell c = producingCell(stockPayer(1.0, 0.0));
+			ConfigLoader.config.use_production_costs = false;
+			assertEquals(0.0, c.productionCost(c.getOwner(), null), 0.0, "production costs off");
+
+			ConfigLoader.config.use_production_costs = true;
+			ProductionCostUpdater.setStockCosts(new double[0]);
+			assertEquals(0.0, c.stockCost(c.getOwner()), 0.0, "no stock costs set");
+		});
+	}
+
+	@Test
+	void stockCost_leavesProductionAndSupplyAlone() throws Throwable {
+		withStockCosts(() -> {
+			Cell c = producingCell(stockPayer(1.0, 0.0));
+			assertArrayEquals(new double[] { 2.0, 2.0 }, c.getCurrentProd(), 1e-12);
+			assertEquals(2.0, c.currentSupply(0), 1e-12);
+		});
+	}
+
+	// -----------------------------
 	// giveUp(...)
 	// -----------------------------
 
@@ -807,6 +900,29 @@ class CellTest {
 	}
 
 	/**
+	 * Runs a stock cost test body on S1 (stock cost 4 per unit this year) and S2 (none), with production costs on
+	 * in global mode and no transport. Everything set here is restored after.
+	 */
+	private void withStockCosts(Executable body) throws Throwable {
+		withMarketGoods(false, () -> {
+			Config cfg = (Config) ensureConfigInstance();
+			boolean costsBefore = cfg.use_production_costs;
+			boolean spatialBefore = cfg.spatial_production_costs;
+			try {
+				cfg.use_production_costs = true;
+				cfg.spatial_production_costs = false;
+				ProductionCostUpdater.setTransportCosts(new double[0]);
+				ProductionCostUpdater.setStockCosts(new double[] { 4.0, 0.0 });
+				body.execute();
+			} finally {
+				cfg.use_production_costs = costsBefore;
+				cfg.spatial_production_costs = spatialBefore;
+				ProductionCostUpdater.setStockCosts(new double[0]);
+			}
+		});
+	}
+
+	/**
 	 * {@link #withTransport(boolean, Executable)} with spatial production costs and use_transport_costs on,
 	 * so transport is charged on the region's export shares. Both switches are restored after.
 	 */
@@ -866,6 +982,14 @@ class CellTest {
 		Aft a = producer(selfConsumption);
 		when(a.getLabel()).thenReturn("Trader");
 		when(a.getTradeFactor(0)).thenReturn(tradeOnS1);
+		return a;
+	}
+
+	/** A {@link #producer(double)} that pays the given share of the stock cost. */
+	private static Aft stockPayer(double paysStockCost, double selfConsumption) {
+		Aft a = producer(selfConsumption);
+		when(a.getLabel()).thenReturn("StockPayer");
+		when(a.getPaysStockCost()).thenReturn(paysStockCost);
 		return a;
 	}
 

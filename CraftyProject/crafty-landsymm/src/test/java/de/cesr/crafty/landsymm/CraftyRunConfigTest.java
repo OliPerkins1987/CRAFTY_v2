@@ -104,7 +104,7 @@ class CraftyRunConfigTest {
 		assertSame(before, ConfigLoader.config, "core's state is put back");
 		assertEquals(pathBefore, ConfigLoader.configPath);
 		assertTrue(values.keySet().stream().allMatch(CraftyRunConfig.RUN_KEYS::contains), values.keySet().toString());
-		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass"),
+		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass", "stock_costs"),
 				values.get("plum_coupling_outputs"));
 	}
 

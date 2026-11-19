@@ -50,6 +50,10 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	// Domestic consumption by region, then year, then service (indexed like ServiceSet.getServicesList()), read
 	// from costs/spatial/export/<scenario>/. Empty unless transport is charged by export share.
 	private static Map<String, Map<Integer, double[]>> consumption = new HashMap<>();
+	// Stock cost per unit of production, indexed like ServiceSet.getServicesList(); 0 for a service that pays
+	// none this year. Set each year by the CRAFTY-PLUM coupler (use_stock_costs); empty until then, so none is
+	// charged.
+	private static double[] stockCosts = new double[0];
 
 	private Map<Integer, Path> nfertCostPaths = new TreeMap<>();
 	private Map<Integer, Path> irrigationCostPaths = new TreeMap<>();
@@ -59,6 +63,7 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	public ProductionCostUpdater() {
 		transportCosts = new double[0];
 		consumption = new HashMap<>();
+		stockCosts = new double[0];
 		if (!ConfigLoader.isUseProductionCosts()) {
 			LOGGER.info("Production costs disabled");
 			return;
@@ -70,6 +75,9 @@ public class ProductionCostUpdater extends AbstractUpdater {
 			loadTransportCosts();
 		} else {
 			LOGGER.info("Transport costs disabled");
+		}
+		if (ConfigLoader.isUseStockCosts()) {
+			checkStockCost();
 		}
 
 		if (!ConfigLoader.isSpatialProductionCosts()) {
@@ -129,6 +137,45 @@ public class ProductionCostUpdater extends AbstractUpdater {
 			return;
 		}
 		globalCostData = new GlobalCostData(globalCostsCsv);
+	}
+
+	/*
+	 * Stock costs (use_stock_costs): the CRAFTY-PLUM coupler turns the one Stock_cost row of global_costs.csv into
+	 * each service's cost per unit every year, so here the row only has to be there. A missing row stops the run,
+	 * so it cannot pass as no stock cost.
+	 */
+	private void checkStockCost() {
+		if (globalCostData == null) return;
+		String problem = stockCostProblem(globalCostData);
+		if (problem != null) {
+			LOGGER.fatal(problem);
+			return;
+		}
+		if (globalCostData.getStockCost() == 0.0) {
+			LOGGER.warn("use_stock_costs is on but " + GlobalCostData.STOCK_COST
+					+ " is 0 in global_costs.csv, so no stock cost is ever charged");
+		} else {
+			LOGGER.info("Stock costs: " + GlobalCostData.STOCK_COST + " " + globalCostData.getStockCost()
+					+ " per unit produced, x world stock / world production when PLUM's stock is above its production;"
+					+ " the CRAFTY-PLUM coupler sets each service's rate every year");
+		}
+	}
+
+	/**
+	 * The problem with global_costs.csv's stock cost when use_stock_costs is on, kept separate because LOGGER.fatal
+	 * exits the JVM and so cannot be exercised from a test.
+	 *
+	 * @return the message to stop the run with, or null if the row is there and is 0 or more
+	 */
+	static String stockCostProblem(GlobalCostData data) {
+		if (!data.hasStockCost()) {
+			return "use_stock_costs is on but global_costs.csv has no " + GlobalCostData.STOCK_COST
+					+ " row; add one with the stock cost per unit produced";
+		}
+		if (data.getStockCost() < 0) {
+			return GlobalCostData.STOCK_COST + " in global_costs.csv must be 0 or more, got: " + data.getStockCost();
+		}
+		return null;
 	}
 
 	/*
@@ -531,5 +578,18 @@ public class ProductionCostUpdater extends AbstractUpdater {
 	 */
 	public static void setConsumption(Map<String, Map<Integer, double[]>> byRegion) {
 		consumption = byRegion;
+	}
+
+	/**
+	 * Stock cost per unit of production, indexed like ServiceSet.getServicesList(), with 0 for a service that pays
+	 * none this year; empty until the CRAFTY-PLUM coupler sets it (use_stock_costs).
+	 */
+	public static double[] getStockCosts() {
+		return stockCosts;
+	}
+
+	/** Set by the CRAFTY-PLUM coupler each year; the array replaces the whole of what is held. */
+	public static void setStockCosts(double[] costs) {
+		stockCosts = costs;
 	}
 }

@@ -34,7 +34,7 @@
               <finalName>crafty-landsymm-1.0</finalName>
               <transformers>
                 <transformer>
-                  <mainClass>de.cesr.crafty.landsymm.MainLandSymm</mainClass>
+                  <mainClass>de.cesr.crafty.landsymm.LandSymmLauncher</mainClass>
                 </transformer>
               </transformers>
             </configuration>
