@@ -6,12 +6,15 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import de.cesr.crafty.core.cli.Config;
+import de.cesr.crafty.core.crafty.Aft;
+import de.cesr.crafty.core.crafty.ManagerTypes;
 
 class CouplingStartupCheckTest {
 
@@ -312,5 +315,81 @@ class CouplingStartupCheckTest {
 		c.gis_path = gis().toString();
 
 		assertEquals(gis(), CouplingStartupCheck.locateGisFile(c));
+	}
+
+	// ---- Non-economic service prices (50a) ----
+
+	private static Aft aft(String label, ManagerTypes type, double biodiversityLevel) {
+		Aft a = new Aft(label);
+		a.setType(type);
+		if (biodiversityLevel > 0) {
+			a.setSensByService(Map.of("Biodiversity", Map.of("biodiversity_suit", 1.0)));
+			a.getProductivityLevel().put("Biodiversity", biodiversityLevel);
+		}
+		return a;
+	}
+
+	private static List<Aft> globalAfts() {
+		return List.of(aft("Conservation_Nonex", ManagerTypes.AFT, 1), aft("AgriEcoC3C", ManagerTypes.AFT, 0.5),
+				aft("IntAgriC3C", ManagerTypes.AFT, 0), aft("UL", ManagerTypes.MASK, 0), new Aft("Abandoned"));
+	}
+
+	private Path capitals(String... labels) throws IOException {
+		StringBuilder text = new StringBuilder("Label,Name,Type,PLUM_name,Description\n");
+		for (String label : labels) {
+			text.append(label).append(",x,Suitability,,x\n");
+		}
+		return Files.writeString(tempDir.resolve("Capitals.csv"), text);
+	}
+
+	private Path aftsMetaData(String column) throws IOException {
+		return Files.writeString(tempDir.resolve("AFTsMetaData.csv"), "Label,Type," + column + "\n"
+				+ "Conservation_Nonex,AFT,1\nAgriEcoC3C,AFT,\nIntAgriC3C,AFT,\nUL,Mask,1\n");
+	}
+
+	@Test
+	void aGoodNesSetUpWarnsOfProducersThatDontCountAndNotesTheCountedLand() throws Exception {
+		CouplingStartupCheck.NesReport r = CouplingStartupCheck.nesReport("Biodiversity", "biodiversity_suit",
+				List.of("C1", "Biodiversity"), Map.of("C1", true, "Biodiversity", false),
+				capitals("Education", "biodiversity_suit"), aftsMetaData("biodiversity_counted_land"), tempDir.toString(),
+				Set.of(), globalAfts());
+
+		assertEquals(List.of(), r.problems());
+		assertEquals(1, r.warnings().size(), r.warnings().toString());
+		assertTrue(r.warnings().get(0).contains("[AgriEcoC3C] produce Biodiversity but count 0"), r.warnings().get(0));
+		assertEquals(1, r.notes().size());
+		assertTrue(r.notes().get(0).contains("Conservation_Nonex 1.0, UL 1.0; [UL] count but can't be paid"),
+				r.notes().get(0));
+		assertEquals(1.0, r.counted().fraction(new Aft("UL")), 0.0);
+	}
+
+	@Test
+	void everyNesProblemIsListedTogether() throws Exception {
+		Path oneFile = Files.writeString(tempDir.resolve("weights_global.csv"), "Biodiversity\n1\n");
+
+		CouplingStartupCheck.NesReport r = CouplingStartupCheck.nesReport("Biodiversity", "bii",
+				List.of("C1", "Biodiversity"), Map.of("C1", true, "Biodiversity", true), capitals("biodiversity_suit"),
+				aftsMetaData("Pays_stock_cost"), oneFile.toString(), Set.of("Tanzania", "Argentina"), globalAfts());
+
+		assertEquals(5, r.problems().size(), String.join("\n", r.problems()));
+		assertTrue(r.problems().get(0).contains("Biodiversity is a market good"), r.problems().get(0));
+		assertTrue(r.problems().get(1).contains("Capitals.csv has no capital bii"), r.problems().get(1));
+		assertTrue(r.problems().get(2).contains("service_utility_weights_path is one file"), r.problems().get(2));
+		assertTrue(r.problems().get(3).startsWith("2 region(s) have no weight file of their own")
+				&& r.problems().get(3).contains("[Argentina, Tanzania]"), r.problems().get(3));
+		assertTrue(r.problems().get(4).contains("has no biodiversity_counted_land column"), r.problems().get(4));
+		assertNull(r.counted());
+		assertEquals(List.of(), r.notes());
+	}
+
+	@Test
+	void aServiceCraftyDoesntHaveStops() throws Exception {
+		CouplingStartupCheck.NesReport r = CouplingStartupCheck.nesReport("Biodiversity", "biodiversity_suit",
+				List.of("C1"), Map.of("C1", true), capitals("biodiversity_suit"), aftsMetaData("biodiversity_counted_land"),
+				"", Set.of(), globalAfts());
+
+		assertEquals(1, r.problems().size(), String.join("\n", r.problems()));
+		assertTrue(r.problems().get(0).contains("dynamic_biodiversity_price is on, but CRAFTY has no Biodiversity"),
+				r.problems().get(0));
 	}
 }

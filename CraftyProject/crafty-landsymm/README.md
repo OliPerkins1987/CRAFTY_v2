@@ -50,6 +50,23 @@ block at the end, so a diff against your file shows exactly what changed. In par
   (`PLUM_price_name`), when the ratio is above `stock_target` × `stock_cost_threshold`. It writes every term to
   `plum_coupling/stock_costs.csv` (`outputs: stock_costs`, on by default). AFTs pay their `Pays_stock_cost` share
   (`AFTsMetaData`). Pasture follows ruminant stocks, since PLUM keeps no stock of grass.
+- **Non-economic service (NES) prices** come from the `coupling` block too: `dynamic_nes_prices`, then one switch
+  per service (today `dynamic_biodiversity_price`), `biodiversity_metric` (`area`) and
+  `biodiversity_allocation_capital` (`biodiversity_suit`). They aren't available in standalone CRAFTY. With both
+  switches on, each year, straight before CRAFTY's supply step:
+  - each region's spend B = its Biodiversity weight × 10⁶. The weight is the region's total spend in million US$,
+    so every region needs **its own** weight file (`service_utility_weights_path` a folder of
+    `<name>_<region>.csv`, rows from the start year, every service's column). A single file, or a region with no
+    file of its own, stops the run;
+  - counted land D = Σ area × the owner's `biodiversity_counted_land` (a new `AFTsMetaData` column, 0–1, blank = 0,
+    AFT and mask rows; built-in `Abandoned` counts 0) × the metric (`area`: 1 per cell);
+  - price P = B ÷ max(D, M), with M the region's mean pixel area × metric, or 0 when B = 0. P replaces the year's
+    weight, which giving up, competition and the region outputs read;
+  - the metric is written into `biodiversity_allocation_capital` on every cell, over the capitals file's values.
+
+  Every term is in `plum_coupling/nes_prices.csv` (`outputs: nes_prices`, on by default). With
+  `initialise_regional_price_weights` on, every region file must hold the same market prices: a difference stops
+  the run, because the regional start would add each country's mark-up a second time.
 - PLUM's config must already have `ALL_CRAFTY_COUNTRIES=true` and `BASE_YEAR` = CRAFTY's start year; the launcher
   sets `IS_CALIBRATION_RUN`, the timesteps, `OUTPUT_DIR`, `CRAFTY_PRODUCTION_DIR`, `CALIB_DIR` and
   `LPJG_MONITOR_TIMEOUT`.

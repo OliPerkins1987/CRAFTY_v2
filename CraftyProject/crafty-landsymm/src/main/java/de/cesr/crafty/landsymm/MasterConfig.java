@@ -85,6 +85,10 @@ record MasterConfig(Path file, String runName, Path outputRoot, boolean calibrat
 		keys.put("trade_capital_slope", Number.class);
 		keys.put("trade_capital_midpoint", Number.class);
 		keys.put("trade_capital_averaging_years", Integer.class);
+		keys.put("dynamic_nes_prices", Boolean.class);
+		keys.put("dynamic_biodiversity_price", Boolean.class);
+		keys.put("biodiversity_metric", String.class);
+		keys.put("biodiversity_allocation_capital", String.class);
 		return Collections.unmodifiableMap(keys);
 	}
 
@@ -366,10 +370,14 @@ record MasterConfig(Path file, String runName, Path outputRoot, boolean calibrat
 			case "plum_coupling_mode" -> ConfigLoader.PLUM_COUPLING_MODES;
 			case "plum_price_scaling" -> ConfigLoader.PLUM_PRICE_SCALINGS;
 			case "plum_price_basis" -> ConfigLoader.PLUM_PRICE_BASES;
+			case "biodiversity_metric" -> ConfigLoader.NES_METRICS;
 			default -> null;
 			};
 			if (allowed != null) {
 				return allowed.contains(v) ? null : "must be one of " + allowed + ", got: " + v;
+			}
+			if (key.equals("biodiversity_allocation_capital") && String.valueOf(v).isBlank()) {
+				return "must name the capital the biodiversity metric is written into, e.g. biodiversity_suit";
 			}
 			if (v instanceof Number n) {
 				double d = n.doubleValue();

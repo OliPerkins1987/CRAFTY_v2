@@ -7,19 +7,26 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.StringJoiner;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 import de.cesr.crafty.core.cli.Config;
+import de.cesr.crafty.core.crafty.Aft;
 import de.cesr.crafty.core.utils.file.PathTools;
 
 /**
- * The coupler's start-up checks, run by {@link MainLandSymm} in three rounds so that a wrong set-up stops before
- * CRAFTY loads its cells:
+ * The coupler's start-up checks, run by {@link MainLandSymm} in rounds so that a wrong set-up stops as early as it
+ * can, most of it before CRAFTY loads its cells:
  * <ol>
  * <li>{@link #configReport(Config)}: the config alone, before anything loads;</li>
  * <li>{@link #dataReport}: Services.csv, the GIS key, and the production and PLUM paths and years, once the
  * project paths and the scenario are known;</li>
- * <li>{@link #afterLoadProblems}: cheap checks that need the loaded cells.</li>
+ * <li>{@link #afterLoadProblems}: cheap checks that need the loaded cells;</li>
+ * <li>{@link #nesReport}: with non-economic service prices on, what each service's prices need.</li>
  * </ol>
  * Each round returns its problems and warnings rather than stopping, so every problem can be reported at once and
  * each check can be tested.
@@ -251,6 +258,118 @@ public final class CouplingStartupCheck {
 					+ ". Their countries would be sent 0 production, which PLUM would cover with imports");
 		}
 		return problems;
+	}
+
+	/** The NES round's problems (which stop the run), warnings and notes, and the counted land it read (or null). */
+	record NesReport(List<String> problems, List<String> warnings, List<String> notes, CountedLand counted) {
+	}
+
+	/**
+	 * What a non-economic service's prices need (50a PLAN section 3.6), checked once CRAFTY has loaded, with
+	 * dynamic_nes_prices and the service's switch on:
+	 * <ul>
+	 * <li>the service is one of CRAFTY's, and not a market good;</li>
+	 * <li>Capitals.csv has the allocation capital the metric is written into;</li>
+	 * <li>every region read its spend from a weight file of its own: not one file for all, and no region given core's
+	 * default weight of 1, which would be a spend of $1 million;</li>
+	 * <li>AFTsMetaData's counted-land column for the service ({@link CountedLand#read}).</li>
+	 * </ul>
+	 * It warns about an AFT that produces the service but counts 0 (it is paid without lowering the price), and notes
+	 * the counted land, saying which of it can't be paid (masks, not competing AFTs).
+	 *
+	 * @param services          CRAFTY's services (ServiceSet.getServicesList())
+	 * @param marketGoods       whether each service is a market good (ServiceSet.getMarketGood())
+	 * @param capitalsCsv       Capitals.csv (ProjectLoader's capitals metadata)
+	 * @param aftsMetaData      AFTsMetaData.csv (ProjectLoader's AFT metadata)
+	 * @param weightsPath       config service_utility_weights_path
+	 * @param defaultWeights    the regions core gave the default weights (ServiceWeightLoader)
+	 * @param afts              every AFT and mask CRAFTY loaded (AFTsLoader.getAftHash())
+	 */
+	static NesReport nesReport(String service, String allocationCapital, List<String> services,
+			Map<String, Boolean> marketGoods, Path capitalsCsv, Path aftsMetaData, String weightsPath,
+			Set<String> defaultWeights, Collection<Aft> afts) {
+		List<String> problems = new ArrayList<>();
+		List<String> warnings = new ArrayList<>();
+		List<String> notes = new ArrayList<>();
+		String key = "dynamic_" + service.toLowerCase(Locale.ROOT) + "_price";
+
+		if (!services.contains(service)) {
+			problems.add(key + " is on, but CRAFTY has no " + service + " service (Services.csv)");
+		} else if (Boolean.TRUE.equals(marketGoods.get(service))) {
+			problems.add(key + " is on, but " + service + " is a market good (Market_good = Yes in Services.csv). Only a "
+					+ "non-economic service is priced from its spend");
+		}
+
+		if (capitalsCsv == null) {
+			problems.add(key + " is on, but there's no Capitals.csv to find " + allocationCapital + " in");
+		} else {
+			try {
+				CsvReader.Table capitals = CsvReader.readAll(capitalsCsv);
+				boolean found = false;
+				for (int i = 0; capitals.hasColumn("Label") && i < capitals.size(); i++) {
+					found |= allocationCapital.equals(capitals.get(i, "Label"));
+				}
+				if (!found) {
+					problems.add(capitalsCsv.getFileName() + " has no capital " + allocationCapital + ", which the " + service
+							+ " metric is written into (biodiversity_allocation_capital)");
+				}
+			} catch (CouplingInputException e) {
+				problems.addAll(e.getProblems());
+			}
+		}
+
+		if (weightsPath != null && !weightsPath.isBlank() && Paths.get(weightsPath).toFile().isFile()) {
+			problems.add("service_utility_weights_path is one file (" + weightsPath + "), so every region would read the "
+					+ "same " + service + " spend. With " + key + " on, point it at a folder of per-region weight files, "
+					+ "<name>_<region>.csv, each with the region's spend (million US$) as its " + service + " weight");
+		}
+		if (!defaultWeights.isEmpty()) {
+			List<String> first = defaultWeights.stream().sorted().limit(MAX_LISTED).toList();
+			problems.add(defaultWeights.size() + " region(s) have no weight file of their own, so core gave them weight 1 "
+					+ "for every service, which would be a " + service + " spend of $1 million: " + first
+					+ (defaultWeights.size() > MAX_LISTED ? " and " + (defaultWeights.size() - MAX_LISTED) + " more" : ""));
+		}
+
+		CountedLand counted = null;
+		if (aftsMetaData == null) {
+			problems.add(key + " is on, but there's no AFTsMetaData.csv to read " + CountedLand.column(service) + " from");
+		} else {
+			try {
+				counted = CountedLand.read(aftsMetaData, service);
+			} catch (CouplingInputException e) {
+				problems.addAll(e.getProblems());
+			}
+		}
+		if (counted != null) {
+			Map<String, Aft> byLabel = new TreeMap<>();
+			afts.forEach(a -> byLabel.put(a.getLabel(), a));
+			List<String> producersNotCounted = new ArrayList<>();
+			for (Aft a : byLabel.values()) {
+				Double level = a.getProductivityLevel().get(service);
+				Map<String, Double> sensitivities = a.getSensByService().get(service);
+				boolean produces = a.isInteract() && level != null && level > 0 && sensitivities != null
+						&& !sensitivities.isEmpty();
+				if (produces && counted.fraction(a) == 0) {
+					producersNotCounted.add(a.getLabel());
+				}
+			}
+			if (!producersNotCounted.isEmpty()) {
+				warnings.add(service + ": " + producersNotCounted + " produce " + service + " but count 0 in "
+						+ counted.column() + ", so they are paid for it without lowering the price");
+			}
+			StringJoiner listed = new StringJoiner(", ");
+			List<String> unpaid = new ArrayList<>();
+			counted.counted().forEach((label, f) -> {
+				listed.add(label + " " + ProductionFile.format(f));
+				Aft a = byLabel.get(label);
+				if (a != null && !a.isInteract()) {
+					unpaid.add(label);
+				}
+			});
+			notes.add(service + "'s counted land (" + counted.column() + "): " + listed
+					+ (unpaid.isEmpty() ? "" : "; " + unpaid + " count but can't be paid, not being competing AFTs"));
+		}
+		return new NesReport(problems, warnings, notes, counted);
 	}
 
 	/**

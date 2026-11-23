@@ -71,6 +71,20 @@ class CraftyRunConfigTest {
 	}
 
 	@Test
+	void theNesSwitchesInTheBaseFileStopToo() throws Exception {
+		List<String> problems = CraftyRunConfig.baseProblems(base("dynamic_nes_prices: true\n"
+				+ "dynamic_biodiversity_price: true\nbiodiversity_metric: area\n"
+				+ "biodiversity_allocation_capital: biodiversity_suit\n"));
+
+		assertEquals(4, problems.size(), problems.toString());
+		for (String key : List.of("dynamic_nes_prices", "dynamic_biodiversity_price", "biodiversity_metric",
+				"biodiversity_allocation_capital")) {
+			assertTrue(problems.stream().anyMatch(p -> p.contains("sets " + key) && p.contains("coupling block")),
+					key + ": " + problems);
+		}
+	}
+
+	@Test
 	void aRelativePathInTheBaseFileStopsButTheLaunchersOwnKeysDont() throws Exception {
 		List<String> problems = CraftyRunConfig.baseProblems(base("capitals_directory: \"worlds/capitals\"\n"
 				+ "output_path: \"out\"\ncrafty_production_path: \"prod\"\n"));
@@ -104,8 +118,8 @@ class CraftyRunConfigTest {
 		assertSame(before, ConfigLoader.config, "core's state is put back");
 		assertEquals(pathBefore, ConfigLoader.configPath);
 		assertTrue(values.keySet().stream().allMatch(CraftyRunConfig.RUN_KEYS::contains), values.keySet().toString());
-		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass", "stock_costs"),
-				values.get("plum_coupling_outputs"));
+		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass", "stock_costs",
+				"nes_prices"), values.get("plum_coupling_outputs"));
 	}
 
 	@Test

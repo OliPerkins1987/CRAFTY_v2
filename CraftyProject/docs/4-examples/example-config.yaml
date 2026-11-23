@@ -191,8 +191,12 @@ dynamic_trade_capitals: false      # trade capitals updated from PLUM each year,
 trade_capital_slope: 6             # trade capital = 1 / (1 + exp(-slope x (production / domestic use - midpoint))), to be calibrated
 trade_capital_midpoint: 1          # the self-sufficiency ratio (production / domestic use) at which a trade capital is 0.5
 trade_capital_averaging_years: 5   # trade capital = (1 - 1/k) x last year's value + 1/k x the rule's value, from the file value; 1 = no averaging
+dynamic_nes_prices: false          # non-economic service prices set each year from CRAFTY's own land use (coupled runs only; off = none)
+dynamic_biodiversity_price: false  # each region's Biodiversity weight = its spend (million US$, in its own weight file) / counted land
+biodiversity_metric: area          # how a region's spend is spread over its cells: area (1 per cell, so the price is per ha)
+biodiversity_allocation_capital: biodiversity_suit # the capital the metric is written into each year, over the capitals file's values
 # the coupler's yearly files in plum_coupling/ to write ([] = none); price_factors.csv and baseline_check.csv are always written
-plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass, stock_costs]
+plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass, stock_costs, nes_prices]
 # Stock costs: set here, not by the launcher. Needs coupled_with_plum and use_production_costs (the run stops
 # otherwise), a Stock_cost row in global_costs.csv and a Pays_stock_cost column (0-1) in AFTsMetaData.
 # Charged per unit as Stock_cost x stock ratio, stock ratio = stock / (production + imports - exports) from PLUM's

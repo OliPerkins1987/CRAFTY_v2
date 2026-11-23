@@ -51,7 +51,8 @@ class StepInserterTest {
 	}
 
 	private static final StepInserter.Steps STEPS = new StepInserter.Steps(new Named("PlumInput"),
-			new Named("StockCost"), new Named("TradeCapital"), new Named("Consumption"), new Named("Production"));
+			new Named("StockCost"), new Named("TradeCapital"), new Named("NesPrice"), new Named("Consumption"),
+			new Named("Production"));
 
 	private static List<String> names(List<ModelState> schedule) {
 		return schedule.stream().map(Object::toString).toList();
@@ -64,7 +65,7 @@ class StepInserterTest {
 		StepInserter.insert(schedule, STEPS, "sequential", ANCHORS);
 
 		assertEquals(List.of("PlumInput", "StockCost", "Flag", "Services", "Capital", "TradeCapital", "ProductionCost", "React",
-				"Subsidy", "Afts", "CellBehaviour", "LandMask", "CapitalDegradation", "Supply", "Consumption",
+				"Subsidy", "Afts", "CellBehaviour", "LandMask", "CapitalDegradation", "NesPrice", "Supply", "Consumption",
 				"Listener", "Tracker", "Regions", "Production", "Timestep"), names(schedule));
 	}
 
@@ -75,7 +76,7 @@ class StepInserterTest {
 		StepInserter.insert(schedule, STEPS, "overlapping", ANCHORS);
 
 		assertEquals(List.of("PlumInput", "StockCost", "Flag", "Services", "Capital", "TradeCapital", "ProductionCost", "React",
-				"Subsidy", "Afts", "CellBehaviour", "LandMask", "CapitalDegradation", "Supply", "Consumption",
+				"Subsidy", "Afts", "CellBehaviour", "LandMask", "CapitalDegradation", "NesPrice", "Supply", "Consumption",
 				"Production", "Listener", "Tracker", "Regions", "Timestep"), names(schedule));
 	}
 

@@ -233,6 +233,27 @@ class PriceScalingTest {
 	}
 
 	@Test
+	void aRegionalStartStopsWhenAMarketServicesStartWeightDiffersBetweenRegions() throws Exception {
+		Fixture f = fixture();
+		Map<String, Map<String, Double>> weights = f.weights(300);
+		weights.get("Argentina").put("C3cereals", 250.0);
+		weights.get("Tanzania").put("Pasture", 300 * (1 + 1e-12)); // the same, to rounding
+
+		for (Basis basis : Basis.values()) {
+			CouplingInputException e = assertThrows(CouplingInputException.class,
+					() -> PriceScaling.create(Scaling.INDEX, basis, f.services, f.key, weights, y2029, true));
+			assertEquals(1, e.getProblems().size(), e.getMessage());
+			String problem = e.getProblems().get(0);
+			assertTrue(problem.contains("C3cereals") && problem.contains("250.0 (Argentina)")
+					&& problem.contains("300.0") && problem.contains("initialise_regional_price_weights"), problem);
+		}
+		assertDoesNotThrow(() -> PriceScaling.create(Scaling.INDEX, Basis.DOMESTIC, f.services, f.key, weights, y2029),
+				"without a regional start, each region starts at its own file price");
+		assertDoesNotThrow(() -> PriceScaling.create(Scaling.FACTOR, Basis.DOMESTIC, f.services, f.key, weights, y2029,
+				true), "factor scaling doesn't use the file prices");
+	}
+
+	@Test
 	void aRegionalStartChangesNothingWithTheExporterBasisOrFactorScaling() throws Exception {
 		Fixture f = fixture();
 		for (Scaling scaling : Scaling.values()) {

@@ -41,7 +41,7 @@ class MasterConfigTest {
 		assertEquals(LauncherFixture.CALIBRATION_STEPS, m.calibrationSteps());
 		assertEquals(120, m.waitTimeoutMinutes());
 		assertEquals(List.of("prices_received", "production_sent", "export_basis", "trade_capitals",
-				"ungrazed_grass", "stock_costs"), m.outputs(), "every file by default");
+				"ungrazed_grass", "stock_costs", "nes_prices"), m.outputs(), "every file by default");
 		assertTrue(m.coupling().isEmpty());
 		assertEquals(f.jar, m.craftyJar());
 		assertEquals(f.gamsDir.resolve("apifiles/Java/api/GAMSJavaAPI.jar"), m.gamsJar());
@@ -63,8 +63,8 @@ class MasterConfigTest {
 		assertEquals("overlapping", m.coupling().get("plum_coupling_mode"));
 		assertEquals(true, m.coupling().get("dynamic_trade_capitals"));
 		assertEquals(6, m.coupling().get("trade_capital_slope"), "a whole number is still a number");
-		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass", "stock_costs"),
-				m.outputs());
+		assertEquals(List.of("prices_received", "production_sent", "trade_capitals", "ungrazed_grass", "stock_costs",
+				"nes_prices"), m.outputs());
 		assertEquals(List.of("export_basis"), m.outputsOff());
 		assertEquals(0, m.calibrationSteps());
 	}
@@ -133,6 +133,26 @@ class MasterConfigTest {
 		assertTrue(message.contains("coupling.trade_capital_averaging_years must be a whole number"), message);
 		assertTrue(message.contains("coupling.crafty_production_path isn't one of the coupler's settings"), message);
 		assertTrue(message.contains("The files to write go in the outputs block"), message);
+	}
+
+	@Test
+	void theNesSettingsAreCouplingSettings() throws Exception {
+		MasterConfig m = read(f.scenarioMaster("nes", tempDir.resolve("calib"), 1993, "coupling:\n"
+				+ "  dynamic_nes_prices: true\n  dynamic_biodiversity_price: true\n"
+				+ "  biodiversity_metric: area\n  biodiversity_allocation_capital: bii\n"));
+
+		assertEquals(true, m.coupling().get("dynamic_nes_prices"));
+		assertEquals(true, m.coupling().get("dynamic_biodiversity_price"));
+		assertEquals("area", m.coupling().get("biodiversity_metric"));
+		assertEquals("bii", m.coupling().get("biodiversity_allocation_capital"));
+
+		String message = problems(f.scenarioMaster("s", tempDir, 2000, "coupling:\n"
+				+ "  dynamic_nes_prices: yes please\n"
+				+ "  biodiversity_metric: bii\n"
+				+ "  biodiversity_allocation_capital: \" \"\n"));
+		assertTrue(message.contains("coupling.dynamic_nes_prices must be true or false"), message);
+		assertTrue(message.contains("coupling.biodiversity_metric must be one of [area]"), message);
+		assertTrue(message.contains("coupling.biodiversity_allocation_capital must name the capital"), message);
 	}
 
 	@Test

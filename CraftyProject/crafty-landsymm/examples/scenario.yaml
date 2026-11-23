@@ -20,6 +20,10 @@ coupling:                                   # the coupler's settings, under thei
   # trade_capital_slope: 6
   # trade_capital_midpoint: 1
   # trade_capital_averaging_years: 5
+  dynamic_nes_prices: false                 # non-economic service prices from CRAFTY's land use; off = none at all
+  dynamic_biodiversity_price: false         # Biodiversity weight = region's spend (its own weight file, million US$) / counted land
+  # biodiversity_metric: area
+  # biodiversity_allocation_capital: biodiversity_suit
 
 outputs:                                    # the coupler's yearly files in plum_coupling/; each defaults to true.
   prices_received: true                     # price_factors.csv and baseline_check.csv are always written
@@ -28,6 +32,7 @@ outputs:                                    # the coupler's yearly files in plum
   trade_capitals: true
   ungrazed_grass: true
   stock_costs: true                         # written only with use_stock_costs: true in the CRAFTY config.yaml
+  nes_prices: true                          # written only with dynamic_nes_prices and a service switch on
 
 crafty:
   config: C:/Users/olive/Documents/UEA_fellowship/Data/CRAFTY_drive/CRAFTY-PLUM-Global/config.yaml

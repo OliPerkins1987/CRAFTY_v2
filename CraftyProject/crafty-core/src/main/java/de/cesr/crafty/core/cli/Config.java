@@ -285,6 +285,10 @@ public class Config {
                 + "|-> trade_capital_slope=" + trade_capital_slope + "\n"
                 + "|-> trade_capital_midpoint=" + trade_capital_midpoint + "\n"
                 + "|-> trade_capital_averaging_years=" + trade_capital_averaging_years + "\n"
+                + "|-> dynamic_nes_prices=" + dynamic_nes_prices + "\n"
+                + "|-> dynamic_biodiversity_price=" + dynamic_biodiversity_price + "\n"
+                + "|-> biodiversity_metric=" + biodiversity_metric + "\n"
+                + "|-> biodiversity_allocation_capital=" + biodiversity_allocation_capital + "\n"
                 + "|-> plum_coupling_outputs=" + plum_coupling_outputs + "\n"
                 + "] \n\n";
     }
@@ -337,7 +341,8 @@ public class Config {
     // With index scaling and the importer or domestic basis: true starts each region at the file price x its
     // country's PLUM price / PLUM's world price, instead of at the file price itself. The file prices are global
     // (median producer or export prices), so this gives each region its own start price from PLUM's mark-ups. It
-    // changes nothing with the exporter basis or factor scaling, which the coupler warns about.
+    // changes nothing with the exporter basis or factor scaling, which the coupler warns about. Every region's
+    // start-year weight of a market service must then be the same, or the coupler stops the run.
     public boolean initialise_regional_price_weights = false;
     // true: each year, each region's consumption for transport export shares is PLUM's domestic use, so the
     // consumption files are only needed for the start year. false: the consumption files, for every year.
@@ -352,10 +357,23 @@ public class Config {
     // Each year a trade capital moves 1/k of the way to the rule's value: (1 - 1/k) x last year's value + 1/k x
     // the rule's value, starting from the file value. 1 = no averaging.
     public int trade_capital_averaging_years = 5;
+    // Non-economic service (NES) prices, set by the coupler each year from CRAFTY's own land use. Coupled runs only:
+    // the run stops if dynamic_nes_prices is on without coupled_with_plum. false = no NES price is set, whatever the
+    // service switches below say.
+    public boolean dynamic_nes_prices = false;
+    // With dynamic_nes_prices: each region's Biodiversity weight (its own service-weight file) is its total spend in
+    // million US$, and each year it is replaced by spend / counted land, the price per ha of metric. Counted land =
+    // the cells' area x the owner's biodiversity_counted_land (AFTsMetaData, 0-1) x the metric.
+    public boolean dynamic_biodiversity_price = false;
+    // The biodiversity metric that spreads a region's spend over its cells: area (1 on every cell, so the price is
+    // per ha). The coupler writes it into biodiversity_allocation_capital on every cell each year, over the
+    // capitals file's values.
+    public String biodiversity_metric = "area";
+    public String biodiversity_allocation_capital = "biodiversity_suit";
     // The coupler's yearly files in plum_coupling/ to write: any of prices_received, production_sent, export_basis,
-    // trade_capitals, ungrazed_grass and stock_costs ([] = none). price_factors.csv and baseline_check.csv are always
-    // written. The launcher sets it from the master YAML's outputs block.
+    // trade_capitals, ungrazed_grass, stock_costs and nes_prices ([] = none). price_factors.csv and
+    // baseline_check.csv are always written. The launcher sets it from the master YAML's outputs block.
     public List<String> plum_coupling_outputs = new ArrayList<>(List.of("prices_received", "production_sent",
-            "export_basis", "trade_capitals", "ungrazed_grass", "stock_costs"));
+            "export_basis", "trade_capitals", "ungrazed_grass", "stock_costs", "nes_prices"));
 
 }

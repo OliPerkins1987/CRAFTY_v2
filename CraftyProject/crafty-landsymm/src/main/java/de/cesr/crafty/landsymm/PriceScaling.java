@@ -35,7 +35,9 @@ import java.util.TreeMap;
  * each region can instead start at its file weight x its country's PLUM price / PLUM's world price, so its start
  * carries its country's mark-up over the world price. Its factor is then the file weight / the world price, the same
  * for every region, and its price follows its country's PLUM price from there. With the exporter basis the country
- * price is the world price, so it changes nothing.
+ * price is the world price, so it changes nothing. Because the file weight is taken as the world price, a market
+ * service's start-year weight must be the same in every region: with per-region weight files (50a), a regional file
+ * price would get its country's mark-up a second time, so a difference stops the run.
  *
  * Factors are per region and service. They are fixed for the run and can be written to price_factors.csv.
  */
@@ -111,6 +113,9 @@ public final class PriceScaling {
 			RegionCountryKey key, Map<String, Map<String, Double>> startWeights, PlumYearOutputs startState,
 			boolean regionalStart) {
 		List<String> problems = new ArrayList<>();
+		if (scaling == Scaling.INDEX && regionalStart) {
+			problems.addAll(regionalStartProblems(services, startWeights));
+		}
 		Map<String, Map<String, Factor>> factors = new TreeMap<>();
 		for (String region : new java.util.TreeSet<>(startWeights.keySet())) {
 			String country = key.country(region);
@@ -158,6 +163,49 @@ public final class PriceScaling {
 			throw new CouplingInputException(problems);
 		}
 		return new PriceScaling(basis, scaling, services, key, factors);
+	}
+
+	/** How far two regions' start-year weights may differ, relative to the larger, and still count as the same. */
+	static final double SAME_WEIGHT = 1e-9;
+
+	/**
+	 * With a regional start: one problem for each market service whose start-year weight isn't the same in every
+	 * region, naming its lowest and highest weights and their regions. A regional start takes the file weight as the
+	 * world price and adds each country's mark-up, so a regional file price would get the mark-up twice, and keep it
+	 * all run, since the factor is fixed. Weights that are missing or not above 0 are left to the factor checks.
+	 */
+	static List<String> regionalStartProblems(ServiceCommodityMap services, Map<String, Map<String, Double>> startWeights) {
+		List<String> problems = new ArrayList<>();
+		for (ServiceCommodityMap.Link link : services.links()) {
+			String lowRegion = null;
+			String highRegion = null;
+			double low = Double.POSITIVE_INFINITY;
+			double high = Double.NEGATIVE_INFINITY;
+			int regions = 0;
+			for (String region : new java.util.TreeSet<>(startWeights.keySet())) {
+				Double w = startWeights.get(region).get(link.service());
+				if (w == null || !Double.isFinite(w) || w <= 0) {
+					continue;
+				}
+				regions++;
+				if (w < low) {
+					low = w;
+					lowRegion = region;
+				}
+				if (w > high) {
+					high = w;
+					highRegion = region;
+				}
+			}
+			if (regions > 1 && high - low > SAME_WEIGHT * high) {
+				problems.add("initialise_regional_price_weights is on, but " + link.service()
+						+ "'s start-year weight differs between regions: from " + low + " (" + lowRegion + ") to " + high + " ("
+						+ highRegion + "). A regional start takes the file weight as the world price and adds each country's "
+						+ "PLUM mark-up, so a regional file price would get the mark-up twice: give every region's weight file "
+						+ "the same market prices, or switch initialise_regional_price_weights off");
+			}
+		}
+		return problems;
 	}
 
 	/** CRAFTY's price for a region's service, from PLUM's outputs for a year: the factor x the region's PLUM price. */

@@ -1150,7 +1150,13 @@ class ConfigLoaderTest {
         assertEquals(6.0, c.trade_capital_slope);
         assertEquals(1.0, c.trade_capital_midpoint);
         assertEquals(5, c.trade_capital_averaging_years);
+        assertFalse(c.dynamic_nes_prices);
+        assertFalse(c.dynamic_biodiversity_price);
+        assertEquals("area", c.biodiversity_metric);
+        assertEquals(ConfigLoader.NES_METRICS.get(0), c.biodiversity_metric, "The default is listed first");
+        assertEquals("biodiversity_suit", c.biodiversity_allocation_capital);
         assertEquals(ConfigLoader.PLUM_COUPLING_OUTPUTS, c.plum_coupling_outputs, "Every coupler file by default");
+        assertTrue(c.plum_coupling_outputs.contains("nes_prices"));
         assertEquals(ConfigLoader.PLUM_COUPLING_MODES.get(0), c.plum_coupling_mode, "The default is listed first");
         assertEquals(ConfigLoader.PLUM_PRICE_SCALINGS.get(0), c.plum_price_scaling, "The default is listed first");
         assertEquals(ConfigLoader.PLUM_PRICE_BASES.get(0), c.plum_price_basis, "The default is listed first");
@@ -1183,6 +1189,47 @@ class ConfigLoaderTest {
         String nullError = ConfigLoader.plumCouplingConfigError(missing);
         assertNotNull(nullError);
         assertTrue(nullError.contains("plum_coupling_outputs"), "Got: " + nullError);
+    }
+
+    @Test
+    void nesPricesShouldStopAStandaloneRun() {
+        Config standalone = new Config();
+        standalone.dynamic_nes_prices = true;
+        String error = ConfigLoader.plumCouplingConfigError(standalone);
+        assertNotNull(error);
+        assertTrue(error.contains("dynamic_nes_prices") && error.contains("coupled_with_plum"), "Got: " + error);
+
+        Config coupled = new Config();
+        coupled.dynamic_nes_prices = true;
+        coupled.dynamic_biodiversity_price = true;
+        coupled.coupled_with_plum = true;
+        assertNull(ConfigLoader.plumCouplingConfigError(coupled));
+
+        Config serviceOnly = new Config();
+        serviceOnly.dynamic_biodiversity_price = true;
+        assertNull(ConfigLoader.plumCouplingConfigError(serviceOnly),
+                "a service switch without dynamic_nes_prices does nothing, so it doesn't stop a standalone run");
+    }
+
+    @Test
+    void anUnknownBiodiversityMetricOrABlankAllocationCapitalShouldStopTheRun() {
+        for (String metric : List.of("bii", "Area", "")) {
+            Config c = new Config();
+            c.biodiversity_metric = metric;
+            String error = ConfigLoader.plumCouplingConfigError(c);
+            assertNotNull(error, "'" + metric + "' must be rejected");
+            assertTrue(error.contains("biodiversity_metric") && error.contains("[area]"), "Got: " + error);
+        }
+        for (String capital : new String[] { "", "  ", null }) {
+            Config c = new Config();
+            c.biodiversity_allocation_capital = capital;
+            String error = ConfigLoader.plumCouplingConfigError(c);
+            assertNotNull(error, "'" + capital + "' must be rejected");
+            assertTrue(error.contains("biodiversity_allocation_capital"), "Got: " + error);
+        }
+        Config other = new Config();
+        other.biodiversity_allocation_capital = "bii_capital";
+        assertNull(ConfigLoader.plumCouplingConfigError(other));
     }
 
     @Test

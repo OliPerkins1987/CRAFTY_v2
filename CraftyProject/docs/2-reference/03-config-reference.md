@@ -334,6 +334,26 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
   has no row in `prices.txt` never pays. An AFT pays, per ha, its `Pays_stock_cost` share of its production × that
   cost. The cost is not reduced by self-consumption, and it is subtracted from explicit-price utility only;
   CRAFTY-react ignores it.
+- **Non-economic service (NES) prices** (`dynamic_nes_prices`, then one switch per service; today
+  `dynamic_biodiversity_price`) are set by the coupler each year from CRAFTY's own land use. Core stops a run that
+  has `dynamic_nes_prices` on without `coupled_with_plum`. With the service switch off, or `dynamic_nes_prices` off,
+  nothing changes. With both on, for each region r in year t:
+  - spend B = the region's Biodiversity weight × 10⁶. The weight must be the region's total biodiversity spend in
+    million US$, from **its own** weight file (`service_utility_weights_path` a folder of `<name>_<region>.csv`).
+    A single file, or a region with no file of its own (core would give it weight 1), stops the run;
+  - counted land D = Σ over the region's cells of area × the owner's `biodiversity_counted_land` × the metric. The
+    `biodiversity_counted_land` column in `AFTsMetaData` (0–1, blank = 0) covers AFT and mask rows; built-in
+    `Abandoned` and cells with no owner count 0. The metric (`biodiversity_metric`) is `area`, 1 on every cell;
+  - price P = B ÷ max(D, M), M = the mean of area × metric over the region's cells (so a region with no counted
+    land is priced as if its spend were on one average pixel), or 0 when B = 0. P replaces year t's weight, so
+    utility and the region outputs use it.
+
+  The metric is written into `biodiversity_allocation_capital` (`biodiversity_suit`) on every cell each year, over
+  the capitals file's values, before production is worked out. The coupler records every term in
+  `plum_coupling/nes_prices.csv`.
+- With `initialise_regional_price_weights` on (index scaling), every region's start-year weight of each market
+  service must be the same: the option takes the file weight as the world price and adds each country's mark-up,
+  so a regional file price would get the mark-up twice. A difference stops the run.
 
 | Key | Type | Default | Meaning |
 |---|---:|---|---|
@@ -349,7 +369,7 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 | `plum_coupling_mode` | string | `sequential` | `sequential`: PLUM's market, then CRAFTY's land use, then PLUM's market. `overlapping`: PLUM solves year t while CRAFTY runs year t's giving up and competition. |
 | `plum_price_scaling` | string | `index` | `index`: each market service's price follows PLUM's relative price changes from its start-year file price. `factor`: PLUM's price × `PLUM_price_factor` in `Services.csv`. |
 | `plum_price_basis` | string | `domestic` | Which PLUM price a region's market services follow. `domestic`: PLUM's own country price, the import and export prices weighted by the country's import share, so it floats with how much the country imports. `exporter`: PLUM's world export price, the same for every region. `importer`: the country's import price, the world price × its import mark-up. |
-| `initialise_regional_price_weights` | boolean | `false` | With `index` scaling and the `importer` or `domestic` basis: each region starts at its file price × its country's PLUM price ÷ PLUM's world price, instead of at the (global) file price itself. It then follows its country's PLUM price. With `exporter` or `factor` it changes nothing, and the coupler warns. |
+| `initialise_regional_price_weights` | boolean | `false` | With `index` scaling and the `importer` or `domestic` basis: each region starts at its file price × its country's PLUM price ÷ PLUM's world price, instead of at the (global) file price itself. It then follows its country's PLUM price. With `exporter` or `factor` it changes nothing, and the coupler warns. With `index`, every region's start-year weight of a market service must be the same, or the run stops. |
 | `plum_consumption` | boolean | `true` | Each year, a region's consumption for transport export shares is PLUM's domestic use. `false`: the consumption files, for every year. |
 | `dynamic_trade_capitals` | boolean | `false` | The trade capitals are updated from PLUM each year and written over the capitals file's values: one value per region, from `trade_capital_slope` and `trade_capital_midpoint`. |
 | `trade_capital_slope` | number | `6` | The trade-capital rule's slope: capital = 1 / (1 + exp(−slope × (ratio − midpoint))), with ratio = the region's production ÷ domestic use of the capital's crop in PLUM. More than 0. |
@@ -358,7 +378,11 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 | `use_stock_costs` | boolean | `false` | Charge stock costs, set each year by the coupler from PLUM's world stocks (see above). Set in your `config.yaml`. |
 | `stock_target` | number | `0.3` | The target stock ratio (stock ÷ consumption) for stock costs; PLUM's own target is 0.3. More than 0, checked whether or not stock costs are on. |
 | `stock_cost_threshold` | number | `3` | Stock costs are charged once the stock ratio is above `stock_target` × this. 0 or more, checked whether or not stock costs are on. |
-| `plum_coupling_outputs` | list | all six | The coupler's yearly files in `plum_coupling/` to write: any of `prices_received`, `production_sent`, `export_basis`, `trade_capitals`, `ungrazed_grass` and `stock_costs`. `[]` writes none of them. `price_factors.csv` and `baseline_check.csv` are always written. The launcher sets it from the master YAML's `outputs` block. |
+| `dynamic_nes_prices` | boolean | `false` | Non-economic service prices set each year from CRAFTY's land use (see above). Coupled runs only. `false`: none, whatever the service switches say. |
+| `dynamic_biodiversity_price` | boolean | `false` | With `dynamic_nes_prices`: each region's Biodiversity weight is its spend (million US$), replaced each year by spend ÷ counted land. |
+| `biodiversity_metric` | string | `area` | How a region's spend is spread over its cells. `area`: 1 on every cell, so the price is per ha. |
+| `biodiversity_allocation_capital` | string | `biodiversity_suit` | The capital the metric is written into on every cell each year. Not blank. |
+| `plum_coupling_outputs` | list | all seven | The coupler's yearly files in `plum_coupling/` to write: any of `prices_received`, `production_sent`, `export_basis`, `trade_capitals`, `ungrazed_grass`, `stock_costs` and `nes_prices`. `[]` writes none of them. `price_factors.csv` and `baseline_check.csv` are always written. The launcher sets it from the master YAML's `outputs` block. |
 
 A coupled run also needs `use_price_feedback: false`, `global_price_feedback: false`,
 `initial_demand_supply_equilibrium: false` and `use_explicit_price_utility: true`. The coupler's own start-up check

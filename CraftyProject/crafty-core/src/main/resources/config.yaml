@@ -103,5 +103,9 @@ dynamic_trade_capitals: false                # trade capitals updated from PLUM 
 trade_capital_slope: 6                       # trade capital = 1 / (1 + exp(-slope x (production / domestic use - midpoint)))
 trade_capital_midpoint: 1                    # self-sufficiency ratio at which a trade capital is 0.5
 trade_capital_averaging_years: 5             # each year a trade capital moves 1/k of the way to the rule's value; 1 = no averaging
+dynamic_nes_prices: false                    # non-economic service prices from CRAFTY's land use each year (coupled runs only; off = none, whatever the service switches say)
+dynamic_biodiversity_price: false            # Biodiversity weight = region's spend (million US$) / counted land (area x AFTsMetaData biodiversity_counted_land x metric)
+biodiversity_metric: area                    # how a region's spend is spread over its cells: area (1 per cell)
+biodiversity_allocation_capital: biodiversity_suit   # the capital the metric is written into each year, over the capitals file's values
 # The coupler's yearly files in plum_coupling/ to write ([] = none); price_factors.csv and baseline_check.csv are always written
-plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass, stock_costs]
+plum_coupling_outputs: [prices_received, production_sent, export_basis, trade_capitals, ungrazed_grass, stock_costs, nes_prices]

@@ -11,7 +11,7 @@ import de.cesr.crafty.core.updaters.SupplyUpdater;
 import de.cesr.crafty.core.updaters.Timestep;
 
 /**
- * Puts the coupler's five steps into CRAFTY's yearly schedule, which ModelRunner.start() builds as:
+ * Puts the coupler's six steps into CRAFTY's yearly schedule, which ModelRunner.start() builds as:
  *
  * <pre>
  * Flag, Services, Capital, ProductionCost, [react], Subsidy, Afts, CellBehaviour, LandMask, Capital_Degradation,
@@ -23,6 +23,8 @@ import de.cesr.crafty.core.updaters.Timestep;
  * <li>StockCostStep: right after PlumInputStep, whose rows it reads, so the year's stock costs are set before any
  * utility is worked out;</li>
  * <li>TradeCapitalStep: after Capital, which reloads every capital from the year's file;</li>
+ * <li>NesPriceStep: straight before Supply, so the year's production uses the capital it writes, and after LandMask,
+ * so the counted land sees the year's masks;</li>
  * <li>ConsumptionStep: after Supply, before RegionsModelRunner computes export shares;</li>
  * <li>ProductionStep: after RegionsModelRunner in sequential mode (production after this year's land use), after
  * ConsumptionStep in overlapping mode (production before it).</li>
@@ -43,9 +45,9 @@ public final class StepInserter {
 		}
 	}
 
-	/** The five coupler steps. */
-	public record Steps(ModelState plumInput, ModelState stockCost, ModelState tradeCapital, ModelState consumption,
-			ModelState production) {
+	/** The six coupler steps. */
+	public record Steps(ModelState plumInput, ModelState stockCost, ModelState tradeCapital, ModelState nesPrice,
+			ModelState consumption, ModelState production) {
 	}
 
 	private StepInserter() {
@@ -78,6 +80,7 @@ public final class StepInserter {
 		schedule.add(indexOf(schedule, anchors.flag()), steps.plumInput());
 		schedule.add(schedule.indexOf(steps.plumInput()) + 1, steps.stockCost());
 		schedule.add(indexOf(schedule, anchors.capital()) + 1, steps.tradeCapital());
+		schedule.add(indexOf(schedule, anchors.supply()), steps.nesPrice());
 		schedule.add(indexOf(schedule, anchors.supply()) + 1, steps.consumption());
 		if (sequential) {
 			schedule.add(indexOf(schedule, anchors.regions()) + 1, steps.production());

@@ -3,8 +3,11 @@ package de.cesr.crafty.core.dataLoader.serivces;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 import de.cesr.crafty.core.cli.ConfigLoader;
@@ -44,6 +47,8 @@ import de.cesr.crafty.core.utils.general.Utils;
  * Defaults:
  * - If no weight file is found for a region, {@link #useDefaultUtilityW(Region)} assigns a constant weight of
  *   {@code 1.0} for all services and all years, ensuring the model remains runnable without optional inputs.
+ *   {@link #getRegionsWithDefaultWeights()} names those regions, for callers that need every region's own file
+ *   (the CRAFTY-PLUM coupler's non-economic service prices read each region's spend from it).
  */
 /**
  * @author Mohamed Byari
@@ -53,7 +58,19 @@ import de.cesr.crafty.core.utils.general.Utils;
 public class ServiceWeightLoader {
 	private static final CustomLogger LOGGER = new CustomLogger(ServiceWeightLoader.class);
 
+	/** The regions given the default weights at the last load, because no weight file of their own was found. */
+	private static final Set<String> regionsWithDefaultWeights = ConcurrentHashMap.newKeySet();
+
+	/**
+	 * The regions that had no weight file of their own at the last {@link #updateRegionsWeight()}, and so got weight
+	 * 1 for every service and year, in name order. Empty when every region found its file.
+	 */
+	public static Set<String> getRegionsWithDefaultWeights() {
+		return Collections.unmodifiableSet(new TreeSet<>(regionsWithDefaultWeights));
+	}
+
 	public static void updateRegionsWeight() {
+		regionsWithDefaultWeights.clear();
 		CellsLoader.regions.values().forEach(r -> {
 			r.getServicesHash().values().forEach(s -> {
 				s.getWeights().clear();
@@ -111,6 +128,7 @@ public class ServiceWeightLoader {
 	}
 
 	private static void useDefaultUtilityW(Region R) {
+		regionsWithDefaultWeights.add(R.getName());
 		ServiceSet.getServicesList().forEach((serviceName) -> {
 			ConcurrentHashMap<Integer, Double> dv = new ConcurrentHashMap<>();
 			for (int i = 0; i < Timestep.getSize(); i++) {

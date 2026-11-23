@@ -453,13 +453,17 @@ public class ConfigLoader {
 	 * are written by default.
 	 */
 	public static final List<String> PLUM_COUPLING_OUTPUTS = List.of("prices_received", "production_sent",
-			"export_basis", "trade_capitals", "ungrazed_grass", "stock_costs");
+			"export_basis", "trade_capitals", "ungrazed_grass", "stock_costs", "nes_prices");
+	/** The values biodiversity_metric can take; the first is the default. */
+	public static final List<String> NES_METRICS = List.of("area");
 
 	/**
 	 * The CRAFTY-PLUM coupling keys (used by crafty-landsymm) must hold values the coupler knows, so the run
 	 * stops on a misspelt mode or a number out of range. They are checked whether or not coupled_with_plum is
-	 * on, so that a mistake can't wait unnoticed until the switch is turned on. The coupler's own start-up
-	 * check covers the rest of a coupled set-up.
+	 * on, so that a mistake can't wait unnoticed until the switch is turned on. The one exception is
+	 * dynamic_nes_prices, which stops a run that isn't coupled: non-economic service prices are set by the coupler,
+	 * so they aren't available in standalone CRAFTY. The coupler's own start-up check covers the rest of a coupled
+	 * set-up.
 	 */
 	static void validatePlumCouplingConfig() {
 		if (config == null) return;
@@ -504,6 +508,18 @@ public class ConfigLoader {
 		if (c.trade_capital_averaging_years < 1) {
 			problems.add("trade_capital_averaging_years must be 1 (no averaging) or more, got: "
 					+ c.trade_capital_averaging_years);
+		}
+		if (!NES_METRICS.contains(c.biodiversity_metric)) {
+			problems.add("biodiversity_metric must be one of " + NES_METRICS + ", got: " + c.biodiversity_metric);
+		}
+		if (c.biodiversity_allocation_capital == null || c.biodiversity_allocation_capital.isBlank()) {
+			problems.add("biodiversity_allocation_capital must name the capital the biodiversity metric is written "
+					+ "into (biodiversity_suit by default)");
+		}
+		if (c.dynamic_nes_prices && !c.coupled_with_plum) {
+			problems.add("dynamic_nes_prices is on but coupled_with_plum is off. Non-economic service prices are set "
+					+ "by the CRAFTY-PLUM coupler (crafty-landsymm), so they aren't available in standalone CRAFTY: run "
+					+ "coupled, or switch dynamic_nes_prices off.");
 		}
 		if (c.plum_coupling_outputs == null) {
 			problems.add("plum_coupling_outputs must be a list of the coupler's yearly files to write, from "
