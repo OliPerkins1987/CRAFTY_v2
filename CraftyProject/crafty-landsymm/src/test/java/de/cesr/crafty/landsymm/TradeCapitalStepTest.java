@@ -91,22 +91,58 @@ class TradeCapitalStepTest {
 	}
 
 	@Test
-	void averagedOverKYearsEachValueMovesAFifthOfTheWayFromLastYears() {
+	void theStartYearTakesTheRulesValueNotTheFiles() {
 		SelfSufficiencyLogisticRule rule = new SelfSufficiencyLogisticRule(6, 1);
 		double tanzaniaRule = rule.value(0.1113 / (0.1113 + 0.0612));
+		PlumYear plumYear = new PlumYear();
+		plumYear.set(1990, y2029);
+
+		step(plumYear, rule, 5).yearStep(1990);
+
+		cells.get("Tanzania").forEach(c -> assertEquals(tanzaniaRule, value(c), 1e-12,
+				"k = 5, but the start year has no last year to average from"));
+	}
+
+	@Test
+	void aCapitalsFileOfZerosStartsAtTheRulesValueToo() throws Exception {
+		cells.values().forEach(regionCells -> regionCells.forEach(c -> c.getCapitals().put(CAPITAL, 0.0)));
+		SelfSufficiencyLogisticRule rule = new SelfSufficiencyLogisticRule(6, 1);
+		PlumYear plumYear = new PlumYear();
+		plumYear.set(1990, y2029);
+
+		step(plumYear, rule, 5).yearStep(1990);
+
+		double tanzania = rule.value(0.1113 / (0.1113 + 0.0612));
+		double argentina = rule.value(11.1993 / (11.1993 - 1.6884));
+		cells.get("Tanzania").forEach(c -> assertEquals(tanzania, value(c), 1e-12));
+		cells.get("Argentina").forEach(c -> assertEquals(argentina, value(c), 1e-12));
+		String[] row = Files.readAllLines(tempDir.resolve("plum_coupling").resolve(TradeCapitalStep.TRADE_CAPITALS))
+				.stream().filter(l -> l.startsWith("1990,Tanzania,")).findFirst().orElseThrow().split(",");
+		assertEquals("0.0", row[12], "the file value is recorded");
+	}
+
+	@Test
+	void averagedOverKYearsEachLaterValueMovesAFifthOfTheWayFromLastYears() {
+		// 0.3 in the start year, which has no last year, and 0.8 after it
+		TradeCapitalRule rule = in -> Double.isNaN(in.lastValue()) ? 0.3 : 0.8;
 		PlumYear plumYear = new PlumYear();
 		TradeCapitalStep step = step(plumYear, rule, 5);
 
 		plumYear.set(1990, y2029);
 		step.yearStep(1990);
-		double first = 0.8 * 0.0954 + 0.2 * tanzaniaRule;
-		cells.get("Tanzania").forEach(c -> assertEquals(first, value(c), 1e-12, "from the file value"));
+		cells.get("Tanzania").forEach(c -> assertEquals(0.3, value(c), 1e-12, "the start year: the rule's value"));
 
 		reloadFileValues();
 		plumYear.set(1991, y2029);
 		step.yearStep(1991);
-		double second = 0.8 * first + 0.2 * tanzaniaRule;
+		double second = 0.8 * 0.3 + 0.2 * 0.8;
 		cells.get("Tanzania").forEach(c -> assertEquals(second, value(c), 1e-12, "from 1990's value"));
+
+		reloadFileValues();
+		plumYear.set(1992, y2029);
+		step.yearStep(1992);
+		double third = 0.8 * second + 0.2 * 0.8;
+		cells.get("Tanzania").forEach(c -> assertEquals(third, value(c), 1e-12, "from 1991's value"));
 	}
 
 	@Test
@@ -155,21 +191,21 @@ class TradeCapitalStepTest {
 
 	@Test
 	void eachRegionsValueCarriesOverToTheNextYearThroughAnyRule() {
-		// A rule that only adds 0.1 to last year's value
-		TradeCapitalRule plusOne = in -> Math.min(1, in.lastValue() + 0.1);
+		// A rule that starts at 0.5 (there's no last year in the start year) and then adds 0.1 to last year's value
+		TradeCapitalRule plusOne = in -> Double.isNaN(in.lastValue()) ? 0.5 : Math.min(1, in.lastValue() + 0.1);
 		PlumYear plumYear = new PlumYear();
 		TradeCapitalStep step = step(plumYear, plusOne);
 
 		plumYear.set(1990, y2029);
 		step.yearStep(1990);
-		cells.get("Senegal_and_co").forEach(c -> assertEquals(0.0954 + 0.1, value(c), 1e-12));
+		cells.get("Senegal_and_co").forEach(c -> assertEquals(0.5, value(c), 1e-12));
 
 		// CapitalUpdater reloads the file's values at the start of each year
 		reloadFileValues();
 		plumYear.set(1991, y2029);
 		step.yearStep(1991);
 
-		cells.get("Senegal_and_co").forEach(c -> assertEquals(0.0954 + 0.2, value(c), 1e-12,
+		cells.get("Senegal_and_co").forEach(c -> assertEquals(0.6, value(c), 1e-12,
 				"built on 1990's value, not the reloaded file's"));
 	}
 
@@ -201,8 +237,8 @@ class TradeCapitalStepTest {
 		assertEquals("6.0", tanzania[8]);
 		assertEquals("1.0", tanzania[9]);
 		assertEquals("1", tanzania[10], "averaging years");
-		assertEquals("0.0954", tanzania[11], "last year's value is the file value in the start year");
-		assertEquals("0.0954", tanzania[12]);
+		assertEquals("NA", tanzania[11], "the start year has no last year's value");
+		assertEquals("0.0954", tanzania[12], "the file value");
 		double ruleValue = new SelfSufficiencyLogisticRule(6, 1).value(0.1113 / (0.1113 + 0.0612));
 		assertEquals(ruleValue, Double.parseDouble(tanzania[13]), 1e-12);
 		assertEquals(ruleValue, Double.parseDouble(tanzania[14]), 1e-12, "k = 1: the new value is the rule's");

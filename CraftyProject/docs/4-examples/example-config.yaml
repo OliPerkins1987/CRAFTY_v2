@@ -190,7 +190,7 @@ plum_consumption: true             # consumption for transport export shares fro
 dynamic_trade_capitals: false      # trade capitals updated from PLUM each year, over the capitals file's values (Capitals.csv PLUM_name says which crop)
 trade_capital_slope: 6             # trade capital = 1 / (1 + exp(-slope x (production / domestic use - midpoint))), to be calibrated
 trade_capital_midpoint: 1          # the self-sufficiency ratio (production / domestic use) at which a trade capital is 0.5
-trade_capital_averaging_years: 5   # trade capital = (1 - 1/k) x last year's value + 1/k x the rule's value, from the file value; 1 = no averaging
+trade_capital_averaging_years: 5   # trade capital = (1 - 1/k) x last year's value + 1/k x the rule's value; the start year takes the rule's value; 1 = no averaging
 dynamic_nes_prices: false          # non-economic service prices set each year from CRAFTY's own land use (coupled runs only; off = none)
 dynamic_biodiversity_price: false  # each region's Biodiversity weight = its spend (million US$, in its own weight file) / counted land
 biodiversity_metric: area          # how a region's spend is spread over its cells: area (1 per cell, so the price is per ha)

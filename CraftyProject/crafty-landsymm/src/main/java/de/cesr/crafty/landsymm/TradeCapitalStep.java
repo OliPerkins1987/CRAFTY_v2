@@ -16,15 +16,17 @@ import de.cesr.crafty.core.crafty.Cell;
  *
  * For each region and each trade capital in Capitals.csv's PLUM_name column, the rule ({@link TradeCapitalRule},
  * normally {@link SelfSufficiencyLogisticRule}) gets PLUM's production and domestic use of the capital's crop, the
- * region's value last year and this year's file value, and returns its value. The region's new value averages it in
- * over k years (trade_capital_averaging_years): (1 - 1/k) x last year's value + 1/k x the rule's value, starting from
- * the file value in the start year. The step writes the new value over every cell of the region, right after
- * CapitalUpdater has loaded the year's file. That also replaces the few edge cells holding a neighbouring country's
- * value, a downscaling error.
+ * region's value last year (NaN in the start year, which has none) and this year's file value, and returns its value.
+ * In the start year the region's new value is the rule's value (51a). The start year's rows are the calibration's
+ * final year, PLUM's start-year state, so the trade capitals start from the baseline map's self-sufficiency, not from
+ * the capitals file. Each later year averages the rule's value in over k years (trade_capital_averaging_years):
+ * (1 - 1/k) x last year's value + 1/k x the rule's value. The step writes the new value over every cell of the
+ * region, right after CapitalUpdater has loaded the year's file. That also replaces the few edge cells holding a
+ * neighbouring country's value, a downscaling error.
  *
  * A region's file value is the median of its cells' values, weighted by cell area: the country's own value, which
- * the edge cells don't move. The files on disk aren't touched; every value set is recorded in
- * plum_coupling/trade_capitals.csv.
+ * the edge cells don't move. It is only recorded: the step never uses the capitals file's trade values, so they can
+ * be 0. The files on disk aren't touched; every value set is recorded in plum_coupling/trade_capitals.csv.
  */
 final class TradeCapitalStep extends CouplerStep {
 
@@ -51,7 +53,8 @@ final class TradeCapitalStep extends CouplerStep {
 	 *
 	 * @param slope          the rule's slope, recorded in trade_capitals.csv
 	 * @param midpoint       the rule's midpoint, recorded in trade_capitals.csv
-	 * @param averagingYears k: each year the value moves 1/k of the way to the rule's value; 1 = no averaging
+	 * @param averagingYears k: each year after the start year the value moves 1/k of the way to the rule's value;
+	 *                       1 = no averaging
 	 */
 	TradeCapitalStep(PlumYear plumYear, TradeCapitalMap capitals, TradeCapitalRule rule, double slope, double midpoint,
 			int averagingYears, RegionCountryKey key, CouplingOutputs outputs, ProductionStep.Regions regions) {
@@ -114,7 +117,8 @@ final class TradeCapitalStep extends CouplerStep {
 					problems.add("No cell in region " + region + " has a value of " + capital);
 					continue;
 				}
-				double lastValue = last.getOrDefault(region, Map.of()).getOrDefault(capital, fileValue);
+				// NaN in the start year: there is no last year, and the file value isn't a starting point (51a)
+				double lastValue = last.getOrDefault(region, Map.of()).getOrDefault(capital, Double.NaN);
 				double production = d.trade().production();
 				TradeCapitalRule.Inputs in = new TradeCapitalRule.Inputs(region, country, capital, crop, production,
 						production + d.trade().netImports(), lastValue, fileValue);
@@ -124,7 +128,9 @@ final class TradeCapitalStep extends CouplerStep {
 							+ "; a trade capital must be from 0 to 1");
 					continue;
 				}
-				updates.add(new Update(in, ruleValue, averaged(lastValue, ruleValue, averagingYears), regionCells));
+				// The start year takes the rule's value; each later year averages it in from last year's
+				double value = Double.isNaN(lastValue) ? ruleValue : averaged(lastValue, ruleValue, averagingYears);
+				updates.add(new Update(in, ruleValue, value, regionCells));
 			}
 		}
 		if (!problems.isEmpty()) {
@@ -140,7 +146,8 @@ final class TradeCapitalStep extends CouplerStep {
 					ProductionFile.format(in.production()), ProductionFile.format(in.domesticUse()),
 					in.selfSufficiency() == Double.POSITIVE_INFINITY ? "Inf" : ProductionFile.format(in.selfSufficiency()),
 					ProductionFile.format(slope), ProductionFile.format(midpoint), String.valueOf(averagingYears),
-					ProductionFile.format(in.lastValue()), ProductionFile.format(in.fileValue()),
+					Double.isNaN(in.lastValue()) ? "NA" : ProductionFile.format(in.lastValue()),
+					ProductionFile.format(in.fileValue()),
 					ProductionFile.format(u.ruleValue()), ProductionFile.format(u.value())));
 		}
 		outputs.append(TRADE_CAPITALS, recorded);

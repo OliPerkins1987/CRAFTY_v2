@@ -11,8 +11,9 @@ interface TradeCapitalRule {
 	 *
 	 * @param production  PLUM's production of the crop (Mt)
 	 * @param domesticUse PLUM's domestic use of it, Production + Net_imports (Mt)
-	 * @param lastValue   the region's value of the capital last year (the file value in the start year)
-	 * @param fileValue   this year's value in the capitals file (the median over the region's cells)
+	 * @param lastValue   the region's value of the capital last year; NaN in the start year, which has none
+	 * @param fileValue   this year's value in the capitals file (the median over the region's cells); the step
+	 *                    only records it
 	 */
 	record Inputs(String region, String country, String capital, String crop, double production, double domesticUse,
 			double lastValue, double fileValue) {

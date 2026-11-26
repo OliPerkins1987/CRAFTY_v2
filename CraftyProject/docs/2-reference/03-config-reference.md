@@ -374,7 +374,7 @@ the run's copy of `config.yaml` from the master YAML, so they don't normally nee
 | `dynamic_trade_capitals` | boolean | `false` | The trade capitals are updated from PLUM each year and written over the capitals file's values: one value per region, from `trade_capital_slope` and `trade_capital_midpoint`. |
 | `trade_capital_slope` | number | `6` | The trade-capital rule's slope: capital = 1 / (1 + exp(−slope × (ratio − midpoint))), with ratio = the region's production ÷ domestic use of the capital's crop in PLUM. More than 0. |
 | `trade_capital_midpoint` | number | `1` | The self-sufficiency ratio at which a trade capital is 0.5. 0 or more. |
-| `trade_capital_averaging_years` | integer | `5` | k: each year a trade capital = (1 − 1/k) × last year's value + 1/k × the rule's value, starting from the file value. 1 = no averaging. 1 or more. |
+| `trade_capital_averaging_years` | integer | `5` | k: in the start year a trade capital = the rule's value; each later year = (1 − 1/k) × last year's value + 1/k × the rule's value. The capitals files' trade values aren't used, so they can be 0. 1 = no averaging. 1 or more. |
 | `use_stock_costs` | boolean | `false` | Charge stock costs, set each year by the coupler from PLUM's world stocks (see above). Set in your `config.yaml`. |
 | `stock_target` | number | `0.3` | The target stock ratio (stock ÷ consumption) for stock costs; PLUM's own target is 0.3. More than 0, checked whether or not stock costs are on. |
 | `stock_cost_threshold` | number | `3` | Stock costs are charged once the stock ratio is above `stock_target` × this. 0 or more, checked whether or not stock costs are on. |
